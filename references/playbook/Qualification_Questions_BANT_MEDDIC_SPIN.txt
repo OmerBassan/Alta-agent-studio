@@ -1,0 +1,34 @@
+# VOICE-FIRST QUALIFICATION (BANT, MEDDIC, SPIN)
+Rule: one question per turn, max 20 words, contractions, conversational —
+not an interrogation. Lines below are patterns to adapt, not a fixed script
+to run in order every call.
+
+BANT is this platform's primary qualification framework (see project scope).
+Use it as the backbone. MEDDIC/SPIN questions below are optional deepening —
+pull one in only if BANT alone doesn't give the agent/booking flow enough to
+act on, not as four parallel checklists to work through on every call.
+
+## BANT (Budget, Authority, Need, Timeline)
+- Need: "What's the biggest headache with [current process]?"
+- Timeline: "When are you hoping to have this solved by?"
+- Authority: "Who else usually weighs in on a decision like this?"
+- Budget: "Rough budget carved out for this, or still exploring?"
+
+## MEDDIC (optional, if BANT leaves a gap)
+- Pain: "What happens if you keep doing things the way you are now?"
+- Champion: "If you like what you see, who actually signs off?"
+
+## SPIN (optional, if the lead needs to talk through the problem first)
+- Situation: "How are you handling [process] today?"
+- Problem: "Where does that usually break down?"
+- Implication: "When it breaks down, how much time does that cost you?"
+- Need-Payoff: "If that step were automated, what would you focus on instead?"
+
+## Working the List
+- Don't re-ask something the lead already told you earlier in the call —
+  check what's already known before asking, not just the fixed order above.
+- If they decline or dodge a question (budget is the common one), don't
+  press twice — note it as unknown and move on; a missing field isn't a
+  disqualification.
+- Skip straight to whichever question matters most for THIS lead's answers
+  so far, rather than working the list top to bottom regardless of context.

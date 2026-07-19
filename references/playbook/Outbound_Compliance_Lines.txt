@@ -1,0 +1,28 @@
+# OUTBOUND COMPLIANCE & LEGAL
+Rule: these convey MANDATORY content, not persuasion copy. Surface wording
+may vary, but the required substance (disclosure, consent, opt-out) must be
+present every time — don't drop or soften it for "sounding natural."
+
+## Recording Consent (must land early in the call)
+- Seamless: "Hi [Name], it's [Agent] on a recorded line — how's your day going?"
+- Direct: "Hey [Name], heads up this call's recorded for quality, calling from [Company]."
+
+## AI Transparency (if asked "are you a robot?")
+- "I'm an AI voice assistant calling for [Company] — I can still help with what you need."
+Answer honestly and immediately if asked; don't deflect or delay the disclosure.
+
+## DNC / Opt-Out Request
+- "Understood — I'll flag your number for removal. Sorry for the interruption, take care."
+Do NOT claim the number is "added to the Do Not Call list right now" unless an
+actual opt-out/DNC tool is wired into this agent's config — check before
+generating this line into a live prompt. As of this boilerplate, no such tool
+exists by default (see config.py); a spoken promise with no system action
+behind it is a compliance gap, not just an inaccurate line. If no tool exists,
+say the request is being recorded/escalated, and make sure the platform layer
+(runtime/CRM integration) actually captures the opt-out — this is a build
+requirement, not something to paper over with softer phrasing.
+
+## Cold Call Transparency
+- "To be upfront, this is a sales call — thirty seconds to tell you why I called?"
+If you promise a time limit ("under a minute"), honor it — don't let the call
+run long because the rest of the script has more to say.

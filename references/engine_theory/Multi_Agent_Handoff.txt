@@ -1,0 +1,56 @@
+# Multi-Agent Architecture: The Handoff Pattern
+
+STATUS: FORWARD-LOOKING — do NOT design a multi-agent split unless the client
+genuinely needs one. The ONLY multi-agent mechanism live in the engine today
+is the subgraph-as-one-parent-node mount, whose working reference is the
+Agentic-RAG loop (rag_subgraph.py + the agentic_retrieval node, §5 below). No
+generated agent currently uses a second specialized sub-agent, and adding one
+is a real architecture decision, not a default. On a re-read: if the client
+has a single domain, skip this file — the same-turn pipeline already covers it.
+When a real second domain appears, §5 (mounting mechanics) is the load-bearing
+section; §§1-4 are the discipline that mount must follow.
+
+When a voice agent system grows complex, it must be split into specialized
+Sub-Graphs (e.g., a Booking Agent, a Support Agent). To maintain low latency
+and avoid token bloat, follow the Structured State Handoff pattern strictly.
+
+1. Sub-Graph Isolation
+- Never build one massive graph for multiple domains.
+- Each specialized agent (Sub-Graph) should have its own narrow System Prompt
+  and specific tools.
+
+2. The Context Bloat Danger (No Raw History Transfer)
+- NEVER pass the full raw `recent_messages` array from the Main Router to the
+  Sub-Graph.
+- Giving a specialized agent the entire history of an unrelated task distracts
+  the LLM, increases latency, and risks prompt injection crossover.
+
+3. The Structured State Handoff (NOT a prose summary)
+- Before routing to a Sub-Graph, pass ONLY structured state fields — never an
+  LLM-generated `conversation_summary` prose string. LLM summarization violates
+  Voice_Architecture_Principles.txt Principle 2 (zero-model memory compression):
+  it adds a model call, mutates the prompt prefix (breaking prompt-cache
+  economics), and introduces hallucination risk on the handoff path.
+- Pass instead: `session_facts` (whitelisted transactional hard keys),
+  `last_action` (most-recent tool result), and a scoped `recent_messages` slice
+  (the last N turns relevant to the new domain). These are already in state;
+  no model call required.
+- Pass also any explicit structured variables the Sub-Graph needs (e.g.,
+  `active_booking_id`, `customer_tier`).
+
+4. Clean Return (The Resolution)
+- When the Sub-Graph completes its task, it does not return its internal
+  dialogue history to the Main Router.
+- It returns a structured resolution state (e.g., `task_completed = True`,
+  the relevant `session_facts` keys updated), allowing the Main Router to
+  seamlessly continue or wrap up the session.
+
+5. Mounting Mechanics (compiled graph as a parent node)
+- The concrete mounting pattern is a compiled `StateGraph` invoked from inside
+  ONE parent node function: build the sub-graph over its own private `TypedDict`,
+  `compile()` it once at import, then have the parent node `ainvoke` it with a
+  minimal input dict and copy back only the resolution keys.
+- The boilerplate's Agentic-RAG loop (`boilerplate/rag_subgraph.py` + the
+  `agentic_retrieval` node) is the working reference implementation of this exact
+  pattern: private `RagState` in, exactly one key (`retrieved_context`) out, loop
+  bounded by a circuit breaker. Any future specialized sub-agent mounts the same way.

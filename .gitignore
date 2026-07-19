@@ -1,0 +1,43 @@
+# ── Secrets — never commit real credentials ─────────────────────────────────
+.env
+builder_platform/.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Credential artifacts (OAuth clients, tokens, service accounts, keys)
+credentials.json
+client_secret*.json
+token*.json
+*-service-account.json
+service_account*.json
+*.pem
+*.key
+*.p12
+.credentials/
+secrets/
+
+# ── Generated agents (builder output) — regenerated, not source ─────────────
+workspaces/
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# ── Local databases / scratch ───────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+builder_platform/vapi_raw_capture.jsonl
+*.log
+listen.txt
+
+# ── Claude Code local state (machine-local, never shared) ───────────────────
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# ── Not part of the submission ──────────────────────────────────────────────
+submission_skeleton.txt

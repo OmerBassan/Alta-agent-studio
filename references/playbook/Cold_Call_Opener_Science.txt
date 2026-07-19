@@ -1,0 +1,21 @@
+# COLD CALL OPENERS: THE GOLDEN 10 SECONDS
+Rule: Max 15 words before pausing, hand the mic back cleanly. Lines below
+are patterns to adapt, not scripts to recite verbatim.
+
+## Pattern Interrupts (break the "sales call" auto-reject)
+- "Hi [Name], we haven't spoken before — got a brief second?"
+- "Hey [Name], can I borrow thirty seconds?"
+
+## Permission Openers (disarm by asking for control)
+- "Hi [Name], it's [Agent Name] — bad time, or got a minute?"
+Let them ask "what's this about" before pitching.
+
+## The Hook (post-permission, make it relevant fast)
+- "We help businesses like yours cut [pain] by [metric] — dealing with that?"
+- "Saw you manage [department] — most leaders there struggle with [pain]. On your radar?"
+
+## Reading the Response
+- Curious: go straight to the Hook.
+- Flat "not interested": acknowledge, then ask one clarifying question — don't re-pitch.
+- Busy: offer a callback instead of talking faster.
+- Declines twice: end the attempt, don't cycle through more hooks.

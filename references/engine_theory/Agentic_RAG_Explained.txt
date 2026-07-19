@@ -1,0 +1,76 @@
+# Agentic RAG: Implementation Rules for Voice Agents
+
+STATUS: SHIPPED — the Agentic-RAG subgraph (rag_subgraph.py) and all rules 5-10 are
+implemented in the boilerplate engine. Rules 1-4 below document foundational principles that
+are fully subsumed by rule 5 (the subgraph encapsulation IS the correct implementation —
+not a raw retrieval_node). No per-client rebuild required; swap only the RETRIEVER callable
+in config.py to upgrade the retriever tier. Rules 8-10 are the dynamic-RAG boundary
+(co-reference priming, TTL context cache, corpus prep) — consult them in Step 1 for any
+client with a retrieval corpus.
+
+When a voice agent requires external knowledge, implement RAG strictly using these rules:
+
+1. RAG as a Tool, Not a Prompt (No Prompt Bloat)
+- NEVER inject large knowledge bases, catalogs, or static documents directly into the node's System Prompt.
+- RAG must be implemented as a specific, callable Tool within the "Think -> Act" loop.
+
+2. State-Driven Context (Dedicated Nodes)
+- If retrieval is a core step, create a dedicated `retrieval_node`.
+- The retrieved information must be saved explicitly to the AgentState (e.g., `retrieved_context: str`) so subsequent conversational nodes can access it to formulate the response.
+
+3. Terminal-Optimized Synthesis
+- CLI agents shouldn't dump raw document chunks straight into the terminal.
+- The LLM node consuming the `retrieved_context` must synthesize the data into a short, natural answer (a few lines max), citing the source path/section when useful for a developer audience.
+
+4. Fallback Routing (Zero Hallucination)
+- Always include conditional edges to handle RAG failures (e.g., empty results, timeouts).
+- If the RAG tool returns no relevant data, the agent MUST route to a fallback or explicitly state "I don't have that information," rather than hallucinating an answer.
+
+5. The Subgraph Encapsulation (Agentic RAG without breaking the same-turn contract)
+Multi-hop retrieval (retrieve -> grade relevance -> rewrite query -> retrieve again) genuinely needs a loop — but the parent pipeline's contract is a deterministic, loop-free single pass (Same_Turn_Pipeline.txt invariant 3). The reconciliation is a SUBGRAPH:
+- Compile the loop as its own `StateGraph` over a PRIVATE `TypedDict` namespace (`RagState`: query, documents, sufficient, rewrite_count, context) — see `boilerplate/rag_subgraph.py`. This state never merges into the parent `AgentState`.
+- Mount the compiled subgraph behind ONE parent node (`agentic_retrieval`): it feeds the user question in and copies back EXACTLY ONE key (`retrieved_context`). Documents, grades, and counters never leak upward — the selftest asserts this isolation.
+- Bound the loop with BOTH ceilings from rule 6 (`config.RAG_MAX_ITERATIONS` + `config.RAG_TIMEOUT_SECONDS`): past either cap the node finalizes with whatever it has (possibly empty -> rule 4's honest fallback).
+- Grade/rewrite are cheap INTENT-tier calls in live mode, deterministic heuristics in mock — every call degrades gracefully like the rest of the pipeline.
+- The retriever itself is a config hook (`config.RETRIEVER`): a keyword mock by default, upgraded per the local-first ladder in rule 7 — the swap is one function body, exactly like swapping a mock tool for a live API.
+This preserves macro single-turn predictability while enabling deep, iterative retrieval under the hood — the "semantic memory" tier of the tri-partite memory model (see Tri_Partite_Memory.txt).
+
+6. Latency Budget (Single-Hop Is the Default)
+- The default retrieval shape is ONE hop: retrieve -> finalize -> answer. The iterative grade -> rewrite loop is an opt-in for domains that genuinely need multi-hop lookup — it is never the starting design.
+- When the loop IS enabled, it runs under two ceilings, both enforced, either one sufficient to exit:
+  - Iteration ceiling: at most 1 rewrite (RAG_MAX_ITERATIONS=1 as the generated default). Every rewrite costs two extra LLM calls (grade + rewrite) plus a retrieval pass; in a terminal, two loops is a visible freeze.
+  - Wall-clock ceiling: the parent node invokes the subgraph under a hard timeout (~2s; asyncio.wait_for around the compiled subgraph). On timeout, finalize with whatever the LAST retrieve pass returned — degraded context beats a hung prompt. An empty result on timeout routes to the honest fallback (rule 4), never to a retry.
+- A CLI user's tolerance for silence is measured in single seconds. Any design where the terminal can sit blank for 5-10 seconds while the graph "grades" is rejected on sight, exactly like a cross-turn answer lag.
+- Both ceilings ship ENFORCED in the boilerplate engine (config defaults RAG_MAX_ITERATIONS=1 and RAG_TIMEOUT_SECONDS=2.0; the asyncio.wait_for wrapper lives in nodes.agentic_retrieval_node) — this rule documents shipped behavior, not guidance to re-implement per client.
+
+7. Local-First Retrieval (No Heavy Infrastructure)
+- Upgrading beyond the boilerplate's keyword-overlap retriever means swapping the RETRIEVER callable in config.py — never the architecture around it. The subgraph, state keys, and fallback routing are retriever-agnostic by design.
+- The upgrade ladder, in order: keyword-overlap (shipped mock) -> local embeddings with FAISS or SQLite-vss (in-process, Python-native, no server, no credentials) -> a managed vector store ONLY if the corpus or team genuinely demands it.
+- Do NOT reach for Pinecone/Weaviate/pgvector-as-a-service for a CLI agent's corpus. A hosted vector DB adds network latency to every retrieve pass, a credential to every deploy, and a live dependency to a boilerplate whose contract is "runs end-to-end with zero API keys." Mock-first applies to retrieval too: the keyword retriever IS the mock tier, and it must keep working when the embedding path is unavailable.
+- When queries carry hard identifiers (SKUs, ticket numbers, brand names), a pure embedding retriever will fuzzy-match them into the wrong neighborhood. The fix is HYBRID search — keep a sparse/keyword path (BM25 or the shipped overlap scorer) alongside the dense one and merge scores. This is still just the RETRIEVER body: the identifier-exact path is the mock retriever's logic promoted to a permanent component, not scaffolding to delete. (2026-07-12 report §5.)
+
+8. Contextual Query Priming (Deterministic Co-Reference, Never a Pre-Search Model Hop)
+- A referential question ("how much does IT cost?") means nothing to a retriever standalone — co-reference MUST be resolved before ranking, or the search runs on pronouns. (2026-07-12 report R-03.)
+- The report's literal directive — an LLM rewrite before EVERY search — is REJECTED on latency grounds: a standing pre-search model call adds 300-600ms to every retrieval turn, the exact latency conditional retrieval exists to save (R-01). The engine's shape instead:
+  - PRIME deterministically at the parent boundary (nodes._context_hint, zero model calls): when the query contains a referential pronoun, append salient content words from last_action, session_facts, the pending flow, and recent messages — bounded, deduped, stopword-filtered. The first retrieve pass usually lands.
+  - RESOLVE with the model only ON A MISS: the same hint rides into the subgraph as RagState.history_hint, and the already-budgeted rewrite-on-insufficient call (rule 6's ceilings still apply) becomes history-aware — "it" -> the actual entity name.
+- Referential queries are conversation-state-dependent by definition — they are exempt from the TTL cache (rule 9) and must never be.
+
+9. TTL Context Cache (Frequent Questions Skip the Loop)
+- Repeat questions ("what are your business hours?") should not re-run retrieve->grade — the shipped engine keeps an in-process TTL cache (RAG_CACHE_TTL_SECONDS, default 300; 0 disables) keyed on the EXACT normalized query. A hit returns the cached CONTEXT and skips the subgraph entirely, including the live grade call. (2026-07-12 report §5.)
+- Cache the CONTEXT, never the phrased answer: synthesis stays live and grounded, so tone/persona/grounding rules keep applying.
+- Exact-match only, deliberately: "strong semantic match" caching needs an embedding call per turn — the latency the cache exists to avoid. Bounded (128 entries, oldest-out), process-local, empty results never cached (a corpus fix should be visible immediately).
+- Remember the cheaper tier above this one: facts that are small, stable, and constantly asked (hours, addresses) belong in config.FACTS as knowledge intents — zero retrieval at all. The cache is for RETRIEVAL_INTENTS whose corpus is too big for the prompt.
+
+10. Corpus Preparation (Chunking, Confidence, Metadata)
+- DEFAULTS (use these unless the client's corpus gives a concrete reason to
+  deviate — don't re-decide them from scratch each time): chunk = 150-300
+  tokens, 10-15% overlap, one topic per chunk; RETRIEVAL_MIN_SCORE = 0 for the
+  mock overlap scorer, ~0.70 for a live cosine retriever (both already the
+  config defaults). Hybrid keyword+dense retrieval is REQUIRED, not optional,
+  whenever queries carry hard identifiers (SKUs, ticket numbers) — see rule 7.
+  Everything below is the reasoning behind these numbers.
+- CHUNKING: chunk documents into small conversational "nuggets" (150-300 tokens, 10-15% overlap), one topic per chunk. A terminal answer is a few lines; a 2,000-token chunk dilutes the synthesis prompt and invites hallucinated stitching. Chunk shape is decided at corpus-prep time in Step 1 — it cannot be fixed later by the graph. (2026-07-12 report R-02.)
+- CONFIDENCE FLOOR: the shipped retrieve node drops docs under config.RETRIEVAL_MIN_SCORE BEFORE grading, so a low-confidence near-miss degrades to rule 4's honest fallback instead of being confidently synthesized. Default 0 fits the mock overlap scorer; live cosine retrievers typically want ~0.70. (Report R-05 — the floor complements, not replaces, the grade gate.)
+- METADATA: tag chunks at ingestion (category, product_id, doc type) and let the RETRIEVER body filter on them — narrowing the search space per intent beats re-ranking a polluted candidate set. This lives in the retriever swap, not the graph: the RETRIEVER callable already receives the query; a client whose corpus has categories closes over its own filter map. (Report §5.)
+- NOT ADOPTED — ToolMessage segregation (report R-04): injecting retrieved context as a ToolMessage guards agents whose ONE long-lived system prompt would otherwise be mutated. This engine rebuilds the synthesis system prompt per turn and retrieved context never persists into history, so the persona-drift hazard R-04 targets does not exist here. Structurally equivalent; recorded so nobody "fixes" it.

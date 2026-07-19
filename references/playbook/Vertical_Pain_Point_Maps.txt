@@ -1,0 +1,30 @@
+# VERTICAL PAIN POINT MAPS
+Rule: use the industry's own language. Sell pain relief, not features. Pain/
+Voice lines are real industry vocabulary patterns — adapt freely. Bridge
+lines are ILLUSTRATIVE SHAPE ONLY: never copy a bridge claim into a live
+agent's prompt as-is. A real agent's bridge must come from that agent's own
+FACTS/config — this platform never lets an agent claim a capability beyond
+its configured facts (see config.py FACTS), and an invented "guaranteed
+24-hour turnaround" for a business that doesn't actually offer that is
+exactly the hallucination the FACTS-grounding rule exists to prevent.
+
+## Event Planning & Restaurant Supply
+- Pain: unreliable logistics, stock-outs before weekend rushes.
+- Voice: "We're chasing vendors Thursday night just to cover the weekend."
+- Bridge shape: name the specific operational relief (turnaround time, guaranteed
+  stock, etc.) — but only if it's actually true of this agent's business.
+
+## SMB SaaS
+- Pain: high churn from confusing onboarding.
+- Voice: "Users sign up, get lost in five minutes, and cancel before the trial ends."
+- Bridge shape: name what closes the first-week engagement gap — only if it's real.
+
+## Enterprise Healthcare
+- Pain: siloed patient data, heavy admin drag.
+- Voice: "Nurses spend two hours a day re-typing data across portals."
+- Bridge shape: name what unifies the systems — only if it's real.
+
+## Freight & Logistics
+- Pain: no driver visibility, missed dock appointments.
+- Voice: "We eat detention fees because dispatch has no idea where the trucks are."
+- Bridge shape: name what gives real-time visibility — only if it's real.

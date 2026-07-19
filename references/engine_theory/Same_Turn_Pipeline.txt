@@ -1,0 +1,549 @@
+THE SAME-TURN MULTI-MODEL PIPELINE (v3 canonical architecture)
+==============================================================
+This is the primary architecture for every agent this skill produces. It was
+derived empirically from a voice-IVR-style graph whose failures are documented
+at the bottom — read those before "improving" anything here. v3 (2026-07)
+folds in the architectural-report upgrades: decoupled validation (execution
+validator), enrich-bypass routing, hierarchical intent categories, an
+agentic-RAG subgraph, entity resolution, circuit breakers, and an
+operator-approval HITL gate — invariants 15-21 below. The 2026-07-08/09
+NetPulse judgement added: the context-aware-fallback amendment to invariant 6,
+the entity-referencing companion flows OPTIONAL PATTERN, and the RAG latency
+ceilings (Agentic_RAG_Explained.txt rules 5-7) — failures #12-14 below.
+The 2026-07-09 report adoption promoted two capabilities into the SHIPPED
+engine: the FUNCTIONAL SESSION CACHE (Flow.cache_keys -> session_facts,
+zero-inference merge; see its section below) and the PLAN-AND-EXECUTE layer
+for compound multi-step requests (COMPOUND category -> planner -> bounded
+deterministic step walk) — invariant 22 below. The 2026-07-10 report adoption
+added two more: the FAST-ROUTER GATE (a tier-0 deterministic bypass of the
+INTENT call for unambiguous mid-flow slot answers) and the DEPTH-1 INTERRUPT
+ARCHIVE (a second tool flow parks the pending one instead of clobbering it)
+— invariants 23-24 below; the report's deeper "Intent Stack" was REJECTED
+(anti-pattern #18).
+
+THE STATE MACHINE
+-----------------
+One graph invocation per user turn; every path reaches END inside that
+invocation. The Shell (cli.py) owns turn-taking and re-invokes from START.
+(The one sanctioned suspension is an open Flow.hitl interrupt — see 19.)
+
+  START
+    -> intent_detect            [INTENT tier]   hierarchical classify
+                                                (category -> intent) + slots.
+                                                Two DETERMINISTIC tier-0 gates
+                                                run BEFORE the model: the
+                                                pending yes/no confirmation
+                                                gate (invariant 14) and the
+                                                fast-router gate (invariant
+                                                23: an unambiguous mid-flow
+                                                slot answer skips the INTENT
+                                                call -> think)
+    -> route by intent (conditional edges, no God Node):
+         SYSTEM intents -> system (no model)    -> validator   (help / restart)
+         chitchat               [ANSWER tier]   -> validator
+         RETRIEVAL_INTENTS -> agentic_retrieval [RAG SUBGRAPH, private state]
+                              -> knowledge      -> validator
+         other knowledge intents [ANSWER tier]  -> validator   (answers from FACTS only)
+         goodbye -> closing     [ANSWER tier]   -> validator   (sets exit_conversation)
+         compound_request -> planner [ANSWER tier, ONCE: emits plan_steps]
+                          -> plan_step (no model, the bounded walk controller)
+                          -> think ... tool ... -> plan_step -> ... (invariant 22)
+         tool-backed flows -> think [ANSWER tier, the Think step:
+                                     entity resolvers + slot validators]
+              need_info -> ask one question     -> validator   (sets pending_intent/pending_slots)
+              confirm   -> yes/no question      -> validator   (stash payload)
+              hitl      -> hitl_gate: interrupt() — OPERATOR approves/denies
+              act       -> tool_exec (no model, registry, breaker-guarded)
+                           -> execution_validator (no model, Layer 2.5)
+                                failure         -> failure     -> validator
+                                ok, enrich=False               -> validator  (SLM BYPASS)
+                                ok, enrich=True -> enrichment  [ENRICH tier / SLM]
+                                                -> validator
+    -> validator (RESPONSE validator: exit filter, no model)   -> END
+
+MODEL TIER MAP (each tier its own env var; may all be one model)
+----------------------------------------------------------------
+  INTENT  (AGENT_INTENT_MODEL) - cheap/fast. Classification + opportunistic
+          slot extraction in one structured call. temperature ~0.1.
+  ANSWER  (AGENT_ANSWER_MODEL) - the reasoning tier. Direct answers
+          (knowledge/chitchat/closing) and the Think step of Think->Act.
+          This is where a bigger model pays off.
+  ENRICH  (AGENT_ENRICH_MODEL) - SLM. Rewrites a terse structured tool result
+          into one warm sentence. Runs ONLY when a tool executed.
+
+NON-NEGOTIABLE INVARIANTS
+-------------------------
+1. SAME-TURN: no node may "classify now, answer next turn". A question is
+   answered in the turn it was asked. (See failure #1 below.)
+2. NEUTRAL BUCKET: `chitchat` is a first-class intent. If an intent taxonomy
+   has no neutral bucket, EVERY model — small or large, any language — dumps
+   small talk into the closest bucket, typically wrap-up, and kills the
+   session. Only explicit closings map to `goodbye`; unknown intent names
+   clamp to the pending flow or chitchat, never to goodbye.
+3. THINK->ACT, COLD PAYLOAD: the reasoning tier outputs {"tool", "args"} and
+   never executes or narrates the outcome; only the deterministic
+   TOOL_REGISTRY performs side-effects. One tool per flow = single Think->Act
+   hop; do NOT build an iterative ReAct loop in the PARENT graph. When a
+   capability genuinely needs iteration (multi-hop retrieval), encapsulate
+   the loop in a bounded subgraph with private state (see invariant 20).
+   The ONE sanctioned parent-graph loop is the deterministic plan-step walk
+   (invariant 22) — no model ever decides whether it continues.
+4. PENDING SLOT-FILL + CONTINUATION GUARD: a missing slot sets
+   pending_intent/pending_slots (persisted by the checkpointer). Next turn, a
+   bare value ("downtown at 3pm", "AC-12345") often classifies as chitchat —
+   if the turn extracted any slot value while a flow is pending, stay in the
+   pending flow. Completing or abandoning a flow clears pending_*.
+   (Since invariant 23, the deterministic fast-router gate sits IN FRONT of
+   this guard: an unambiguous slot answer never reaches the model at all; the
+   guard remains the safety net for everything the gate falls through on.)
+5. DATE INJECTION: any Think prompt that can receive relative times gets the
+   current date/time + weekday injected, else the model invents a date.
+6. GRACEFUL DEGRADATION: every live model call is wrapped; on any error
+   (auth, 429, network, parse) the node falls back to its deterministic mock
+   and the session continues. A turn never crashes. The mock/heuristic itself
+   must read pending_intent/pending_slots/recent_messages already in scope,
+   not just the raw current-turn string — a fallback that only pattern-
+   matches the latest message produces amnesia-like symptoms (the user has
+   to repeat themselves) even though state never actually reset. (See
+   failure #12.)
+7. VALIDATOR AS ONLY EXIT: one terminal node strips ANSI/markdown, applies
+   configurable blocked-pattern rewrites (e.g. invented prices), and appends
+   the AIMessage to history. Nothing reaches stdout except final_response.
+8. MOCK-FIRST: with no API key the identical graph runs end-to-end on
+   deterministic fallbacks (keyword intents, regex slot extractors, canned
+   answers, hash-stable tool results). This is what makes selftest.py and
+   zero-key demos possible.
+9. CONFIG-DRIVEN DOMAIN: intents, flows, slots, facts, mock heuristics, and
+   guardrail patterns live in config.py. Nodes/graph/schemas are generic — a
+   new client agent is mostly a config.py + tools.py + selftest.py edit.
+10. SELFTEST GATE: never hand over an agent whose selftest.py doesn't PASS in
+    mock mode. The script encodes invariants 1-4 and 11-14 as assertions.
+11. POST-ACTION GROUNDING: every executed tool (and handoff) writes
+    last_action {tool, summary, result} to state (the FULL structured result,
+    so "how do you know?" can quote any field — not a pre-selected fact
+    subset); it persists across
+    turns (never in the turn reset). The intent prompt gets a LAST ACTION line
+    so a short follow-up ("cash", "thanks", "how do you know?") is read
+    against the completed action instead of spawning a fresh flow; knowledge/
+    chitchat prompts get last_action + the last tool_result so "how do you
+    know?" is answered from data ("I checked our live inventory"), not with a
+    capabilities pitch. (See failures #7 and #10.)
+12. DETOURS DON'T KILL FLOWS: knowledge_node and chitchat_node never clear
+    pending_intent/pending_slots. While a flow (or confirmation) is pending,
+    their replies end with a deterministic resume line ("...and to finish
+    your <flow>, I still need <slot>."). Pending clears ONLY on flow
+    completion, closing, handoff, or explicit abandonment. Think may also
+    answer a question embedded in the user's message (from facts, the
+    conversation, or the injected date/time) before asking for the missing
+    slot. (See failure #8.)
+    (Since invariant 24, this protection extends to FLOW-vs-FLOW: a second
+    tool flow interrupting a pending one no longer clobbers it — the pending
+    flow is parked in the depth-1 interrupt archive and restored
+    deterministically.)
+13. ENRICHMENT CONSTRAINED TO THE ACTION SPACE: the ENRICH tier never asks
+    the user a question and never mentions a step, service, or option
+    (payment, delivery, scheduling...) absent from the tool's JSON. The only
+    allowed follow-up is the deterministic per-tool sentence in
+    config.NEXT_STEP_HINTS, appended by the node in both mock and live mode.
+    (See failure #7.)
+14. CONFIRM GATE + SLOT VALIDATORS: destructive/irreversible flows set
+    Flow(confirm=True) — Think stashes the payload in pending_confirmation
+    and asks a deterministic yes/no; next turn the intent node short-circuits
+    affirmative -> tool_exec, negative -> clear + acknowledge. Quantity/
+    measure slots get Flow.validators hooks (bounds + unit normalization) run
+    by Think after slot merge, before Act; a failed validator forces
+    need_info with the validator's clarification question. (See failure #9.)
+
+V3 INVARIANTS (from the 2026-07 architectural report; report § noted per item)
+15. EXECUTION VALIDATOR — DECOUPLED VALIDATION (report §3): validation is two
+    distinct deterministic stages, never one. The EXECUTION validator sits
+    immediately after tool_exec (Layer 2.5): it inspects the raw tool result
+    for errors/malformed payloads BEFORE any phrasing and routes failures to
+    a dedicated failure node (graceful reply, session alive, flow re-pended
+    for retry). The RESPONSE validator stays the only exit (invariant 7).
+16. ENRICH-BYPASS ROUTING (report §3): Flow(enrich=False) marks tools whose
+    "summary" is already user-ready — the execution validator phrases the
+    result deterministically (summary + NEXT_STEP_HINTS) and routes straight
+    to the response validator, skipping the SLM hop entirely. This is the
+    sub-600ms fast path; needs_enrichment is a ROUTED flag, never assumed.
+17. HIERARCHICAL INTENT CATALOG (report §3): intents are grouped into macro
+    categories — ANSWER (knowledge + chitchat), FLOW (tool-backed),
+    COMPOUND (multi-action utterances -> the planner, see invariant 22),
+    SYSTEM (help/restart/goodbye) — and the intent prompt presents the
+    catalog two-level (category first). Small models classify far more
+    reliably against a handful of categories than a flat list. The category is DERIVED
+    from the final intent via config (never trusted from the model), and
+    SYSTEM intents are handled deterministically: help preserves pending
+    state (a detour); restart is the one explicit abandonment that clears it.
+18. CIRCUIT BREAKERS (report §4): tool_exec enforces a hard per-turn budget
+    (config.MAX_TOOL_CALLS_PER_TURN); past the cap the Act is refused and
+    degrades through the failure node — an off-the-rails agent is stopped by
+    infrastructure, not by the output validator. The RAG subgraph enforces
+    its own loop bound (config.RAG_MAX_ITERATIONS, default 1) the same way,
+    plus a wall-clock ceiling on the whole retrieval loop
+    (config.RAG_TIMEOUT_SECONDS, asyncio.wait_for in the agentic_retrieval
+    node — on timeout the node degrades to ONE deterministic retrieve pass;
+    see Agentic_RAG_Explained.txt rule 6).
+19. HITL OPERATOR GATE (report §4): high-stakes flows (refunds, deletion)
+    set Flow(hitl=True) — when the payload is ready, the graph
+    interrupt()-suspends at a dedicated gate node (checkpoint-persisted) and
+    the tool runs ONLY on a human Command(resume={"approved": True}); denial
+    yields a deterministic decline. This is distinct from Flow.confirm (the
+    end-user yes/no): hitl is an OPERATOR approval the model cannot phrase
+    its way past. It is the single sanctioned suspension of the same-turn
+    rule, and it requires a durable checkpointer if approvals span restarts.
+20. AGENTIC-RAG SUBGRAPH — PRIVATE STATE (report §2/§5 semantic memory):
+    knowledge intents listed in config.RETRIEVAL_INTENTS run a compiled
+    StateGraph subgraph (rag_subgraph.py) mounted as ONE parent node: an
+    iterative retrieve -> grade -> rewrite loop over its own RagState
+    TypedDict, bounded by RAG_MAX_ITERATIONS. The parent receives EXACTLY
+    ONE key back (retrieved_context; empty = answer "I don't have that"
+    honestly, never hallucinate). The parent graph itself stays loop-free
+    (sole exception: the invariant-22 plan-step walk) — invariant 3 holds at
+    the macro level while deep retrieval happens under the hood. Subgraph
+    state NEVER merges into AgentState (selftest asserts).
+21. SEMANTIC ENTITY RESOLUTION (report §1): referential slot values ("all
+    vegetables", "any branch", aliases) are grounded against the domain
+    catalog by config.ENTITY_RESOLVERS hooks, run by Think BEFORE the scalar
+    Flow.validators — canonicalize or bounce with a clarifying question. A
+    literal referential string never reaches a tool as a query.
+    LIVE-MODE COROLLARY (judged live failure #11, 2026-07): the LLM extracts
+    RAW text ("tomatoes" against a "tomato" catalog key) and resolvers are
+    the ONLY normalization live values get — mock extractors pre-normalize,
+    masking any gap. Three hard rules follow: (a) every catalog/DB-keyed
+    slot gets a resolver, sharing its synonym/plural logic with the mock
+    extractor (one source of truth, no drift); (b) bounds validators derive
+    limits from the RESOLVED entity's catalog entry and fall back to
+    format-only validation when the entity isn't known yet — never to a
+    hardcoded default (a fallback "stock=200" turned a mismatched key into
+    a confidently wrong answer); (c) selftest.py runs HOOK_CHECKS — direct
+    resolver/validator calls with raw live-style values — because the mock
+    conversation script is structurally blind to this class of bug.
+22. PLAN-AND-EXECUTE — THE BOUNDED PLAN WALK (2026-07-09 report §5): a single
+    utterance requesting TWO OR MORE tool actions classifies as the built-in
+    `compound_request` intent (macro category COMPOUND) and routes to the
+    planner node, which calls the ANSWER model EXACTLY ONCE to emit an
+    ordered plan_steps array (PlanResult). The plan is clamped in code:
+    unknown actions dropped, truncated to MAX_PLAN_STEPS, slot keys outside
+    the flow contract discarded; zero valid steps -> a deterministic decline.
+    Execution is then a parent-graph walk driven by the plan_step controller
+    (no model): dispatch step i into the ORDINARY think->act machinery (the
+    step's action IS the intent; its slots are a deterministic merge of
+    session_facts — the variable-mapping bus — with the planner's per-step
+    extraction), record the outcome, increment, repeat. This is the ONE
+    sanctioned parent-graph loop because it is deterministic (no model
+    decides continuation), monotonic (current_step_index only increases),
+    and doubly bounded (MAX_PLAN_STEPS at creation, MAX_TOOL_CALLS_PER_TURN
+    at execution) — and it must live in the parent, not a subgraph: pause/
+    resume across turns requires parent-checkpointed state, and each step
+    reuses the existing slot-validation/confirm/HITL/breaker/enrich nodes
+    rather than duplicating them. Every gate keeps its authority mid-plan:
+    a missing slot or confirm question PAUSES the plan (the existing
+    pending_* machinery is the resume mechanism; completed-step summaries
+    are prepended to the ask); a HITL interrupt suspends it; a failed step,
+    a declined confirmation, or an operator denial ABORTS the remaining
+    steps (later steps may depend on the refused one) while still reporting
+    what completed — the failed flow stays re-pended for a single-flow
+    retry. restart and goodbye clear an active plan. Never re-plan mid-way:
+    a compound classification while a flow, confirmation, or plan is in
+    progress stays with the work in progress.
+23. FAST-ROUTER GATE (2026-07-10 report §B "Gatekeeper", adapted): a
+    DETERMINISTIC tier-0 gate inside intent_detect, run after the
+    confirmation gate and before any model call. Mid slot-fill (a pending
+    flow with missing slots), if the user's message unambiguously fills a
+    missing slot, the INTENT-tier call is SKIPPED and the turn routes
+    straight to Think with the same dict a continuation turn would produce
+    (fast_routed=True for telemetry). "Unambiguously" means ALL of: no
+    negation-regex hit (possible abandonment), no INTENT_KEYWORDS hit for
+    any OTHER intent (possible interruption), at least one missing-slot
+    SLOT_EXTRACTORS hit, and every extracted value passes its
+    ENTITY_RESOLVERS hook and Flow.validators as a PRE-TEST (result
+    discarded — Think stays the single authoritative resolver/validator
+    pass and receives the raw value, so hooks must be idempotent on
+    canonical values). Every doubt falls through to the normal INTENT call:
+    a false negative costs one model call; a false positive misroutes an
+    interruption. Hard boundaries: the gate is NEVER a model or SLM (the
+    report's SLM-router variant is rejected — the tiering is non-negotiable
+    and this gate only FRONTS the INTENT tier); it must behave identically
+    in mock and live mode; flows whose slots have no extractors simply never
+    fast-route (the implicit per-flow opt-out); kill switch
+    FAST_ROUTER_ENABLED. The report's separate fast_router graph NODE is
+    also rejected — it would replicate the confirmation-gate precedence and
+    add a super-step per turn for zero behavior gain; the gate lives where
+    the existing deterministic gate lives, inside intent_detect.
+24. DEPTH-1 INTERRUPT ARCHIVE (2026-07-10 report §C "Intent Stack",
+    truncated to depth 1): when a second tool FLOW interrupts a pending one
+    (both in config.FLOWS, different intents, no active plan), intent_detect
+    PARKS the pending flow — paused_flow = {intent, slots, offered:False} —
+    instead of letting think/_clear_pending clobber it, and isolates the new
+    flow's slots (the old flow's values must not leak into the new tool;
+    session_facts remains the sanctioned cross-flow value bus). Newest
+    interruption wins (depth 1 — NEVER a pushdown stack; see anti-pattern
+    #18). Restore is DETERMINISTIC and never a blind re-pend, via three
+    triggers only: (a) re-entry by name — the archived intent classifies
+    again and its parked slots merge back (nothing already collected is
+    re-asked); (b) a bare slot answer with NOTHING pending — the invariant-23
+    gate runs against the archived flow and restores it on a match; (c) the
+    ONE-SHOT resume offer — when the interrupting flow COMPLETES (enrichment
+    or bypass path only, never the failure path, never mid-plan), a
+    deterministic config.PAUSED_RESUME_TEXT line is appended once and
+    `offered` is set (a second nag is the broken-record anti-pattern; empty
+    PAUSED_RESUME_TEXT disables the offer, archive+restore still work).
+    Lifecycle: persisted by the checkpointer; survives a confirmation
+    decline and a HITL denial of the interrupting flow (declining B is not
+    abandoning A); cleared on restore, re-entry, restart, and goodbye; the
+    plan walk never writes or restores it (plans have their own pause/resume
+    machinery). COROLLARY (the zombie guard): completing a flow must clear
+    pending_* at the handoff to Act — including the confirmation-affirm
+    short-circuit — or the archive would later park an already-DONE flow and
+    offer to "finish" it.
+25. STALL DETECTOR (2026-07-11 report defect #5, "Absence of State
+    Monitoring"): repetition is the earliest, cheapest signal of systemic
+    failure, and it MUST be monitored. A deterministic IN-NODE gate inside
+    validator_node (like the fast router: never a separate graph node, never
+    a model) fingerprints every outgoing reply (post-scrub, casefolded) and
+    counts CONSECUTIVE identical emissions across turns
+    (last_reply_fingerprint / stall_count, checkpointer-persisted — a stall
+    is by definition cross-turn). At config.STALL_THRESHOLD (default 3) the
+    reply is swapped for config.STALL_TEXT — a clarify-then-escalate line
+    whose escape phrase MUST match a human_handoff keyword (invariant 26) so
+    saying it actually escalates. The counter then resets with STALL_TEXT as
+    the new fingerprint: a loop that persists fires the gate again. The
+    signal is AGENT-OUTPUT repetition, deliberately: detecting "the user is
+    aggressively rephrasing an unmet need" needs semantic comparison — a
+    model call per turn — while three identical outbound replies is the same
+    fact observed for free on the deterministic side. Model-based sentiment
+    monitoring per turn is REJECTED for the same tiering-economics reason.
+    Restart and handoff reset the fingerprint; STALL_THRESHOLD=0 is the kill
+    switch. Legitimate repeats (asking twice for the same missing slot)
+    survive below the threshold by design — the third identical ask IS a
+    stall, whatever caused it.
+26. DETERMINISTIC ESCALATION PATH (2026-07-11 report defect #6): if the
+    agent advertises a human handoff, the handoff must exist as a REACHABLE
+    NODE, not as conversational copy — an escalation mechanism that lives
+    only in the greeting text is a judged failure mode. human_handoff is a
+    built-in SYSTEM intent (deterministic, no model): explicit
+    person-seeking keywords (manager, human, representative...) route to
+    system_node, which emits config.HANDOFF_TEXT, clears pending work
+    (invariant 12 names handoff as a legitimate clearer — a person takes
+    over), KEEPS last_action/session_facts (the human inherits the context),
+    and raises the handoff_requested state flag — the structural part: the
+    Shell/host observes the flag to actually page a person; the reply is
+    just the copy over it. The flag is per-turn (reset by the Shell) and is
+    never set by a model. The stall detector's STALL_TEXT (invariant 25) and
+    failure copy that promises "a human agent will follow up" must both
+    route INTO this intent — never advertise a channel that isn't wired.
+
+OPTIONAL PATTERN: ENTITY-REFERENCING COMPANION FLOWS
+-----------------------------------------------------
+Not every agent needs this — only domains where a created entity (a
+booking, ticket, order) can later be modified or cancelled. Skip it
+entirely for create-only domains.
+
+When a client needs "change/cancel the thing I just did": author a
+companion Flow (e.g. reschedule_ticket, cancel_booking) whose first slot
+is the entity id. Do NOT force the user to re-supply the id if they
+clearly mean the most recent one ("move it an hour later") — resolve it
+from `last_action.result` (already persisted per invariant 11) via a slot
+resolver, falling back to asking for the id only if `last_action` doesn't
+hold a matching entity type.
+
+Known boundary: `last_action` holds exactly one entity — the most recently
+completed tool result. This pattern supports "modify the last thing I
+did," not arbitrary lookup across a user's full history. If a client
+genuinely needs the latter, that's a real retrieval/lookup tool (a Flow of
+its own: "find my booking by id/date"), not a bigger state contract — don't
+grow AgentState into a multi-entity registry to route around a one-off
+request; add a lookup tool instead.
+
+This is a config.py + tools.py addition (new Flow + new tool function),
+exactly like any other flow — no graph/node changes required. (See
+failure #13.)
+
+FUNCTIONAL SESSION CACHE (durable hard keys, not a memory subsystem) —
+SHIPPED in the engine as of 2026-07-09 (report §4)
+-----------------------------------------------------
+The mechanism ships in the boilerplate: declare `Flow.cache_keys` and the
+engine does the rest (merge in tool_exec, KNOWN FACTS prompt injection,
+checkpointer persistence, cleared on restart). Not every agent needs to
+DECLARE cache_keys — only domains where transactional identifiers (a
+ticket number, a MAC address, an account id) recur across turns or
+restarts of the same session, or where plan steps feed each other
+(invariant 22's variable-mapping bus). Leave cache_keys empty for
+single-shot domains and the cache stays inert.
+
+The gap it fills: `last_action` holds only the single most recent tool
+result, and it is overwritten by the next Act. A user who booked a
+ticket yesterday and runs `--resume` today to ask "any update on my
+ticket?" should not have to re-supply the id — but nothing in the base
+contract keeps it once another tool has run.
+
+The mechanism: one state key, `session_facts{}` — a flat dict of hard
+keys, merged (never replaced) each turn, persisted by the same
+checkpointer that already backs `--resume`. It is populated ONLY from
+an explicit whitelist: each Flow may declare `cache_keys` (e.g.
+("ticket_id",)), and after a successful Act the tool_exec node copies
+exactly those fields from the tool result into `session_facts`. The
+intent and Think prompts get a one-line `KNOWN FACTS:` injection, the
+same way they get the LAST ACTION line — so a companion flow's
+entity-id slot resolves from `session_facts` when `last_action` no
+longer holds it, and a later plan step's missing slot auto-fills from
+an earlier step's output (invariant 22).
+
+Hard boundaries (each one a rejection if crossed):
+- HARD KEYS ONLY. Identifiers and values a flow's slots or a tool's
+  result already produce. No preferences, no personality, no summarized
+  history, no "the user seems frustrated."
+- NO NEW MODEL CALLS. Writing to the cache is a deterministic dict
+  merge in tool_exec; reading it is a prompt-line injection. If a
+  design adds a summarization or consolidation call to maintain
+  memory, it has left this pattern and needs its own justification.
+- NO DECAY POLICY. The cache lives and dies with the session row in
+  the checkpointer. Session deleted -> cache gone. A CLI support
+  session is transactional, minutes long, and resumable — it is not a
+  relationship. Cross-session user profiling is out of scope for this
+  architecture, full stop. (In tri-partite terms this is EPISODIC
+  memory — transactional caching, never a durable user profile; see
+  Tri_Partite_Memory.txt.)
+
+This is a config.py declaration (cache_keys per Flow) — the merge, the
+injection, and the lifecycle already ship in the engine. No graph shape
+changes, no new tiers.
+
+STATE CONTRACT (schemas.AgentState — keep it lean)
+--------------------------------------------------
+  recent_messages (add_messages) | user_message
+  intent, category, slots{}                - this turn's classification
+  pending_intent, pending_slots{}          - cross-turn slot-fill memory
+  pending_confirmation{}                   - stashed payload + yes/no question
+  fast_routed                              - per-turn telemetry: the tier-0
+                                             gate skipped the INTENT call
+                                             (see 23); reset each turn
+  paused_flow{}                            - depth-1 interrupt archive
+                                             {intent, slots, offered} (see
+                                             24); persists via checkpointer;
+                                             cleared on restore/restart/
+                                             goodbye; never a stack
+  last_action{}                            - post-action grounding {tool,
+                                             summary, result} (persists)
+  session_facts{}                          - functional session cache:
+                                             whitelisted hard keys
+                                             (Flow.cache_keys); merged in
+                                             tool_exec, never summarized;
+                                             persists via checkpointer;
+                                             cleared on restart
+  plan_steps[], current_step_index         - Plan-and-Execute walk (see 22);
+                                             persist for pause/resume;
+                                             cleared on finish/abort/restart
+  confirmation_declined                    - one-turn flag for the decline ack
+  retrieved_context                        - the RAG subgraph's ONLY output key
+  cold_payload{}, tool_action_pending      - Think->Act handoff
+  tool_result{}, needs_enrichment          - Act->Enrich handoff (routed, see 16)
+  tool_call_count, execution_error{}       - breaker + execution-validator verdict
+  awaiting_human                           - HITL gate marker (see 19)
+  draft_response -> final_response         - pre/post validator
+  exit_conversation                        - Shell stops when True
+
+Structured outputs: exactly five Pydantic models (IntentResult, ThinkDecision,
+PlanStep, PlanResult, EnrichVerdict), each with a `reasoning`/verdict field (or
+nested under one) for brief chain-of-thought before committing. Intent/action/slot keys are plain
+strings (config-driven catalog) with clamping in the node — schema Literals
+would couple the engine to the domain.
+
+TOOL CONTRACT
+-------------
+Tool functions take the flow's slots as kwargs and return a structured dict
+(never prose) that includes a "summary": one plain-English sentence. Mock
+enrichment uses summary verbatim; live ENRICH grounds on the full JSON. Tools
+are deterministic per input (hash-based mock data) so tests are stable.
+
+EMPIRICAL FAILURES THIS DESIGN FIXES (observed 2026-07, Mistral small/large)
+----------------------------------------------------------------------------
+1. Menu/IVR-style graphs (router node classifies, answer node runs NEXT turn)
+   produce a one-turn lag: the agent answers the PREVIOUS question each turn.
+   Structural — cannot be patched from a wrapper; requires same-turn design.
+2. "my name is Omer" -> session terminated: intent enum had 7 task buckets
+   and wrap_up but no neutral bucket. All models, both languages, failed the
+   same way. Language/model-size was NOT the cause; taxonomy was.
+3. Downstream hallucinations ("we only sell red dresses") were corrupted-state
+   symptoms of failure #2, not model weakness.
+4. Small models ignore reply-language instructions under multi-turn structured
+   routing (Mistral small answered Hebrew under an English prompt). Default to
+   English-only agents; treat language toggles as prompt-pack swaps, not logic.
+5. "tomorrow at 3pm" -> model booked a date months off until the current date
+   was injected into the Think prompt.
+6. Mistral endpoints reject OpenAI's native structured-output parse; the JSON-
+   mode + local Pydantic validation fallback in llm_client.py is mandatory.
+
+FAILURES #7-10 (observed 2026-07, live GreenCart judgement, ALL tiers on
+Mistral small — a single-small-model config; see Multi_Model_Tiering.txt):
+7. POST-ACTION AMNESIA: checkout succeeded (order placed, cart correctly
+   cleared), then the ENRICH tier — invited by a generic "offer further help"
+   line in its prompt — asked "how would you like to pay?", a question no
+   flow could handle. The user's "cash" was classified as a new cart flow,
+   which legitimately saw an empty bag: "your bag is empty" right after a
+   successful order. Root causes: enrichment invented a follow-up outside
+   the action space (fix: invariant 13) and the intent tier had no awareness
+   of the action that had just completed (fix: invariant 11).
+8. SLOT TUNNEL VISION: mid-flow, the user asked an embedded question; the
+   Think prompt only permitted "act" or "ask for the first missing slot", so
+   the question was ignored — and a knowledge/chitchat detour cleared
+   pending state, silently killing the flow. Fix: invariant 12.
+9. UNIT-BLIND EXTRACTION: "1000 kgs of tomatoes" flowed straight through as
+   packages=1000 — no unit acknowledgment, no bounds check, no confirmation
+   before a destructive checkout. Fix: invariant 14.
+10. UNGROUNDED SELF-EXPLANATION: "how do you know?" after a stock answer fell
+    back to the capabilities pitch because state kept no record of where the
+    fact came from. Fix: invariant 11 (last_action + tool_result grounding).
+11. RAW-SLOT ENTITY MISS (LIVE ONLY, observed 2026-07, GreenCart on Mistral):
+    tools executed against the real catalog, but the LLM's raw extraction
+    ("tomatoes") never matched the canonical key ("tomato"): a false "we
+    don't carry tomatoes" for an in-stock item, and "1000 kgs" bounced
+    against a hardcoded fallback stock of 200 instead of the real 40. Mock
+    mode never showed it — its extractor singularized before slots were set,
+    and only the quantity slot had a validator. Fix: invariant 21 (resolvers
+    on every catalog-keyed slot + no-default bounds + HOOK_CHECKS preflight).
+
+FAILURES #12-14 (observed 2026-07, live NetPulse judgement — a residential-
+ISP support agent whose mock heuristics only inspected the current message,
+whose Flow catalog was create-only, and whose one time slot collapsed to a
+coarse enum):
+12. CONTEXT-BLIND FALLBACK: a live APIConnectionError degraded intent
+    detection to its keyword-mock heuristic mid-flow. State was NOT wiped
+    (pending_intent/pending_slots/recent_messages all survived), but the
+    heuristic only pattern-matched the current message, so the reply acted
+    as if the user's prior turn had never happened — the user had to repeat
+    themselves. Fix: invariant 6 (mock/heuristic fallbacks must consult
+    pending state, not just the current string).
+13. CREATE-ONLY TRAP: the user asked to reschedule an already-booked ticket;
+    no Flow existed for "modify an existing booking," so the request
+    re-entered the original booking Flow from scratch and double-booked the
+    same slot. Fix: see "OPTIONAL PATTERN: ENTITY-REFERENCING COMPANION
+    FLOWS" above — this domain didn't use it.
+14. LOSSY SLOT COLLAPSE: a time slot resolved "9am" straight to the enum
+    `morning`, discarding the precise time; "move it an hour later" had
+    nothing to compute against. Fix: resolve precision-bearing slots into a
+    machine-usable value, not just a display enum (CLI_Agent_Anti_Patterns.txt
+    #16).
+
+FAILURES #15-17 (observed 2026-07-11, third-party judgement of a LINEAR-
+router transactional agent — not this architecture, but each failure names
+a hole this engine had to close explicitly):
+15. PRESSURED FABRICATION OF HISTORY: asked repeatedly for past-transaction
+    data it had no tool for, the agent eventually invented a specific count.
+    The structural root: queries ADJACENT to the domain but unsupported
+    (order history, past records) fell through to the open-ended chitchat
+    path, where a model under conversational pressure optimizes for "make
+    the user stop" over accuracy. Fix here: the chitchat prompt carries a
+    hard no-records line (never estimate/reconstruct history; offer a
+    human), and Step 1 must inventory adjacent-unsupported queries so each
+    gets a lookup Flow or an explicit decline intent — pressure must land on
+    a deterministic path.
+16. BROKEN-RECORD LOOP: the agent emitted an identical reply many turns
+    running with zero strategy change; repetition — the cheapest failure
+    signal — was unmonitored. Fix: invariant 25 (deterministic stall
+    detector in the exit validator).
+17. ADVERTISED-BUT-UNWIRED ESCALATION: the greeting promised a human
+    handoff, but no route existed — explicit "get me a manager" requests
+    looped back to the fallback. Fix: invariant 26 (human_handoff as a
+    built-in deterministic SYSTEM intent raising a Shell-observable flag).

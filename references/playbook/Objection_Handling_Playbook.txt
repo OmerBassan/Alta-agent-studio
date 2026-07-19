@@ -1,0 +1,27 @@
+# OBJECTION HANDLING: ACKNOWLEDGE, BRIDGE, ASK
+Rule: Don't argue. Validate the concern, bridge, end with a soft question.
+Lines below are patterns to adapt, not scripts to recite verbatim.
+
+## "It's too expensive."
+- "Price is always a factor — if we could show ROI in two months, worth a quick look?"
+
+## "We're happy with our current vendor."
+- "Loyalty's rare, that's great. Not looking to replace them — are you locked into a long-term contract?"
+
+## "I don't have time."
+- "Totally get it. Twenty seconds on why I called, then you decide if it's worth a follow-up?"
+
+## "We're not interested."
+- "No problem — out of curiosity, already solved [pain], or just not a priority right now?"
+
+## "Send me an email." (the brush-off)
+- "Happy to — what's your biggest focus on [topic] so it's not generic spam?"
+Only promise this if an email/send tool is actually wired into this agent's
+config — check before generating this line into a live prompt. If no such
+tool exists, don't offer to send anything; ask a qualifying question instead
+or offer the calendar link (see Close_and_CTA_Phrasing.txt).
+
+## If the Bridge Doesn't Land
+One acknowledge-bridge-ask per objection is enough — if they push back again
+on the same point, don't repeat a rephrased version of the same bridge. Drop
+to a lighter ask (permission to follow up later) rather than re-arguing.

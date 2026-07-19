@@ -1,0 +1,33 @@
+# System of Action: External Tool Integration Rules
+
+To transform the CLI agent into a reliable "System of Action" without breaking the graph's clean separation of concerns, you MUST decouple tool execution from the conversational graph.
+
+1. The Graph Extracts, The Shell Executes
+- The LangGraph (The Brain) is ONLY responsible for extracting structured intent and arguments from the conversation (e.g., file path, git command, API params).
+- The LangGraph MUST NOT import heavy SDKs (git libraries, cloud SDKs) or make blocking network/filesystem calls directly from a reasoning node.
+
+2. Structured Pydantic Extraction
+- When a conversational phase concludes that an action is needed, use a dedicated node with a Pydantic `StructuredOutput` to rigidly extract the required tool-call fields (tool name, arguments) from the transcript.
+
+3. State-Based Payload Hand-off
+- Save the extracted data into a dedicated key in the `AgentState` (e.g., `tool_call_payload: dict`).
+- Set a boolean trigger flag in the state (e.g., `tool_action_pending: bool = True`).
+
+4. Deterministic Execution (Shell/Tool-Node Domain)
+- A deterministic tool node (or the Shell, for anything touching the OS/filesystem/network) detects the `tool_action_pending` flag, executes the actual call, and handles idempotency, retries, and timeouts.
+- Prefer a mock-first implementation for every tool (return deterministic canned results with no credentials configured) so the agent boilerplate always runs end-to-end without live API keys.
+
+5. Graph-Level Error Handling
+- If the tool execution fails, the EXECUTION VALIDATOR (Layer 2.5, same-turn — see
+  Guardrails_Three_Layers.txt) inspects the raw result immediately after tool_exec,
+  routes to a dedicated failure node that keeps the flow re-pended for retry, and
+  the agent speaks a graceful fallback reply — all within the same graph invocation.
+  No next-turn lag; no lost state.
+
+6. Excessive-Agency Safeguards (hard infrastructure, not prompt engineering)
+- CIRCUIT BREAKER: `tool_exec` enforces `config.MAX_TOOL_CALLS_PER_TURN` — a hard per-turn execution budget. A runaway agent is stopped by the registry gate, not by hoping the output validator notices.
+- HITL OPERATOR GATE: flows flagged `Flow(hitl=True)` (refunds, data deletion) never execute directly. The graph `interrupt()`-suspends with the ready cold payload and resumes only on a human `Command(resume={"approved": True})`. This is stronger than `Flow(confirm=True)` (end-user yes/no): it is an out-of-band OPERATOR approval the model cannot phrase its way past. Use a durable checkpointer when approvals may span process restarts.
+
+7. MCP (Model Context Protocol) Integration
+- In 2026, prefer augmenting the registry with MCP for external/remote tools: `tools.register_mcp_tools(session)` wraps every tool an MCP server exposes into `TOOL_REGISTRY` with the SAME contract (kwargs in -> structured dict with a "summary" out). The graph cannot tell a local tool from an MCP tool — MCP swaps the transport, never the architecture.
+- Schema enforcement stays where it already lives: Flow slots + validators shape the arguments BEFORE the payload is built; the registry stays the single execution door; the execution validator still inspects every result. Custom local Python tools remain the mock-first default.

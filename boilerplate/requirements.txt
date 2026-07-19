@@ -1,0 +1,17 @@
+# Same-turn multi-model CLI agent — runtime dependencies.
+# Pinned to the versions this boilerplate was built and tested against.
+# Install:  pip install -r requirements.txt
+
+langgraph==1.0.5
+langchain-core==1.2.5
+pydantic==2.12.5
+openai==2.14.0
+python-dotenv==1.2.1
+
+# Optional — only for durable cross-restart session persistence
+# recommended whenever a Flow(hitl=True) approval may span restarts):
+# langgraph-checkpoint-sqlite
+# aiosqlite
+
+# Optional — only for MCP-registered tools (tools.register_mcp_tools):
+# mcp

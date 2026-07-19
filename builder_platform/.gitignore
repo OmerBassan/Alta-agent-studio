@@ -1,0 +1,8 @@
+# secrets — never commit the real values; .env.example is the template
+.env
+
+__pycache__/
+*.pyc
+
+# ground-truth capture of raw Vapi payloads — local debugging artifact
+vapi_raw_capture.jsonl

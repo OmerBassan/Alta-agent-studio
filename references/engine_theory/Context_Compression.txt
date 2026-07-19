@@ -1,0 +1,100 @@
+# Context Compression: Crush + Retrieve, Preservation Invariants, Cache Economics
+
+Tri_Partite_Memory.txt decides WHERE knowledge lives; this document decides
+HOW MUCH of a tool's output is allowed to live in the prompt at all. Large
+tool results (a search returning 200 rows, a report API returning a season of
+data) cost tokens on every hop that sees them — the ENRICH prompt, last_action
+grounding, and every later turn that replays history. The patterns below keep
+the salient fraction in-context and make the rest retrievable on demand.
+
+External reading: headroomlabs-ai/headroom (Apache-2.0) — a production
+context-compression proxy. Treat it the way we treat Agent_Memory_Techniques:
+a pattern catalog, NOT a dependency. It requires ONNX Runtime (AVX2), an
+optional Rust build, and a proxy process; none of that is sanctioned by the
+Shell Contract for a CLI agent. Everything this engine needs is re-implemented
+in ~170 lines of stdlib in `compaction.py`. Study their source for the
+invariants; never `pip install headroom-ai` into a generated agent without an
+explicit client requirement recorded in Step 1.
+
+1. CRUSH + RETRIEVE (their "CCR" pattern) — SHIPPED in compaction.py
+- The trick that makes lossy compaction safe: it is not lossy. Keep the
+  salient subset in-context, offload the full original to a bounded
+  in-process store, and append ONE sentinel item to the crushed list:
+      {"_dropped": "<<28 of 40 items omitted to save tokens — call the
+       retrieve_full_result tool with ref='a1b2c3d4e5' if you need them>>"}
+  The model pays retrieval tokens only when it actually needs the tail, which
+  in practice is rarely (the user asked about THEIR order, not all 200).
+- Engine wiring: `tool_exec` crushes every HEALTHY result before it reaches
+  state (nodes.py), so tool_result, last_action, and the ENRICH prompt all
+  see the compact form. `retrieve_full_result` is in TOOL_REGISTRY; give it
+  a Flow only if the domain genuinely pages through result sets.
+- The store is a cache, not memory: process-local, bounded FIFO, never
+  persisted. If the ref has expired, the tool returns an honest error result
+  ("re-run the original request") — the ordinary failure path handles it.
+
+2. PRESERVATION INVARIANTS — what may NEVER be dropped, whatever the budget
+- Error items (truthy `error` field, error-ish status values): the one
+  "failed" row in 200 "ok" rows is usually the whole reason the user asked.
+- Rare status values (<10% frequency in status-like fields): outliers carry
+  the information; the modal value is one summary line.
+- First-K and last-K (~60/40 split): head anchors identity ("what did this
+  return"), tail anchors recency. Guard the split so a budget of 1 cannot
+  round both halves up to 1 (headroom shipped exactly that off-by-one).
+- Results that ARE errors are exempt from compaction entirely — the
+  execution validator and failure node must read them intact.
+- Detection humility: a single error keyword false-positives constantly
+  ("errors": [], error_handler.py). For prose, require two DISTINCT
+  indicators before treating a block as failure output; for structured items,
+  match narrow enum-like status values, not free text. A missed match is safe
+  when a downstream layer still preserves error lines — design so misses are
+  cheap and act accordingly.
+
+3. COMPACTION TRANSFORMS NEVER RAISE
+- A lost saving is safe; a crashed Act node is not. Every compaction entry
+  point catches everything and returns its input unchanged on any internal
+  error. Same posture as the ENRICH tier's deterministic fallback. The
+  inverse rule for FEATURES: when a caller passes an option you do not
+  support, fail loud (raise), never silently ignore it — a silent fallback
+  is a bug that ships.
+
+4. CACHE ECONOMICS — history is APPEND-ONLY (design rule, not code)
+- With Anthropic prompt caching, a cache write costs 1.25x a plain input
+  token and a cache read 0.1x. Rewriting an already-cached earlier message
+  invalidates the prefix: break-even is roughly
+      11.5 * (cached_suffix_tokens / tokens_saved)
+  future reads. Deleting 2K tokens above a 50K cached suffix needs ~287
+  reads to pay off — it never will. "Saving tokens" by editing old history
+  usually burns money.
+- Therefore: compress content ONCE, at the moment it enters state (that is
+  why `tool_exec` crushes before returning), and never rewrite an earlier
+  turn's bytes afterward. Appending a turn must never mutate a previous one
+  (headroom property-tests this as "prefix monotonicity"). This engine's
+  `_history()` window plus crush-on-entry already satisfies the rule; keep
+  it true in any customization.
+
+5. RESULT LIFECYCLE — stale vs. superseded
+   SHIPPED: last_action (most-recent only), session_facts (whitelisted
+   scalars), and the bounded _history() window already bound this at small
+   scale — nothing to add for a normal-length CLI session.
+   OPT-IN (NOT a default): the same-tool-same-args collapse below. Add it only
+   for a client with long sessions of repeated identical lookups; it is a
+   code-level check (no model), never a mid-session LLM summarization.
+- An old tool output in history is SUPERSEDED when the same tool ran again
+  with the same args (redundant), and STALE when a later mutating action
+  invalidated it (factually wrong — worse than wasteful). Headroom's
+  telemetry on coding agents: ~75% of read bytes were one or the other.
+- This engine's shape already embodies the fix at small scale: last_action
+  holds only the most recent action, session_facts holds whitelisted scalars,
+  and the history window is bounded. If a client's domain has long sessions
+  with repeated identical lookups, collapse the earlier occurrence to a
+  one-line marker deterministically (same-tool-same-args is a code-level
+  check, no model) — never summarize old turns with an LLM mid-session.
+
+6. WHAT NOT TO BUILD (anti-patterns for a CLI agent)
+- No compression proxy, no ML-based prose compressor, no embedding-scored
+  relevance for tool results — all latency and dependency weight the tiers
+  were designed to avoid. The INTENT/ENRICH tiers are already the cheap path;
+  compaction must stay zero-model or it cannibalizes its own savings.
+- Do not crush what the prompt never sees (session_facts scalars, config).
+- Do not let compaction touch guardrails: a crushed result still goes through
+  the execution validator and the exit filter unchanged in authority.

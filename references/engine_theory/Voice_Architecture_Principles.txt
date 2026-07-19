@@ -1,0 +1,55 @@
+Voice Architecture Principles: Latency & Execution Constraints
+Real-time voice agents (unlike asynchronous text agents) are strictly latency-bound.
+The architecture must prioritize Time-To-First-Byte (TTFB) above all else to maintain natural
+conversational pacing. The following principles are immutable for any voice agent built on this
+platform. For numeric latency targets and the per-turn tier budget table, see
+Voice_SDR_Reliability.txt rules 1 and 4.
+
+1. Deterministic Fast-Routing (The Tier-0 Gate)
+Never invoke an LLM when a deterministic check suffices.
+The router implements a "Tier-0" gate using regex extractors and heuristic resolvers for
+unambiguous, mid-flow slot answers (explicit yes/no, numeric inputs, standard date formats).
+If the user's input strictly matches the expected pending slot without extraneous context,
+bypass the LLM entirely and route directly to Think/Act.
+Any ambiguity or out-of-bounds input falls through to the LLM for evaluation.
+Kill switch: FAST_ROUTER_ENABLED. See Same_Turn_Pipeline.txt invariant 23.
+
+2. Zero-Model Memory Compression
+LLM-based rolling summarization is explicitly rejected.
+A model summarizing past turns introduces unacceptable latency overhead and destroys
+prompt-cache economics by mutating the context window's prefix on every turn.
+Memory and context compression must be deterministic and model-free: a strict bounded history
+window (last N messages) plus programmatic crush of oversized tool results at point of entry
+(compaction.py), before they are appended to state. This applies equally to multi-agent
+handoffs: pass structured state fields (session_facts, last_action, a scoped
+recent_messages slice) — never an LLM-generated prose summary.
+
+3. Model-Agnostic Client Infrastructure (Provider-Agnostic, STRICT)
+The LLM client is built against the standard OpenAI-compatible /v1 interface only.
+Provider swap = environment variable edit, zero code change:
+  - OPENAI_BASE_URL + OPENAI_API_KEY  — endpoint
+  - AGENT_INTENT_MODEL                — INTENT tier (cheap/fast classifier)
+  - AGENT_ANSWER_MODEL                — ANSWER tier (reasoning, Think→Act)
+  - AGENT_ENRICH_MODEL                — ENRICH tier (SLM verdict phrasing)
+  (all fall back to OPENAI_MODEL when unset)
+Model names are env-var defaults in config.py / .env.example, never literals in logic.
+Blank key → MOCK mode (what selftest runs). Never import a provider-specific SDK or
+hardcode a provider base URL in .py code. See SKILL.md Rules of Engagement for the
+full STRICT enforcement contract.
+
+4. Structured-Output ENRICH Tier (EnrichVerdict — no free-text SLM)
+The ENRICH tier never emits free prose. It produces a structured EnrichVerdict
+(tone enum + verbatim grounded facts list + grounded bool); a deterministic templater
+(nodes._phrase_from_verdict + config.ENRICH_TEMPLATES) assembles the spoken reply and
+independently verifies each fact is a substring of the tool result.
+A model that never emits free prose cannot overreach or hallucinate a follow-up.
+See Voice_Agent_Anti_Patterns.txt anti-pattern #9 for the failure this prevents.
+Gated by enrich_preflight in selftest.
+
+5. MCP as Zero-Code Tool Swap
+MCP (Model Context Protocol) swaps the tool transport exactly the way env vars swap the
+LLM provider — zero architecture change. tools.register_mcp_tools(session) wraps every
+MCP-exposed tool into TOOL_REGISTRY with the same contract (kwargs in → structured dict
+with "summary" out). The graph cannot distinguish a local tool from an MCP tool.
+Flow slots + validators still shape arguments before the payload is built; the execution
+validator still inspects every result. See System_of_Action_Tools.txt §7.

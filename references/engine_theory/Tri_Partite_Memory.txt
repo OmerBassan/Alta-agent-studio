@@ -1,0 +1,106 @@
+# Tri-Partite Memory: Episodic / Semantic / Procedural
+
+A robust agent cannot rely on a single flat "context window." State amnesia
+(the GreenCart checkout bug: the cart payload vanished the moment the
+conversation changed phase) is solved by splitting memory into three distinct,
+specialized layers. The v3 boilerplate implements all three — two of them were
+already present in v2 under different names; this document makes the mapping
+explicit so design conversations can reason about memory deliberately.
+
+DECISION TREE — assign every piece of client knowledge in Step 1 by running
+this top-down; the FIRST match wins. This is a deterministic classification,
+not a judgement call — execute it mechanically, don't re-derive it from the
+prose below.
+
+  1. Is it a transactional HARD IDENTIFIER the agent produces and must not
+     re-ask across turns/restarts (order id, ticket #, MAC, confirmation)?
+        -> EPISODIC: declare it in the producing Flow's `cache_keys`
+           (session_facts). It is ALSO the plan-step variable bus.
+  2. Is it small, stable, ground-truth the agent states verbatim (hours,
+     addresses, the 3 branch names, a returns window)?
+        -> SEMANTIC / static: `config.FACTS` (prompt-injected, bounded).
+  3. Is it knowledge too large or too dynamic for the prompt — a catalog, a
+     policy set, a doc corpus the agent must look things up in?
+        -> SEMANTIC / retrieval: `RETRIEVAL_INTENTS` + `DOCS`/`RETRIEVER`
+           (the Agentic-RAG subgraph). Settle the corpus-prep contract now
+           (Agentic_RAG_Explained.txt rule 10).
+  4. Is it a rule/procedure for HOW to act (which tool, which slots, when to
+     confirm, bounds, grounding, blocked phrasings)?
+        -> PROCEDURAL: `config.py` (FLOWS / validators / ENTITY_RESOLVERS /
+           NEXT_STEP_HINTS / BLOCKED_PATTERNS).
+  5. Is it "what happened just now" the next turn must ground against
+     ("how do you know?", "cash", "thanks")?
+        -> EPISODIC: `last_action` (engine-written, no config).
+  6. Does the client want durable memory ACROSS sessions ("learn from past
+     mistakes")? -> that is OUT of the tri-partite split by design; go to
+     `Cross_Session_Memory.txt` (opt-in, spec-only). Never invent a fourth
+     layer inline.
+
+If a single piece of knowledge seems to fit two layers, you have split it
+wrong: hard keys are episodic, their MEANING is semantic, the RULE that uses
+them is procedural. One fact, one layer.
+
+1. EPISODIC MEMORY — "What happened" (short-term session context)
+- What it is: interaction history, in-progress tasks, the last completed action.
+- Where it lives in the boilerplate:
+  * `recent_messages` (LangGraph add_messages) — the rolling transcript window.
+  * The CHECKPOINTER (MemorySaver per session; sqlite via `cli.py --session`
+    for cross-restart persistence) — carries `pending_intent`/`pending_slots`
+    (multi-turn slot-fill), `pending_confirmation` (open yes/no gates), and an
+    open HITL interrupt.
+  * `last_action` — the post-action grounding record ({tool, summary, result})
+    that lets "how do you know?" and short follow-ups ("cash", "thanks") be
+    read against the completed action instead of spawning a fresh flow.
+  * `session_facts{}` — the Functional Session Cache (SHIPPED in the engine;
+    see Same_Turn_Pipeline.txt): whitelisted transactional hard keys (ticket
+    id, MAC, account #) declared per-flow via `Flow.cache_keys`, merged by
+    tool_exec, that outlive last_action within the session. Hard keys only,
+    no model calls, no decay — episodic memory here is transactional
+    caching, never a durable user profile. Doubles as the variable-mapping
+    bus between Plan-and-Execute steps (invariant 22).
+- Design rule: the LLM is DECOUPLED from mutable state tracking. Slots, carts,
+  and pending work live in the typed state ledger the checkpointer persists —
+  never re-derived from prose each turn. That is what makes the ledger
+  effectively immutable from the model's point of view: nodes propose updates,
+  the graph commits them.
+
+2. SEMANTIC MEMORY — "What is true" (domain knowledge)
+- What it is: catalogs, policies, facts — knowledge too large or too dynamic
+  to stuff into a prompt.
+- Where it lives in the boilerplate:
+  * Small, stable ground truth: `config.FACTS` (prompt-injected, bounded).
+  * Everything else: the Agentic-RAG subgraph (`rag_subgraph.py`) over
+    `config.DOCS` via `config.RETRIEVER` — keyword mock by default, a LOCAL
+    vector index (FAISS, SQLite-vss — in-process, no server, no credentials)
+    in production by swapping ONE function body; a hosted vector DB only when
+    the corpus or team genuinely demands it (Agentic_RAG_Explained.txt rule 7).
+    Knowledge intents opt in via `config.RETRIEVAL_INTENTS`.
+- Design rule: never inject a knowledge base into a system prompt (prompt
+  bloat), and never let a model answer a policy question retrieval couldn't
+  support — empty retrieval yields an honest "I don't have that information."
+
+3. PROCEDURAL MEMORY — "How to do it" (playbooks and guardrails)
+- What it is: standard operating procedures, decision rules, and constraints
+  the agent retrieves per intent instead of carrying in one giant prompt.
+- Where it lives in the boilerplate — the whole of `config.py` IS the
+  procedural store, queried by intent at runtime:
+  * `FLOWS` — the SOP per tool-backed intent: which tool, which slots, how to
+    ask for each (`slot_prompts`), when to confirm (`confirm`), when a human
+    must approve (`hitl`), whether the SLM phrases the result (`enrich`).
+  * `ENTITY_RESOLVERS` + `Flow.validators` — the grounding and bounds rules
+    that gate every value before it reaches a tool.
+  * `NEXT_STEP_HINTS` — the one sanctioned follow-up per tool.
+  * `BLOCKED_PATTERNS`, `INTENT_CATEGORIES`, breaker constants — the
+    guardrail and routing procedure.
+- Design rule: the engine (nodes/graph) is generic; procedure is DATA. A node
+  looks up the SOP for the current intent — it does not have procedures baked
+  into prompt prose. For larger playbooks, the same pattern extends naturally:
+  store SOP documents in the semantic layer and retrieve them per intent.
+
+WHY THE SPLIT MATTERS (the failure it prevents)
+Every GreenCart-class failure is a memory-layer confusion: the cart lived in
+prose instead of the episodic ledger (amnesia); stock answers came from the
+model instead of semantic memory (hallucinated "out of stock"); the slot-fill
+procedure lived in one rigid prompt instead of a queryable SOP (tunnel
+vision). Assign every piece of agent knowledge to exactly one layer during
+Step 1 discovery, and the architecture enforces the rest.

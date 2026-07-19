@@ -1,0 +1,71 @@
+# Guardrails Architecture: The Layered Defense (3 layers + Layer 2.5)
+
+To ensure safe and reliable voice agents, guardrails must be decoupled into distinct layers.
+Do NOT combine these into a single monolithic safety node. In particular, VALIDATION IS TWO
+SEPARATE STAGES: an Execution Validator right after the tool (Layer 2.5) and a Response
+Validator at the exit (Layer 3) — one exit filter doing both jobs is the anti-pattern the
+2026-07 architectural report §3 calls out.
+
+1. Layer 1: Input Moderation (Pre-Brain)
+- Function: Sanitizes the user's raw input before it reaches the core business logic.
+- Responsibility: Blocks explicit prompt injections, jailbreak attempts, or highly abusive
+  language. Also de-duplicates corrected-transcript re-sends from the transport (STT may
+  revise its transcript and re-fire the turn; the runtime's dedupe fingerprint guard makes
+  the double-fire idempotent — any new ingress path must keep that guard).
+- Implementation: Handled by the voice runtime/adapter (`vapi_adapter.py`) BEFORE invoking
+  the LangGraph brain. The graph assumes the input has been de-duped and is generally safe
+  to process.
+
+2. Layer 2: Reasoning Control (Within Business Nodes)
+- Function: Keeps the AI's logic on track during the specific conversational turn.
+- Responsibility: Ensures the agent adheres to strict business rules (e.g., "Never invent a
+  price," "Only propose actions the flow's tool can execute").
+- Implementation: Embedded directly within the SYSTEM micro-prompts of each specific business
+  node. It is context-specific and voice-appropriate (≤20 words, no markdown, one question
+  per turn).
+
+2.5 Layer 2.5: Execution Validation (Post-Tool, Pre-Phrasing)
+- Function: Inspects the RAW structured tool result immediately after tool_exec, BEFORE any
+  model phrases it.
+- Responsibility: Catches API failures, error flags, and malformed/summary-less payloads and
+  routes them to a dedicated failure node (graceful reply, session alive, flow re-pended for
+  retry). Also enforces the per-turn tool-call circuit breaker verdict and decides the
+  enrichment route:
+    * healthy result + enrich=True  → ENRICH tier (structured EnrichVerdict call)
+    * healthy result + enrich=False → deterministic bypass straight to Layer 3 (sub-600ms)
+    * failure                       → failure node → Layer 3
+- ENRICH tier constraint: the ENRICH tier does NOT emit free-text prose. It produces a
+  structured EnrichVerdict (tone enum + verbatim grounded facts + grounded bool);
+  nodes._phrase_from_verdict + config.ENRICH_TEMPLATES assembles the reply and independently
+  verifies each fact is a substring of the tool result. This structural constraint prevents
+  Enrichment Overreach without relying on a regex scrubber. See Voice_Agent_Anti_Patterns.txt
+  anti-pattern #9 and Voice_Architecture_Principles.txt principle 4.
+- Implementation: A deterministic node (`execution_validator_node`) between `tool_exec` and
+  `enrichment`, with conditional edges. No model involved.
+- Why decoupled from Layer 3: execution failures need ROUTING decisions (retry paths,
+  degradation); an exit filter can only mask text, never re-route a failed tool.
+
+3. Layer 3: Output Filtering (The Response Validator — only exit to END)
+- Function: The final safety net before the agent's response reaches the TTS pipeline.
+- Responsibility: Strips ANSI/markdown that TTS would mispronounce (*, #, bullet glyphs,
+  URLs), applies config.BLOCKED_PATTERNS regex rewrites (the domain's "never emit X" net),
+  and runs the invariant-25 stall-detector gate (fingerprint consecutive identical replies;
+  swap at STALL_THRESHOLD for STALL_TEXT → escalation).
+- Implementation: `validator_node`. Takes `draft_response`, sanitizes into `final_response`,
+  routes ONLY to END. NEVER routes back to a business node.
+- WHAT SHIPS vs. WHAT DOESN'T: the shipped exit filter does (a) ANSI/markdown stripping,
+  (b) BLOCKED_PATTERNS rewrites, (c) stall-detector gate. It does NOT currently diff
+  generated numbers/facts against the cold payload token-by-token. BLOCKED_PATTERNS IS the
+  shipped number-safety mechanism; design each agent's patterns accordingly.
+- OPTIONAL HARDENING (not a default): where a cold structured payload exists and a domain
+  needs it, the architect MAY add a payload-diff step that falls back to a deterministic,
+  payload-derived sentence on mismatch — treat it as an explicit per-client addition.
+
+3b. Pre-TTS Sanitizer (Platform Backstop — NOT a license)
+- Function: `platform/sanitizer.py` is a last-resort buffer between the graph's output and
+  the Vapi TTS pipeline. It catches any remaining markdown or pronunciation hazards that
+  slipped through Layer 3.
+- Critical rule: generated text that requires the sanitizer to be correctable is a DEFECT in
+  the generated agent, not a feature of the platform. The sanitizer is a backstop, not a
+  license to generate lazy output. Every user-audible string must be voice-safe before it
+  leaves the graph (see SKILL.md Step 4 voice style pass).

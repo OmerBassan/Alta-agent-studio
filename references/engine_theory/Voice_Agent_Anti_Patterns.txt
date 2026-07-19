@@ -1,0 +1,129 @@
+# Voice Agent Architecture: Anti-Patterns & Pitfalls
+
+ENFORCEMENT STATUS (read this first — most of these are ALREADY GATED, not a
+manual checklist). Legend: [ARCH] structurally impossible in the boilerplate
+(the graph/schema shape prevents it); [GATE] caught by an engine circuit
+breaker or a selftest preflight if a customization introduces it; [DESIGN]
+architect discipline — guided by an invariant + prose, not auto-gated, so this
+is where attention actually belongs.
+
+   1  God Node .............. [ARCH]  conditional edges, no central hub
+   2  Monolith .............. [ARCH]  1:1 node-per-stage
+   3  Brain/Shell Leakage ... [ARCH]  Shell Contract (cli.py owns pipes)
+   4  Validator-as-Router ... [ARCH+GATE] validator routes only to END
+   5  Uncounted Loops ....... [GATE]  MAX_TOOL_CALLS_PER_TURN, RAG_MAX_ITERATIONS,
+                                       stall detector (inv 25) — all in selftest
+   6  IVR Trap .............. [ARCH]  same-turn intent-in-node (inv 1)
+   7  Pydantic Sprawl ....... [ARCH]  5 fixed schemas
+   8  Heavy-Model Default ... [GATE]  runtime startup tier-map + warning
+   9  Enrichment Overreach .. [GATE]  inv 13; selftest post-action turn
+  10  Post-Action Amnesia ... [GATE]  inv 11 last_action; selftest "how do you know?"
+  11  Slot Tunnel Vision .... [GATE]  inv 12; selftest detour turn
+  12  Unit-Blind Extraction . [GATE]  inv 14 validators; HOOK_CHECKS preflight
+  13  Single-Model Tiering .. [GATE]  cli.py collapse warning
+  14  Context-Blind Fallback  [DESIGN] inv 6 — mock heuristics must read pending state
+  15  Create-Only Trap ...... [DESIGN] Step-1 companion-flow inventory
+  16  Lossy Slot Collapse ... [DESIGN] resolve to machine value, not display enum
+  17  Transaction Clobber ... [RESOLVED] shipped as inv 24 (depth-1 archive); selftest
+  18  Unbounded Intent Stack  [REJECTED] the anti-pattern IS the design boundary of inv 24
+  19  Vector-DB Plan RAG Core [REJECTED] deterministic INTENT tier already routes; vector store is opt-in scale-out only
+
+So on a re-read: [ARCH]/[GATE]/[RESOLVED]/[REJECTED] rows need no active
+vigilance — the engine holds them. Spend design effort on the three [DESIGN]
+rows (14/15/16), which depend on judgement the boilerplate cannot make for you.
+
+1. The "God Node" (Central Hub)
+- Definition: Using a single node (like a Validator or Dispatcher) as a traffic circle where all arrows enter and exit.
+- Why it's bad: Breaks LangGraph modularity, makes debugging impossible, and creates "spaghetti routing."
+- Correct Pattern: Nodes should route directly to the next logical business stage.
+
+2. The Monolith (Logic Compression)
+- Definition: Cramming multiple task phases (e.g., Plan + Execute + Review) into one Python function using massive if/else blocks.
+- Why it's bad: Prevents granular state control and makes it harder for the LLM to focus on a single micro-task.
+- Correct Pattern: 1:1 mapping between a business stage and a LangGraph node.
+
+3. Backend/Brain Leakage
+- Definition: Trying to handle "pipes" (stdout streaming, spinners, process signals, file I/O) inside the Graph logic.
+- Why it's bad: Bloats the graph with non-business nodes and creates visual chaos.
+- Correct Pattern: Delegate infrastructure to the voice runtime/platform process (`runtime.py`, `vapi_adapter.py`). The Graph strictly owns "The Brain" (Logic & Prompts).
+
+4. Validator-as-Router
+- Definition: Using a guardrail/validator node to decide the next business step in the conversation.
+- Why it's bad: High risk of the agent getting stuck in a loop or losing context.
+- Correct Pattern: The Validator is an "Exit Filter" only. It sanitizes text before END/output and never routes to a business node.
+
+5. Uncounted Loops (State Stagnation)
+- Definition: Routing back to the same node (e.g., a Retry/Clarification handler) without incrementing a counter or updating the summary.
+- Why it's bad: Leads to repetitive "broken record" behavior where the agent asks the same question indefinitely, or retries a failing tool call forever.
+- Correct Pattern: Every loop must have a clear exit condition (e.g., retry_count >= 2) leading to a fallback or graceful exit.
+
+6. The IVR Trap (Triage Nodes)
+- Definition: Creating a central `intent_triage` node that evaluates every user input after an action to decide where to go next.
+- Why it's bad: It breaks state continuity. If a user says "use the other file" inside a file-editing branch, a global triage won't understand it.
+- Correct Pattern: Intent classification happens *inside* the conversational node via Structured Output, and routes directly via Conditional Edges.
+
+7. Pydantic Sprawl (Code Bloat)
+- Definition: Creating a unique Pydantic model for every single node's output (e.g., `PlanOutput`, `ReviewOutput`, `FaqOutput`).
+- Why it's bad: Wastes tokens and over-engineers simple text responses.
+- Correct Pattern: Default to a single `StandardAgentOutput(response_text: str)` for all basic nodes. Only create custom structured outputs for nodes extracting or executing specific workflow variables (e.g., `ToolCallOutput` for a file write).
+
+8. The Heavy-Model Default (No Tiering)
+- Definition: Routing every node — including trivial rephrasing, summarization, or intent classification — through one large, expensive model.
+- Why it's bad: Burns latency and cost on tasks that a cheap SLM or a local embedding classifier solves just as well.
+- Correct Pattern: Reserve the heavy model for reasoning/decision nodes. Use an SLM for expansion/rephrasing and a local embedding model for tier-0 routing. Tier map and per-turn budget table: `Voice_SDR_Reliability.txt` rule 4.
+
+9. Enrichment Overreach
+- Definition: Letting the ENRICH tier (whose only job is phrasing a tool result) ask the user questions or offer steps/services — payment, delivery, scheduling — that exist nowhere in the agent's action space, typically invited by a generic "offer further help" line in its prompt.
+- Why it's bad: The invented follow-up sets up a question no flow can answer; the user's reply gets misrouted into an unrelated flow (observed live: post-checkout "how would you like to pay?" → "cash" → "your bag is empty").
+- Correct Pattern: The enrichment prompt forbids questions and any option not in the tool's JSON. The only allowed follow-up is a deterministic per-tool sentence from `config.NEXT_STEP_HINTS`, appended by the node.
+- Hardening (2026-07-12): the SLM no longer writes the sentence AT ALL. ENRICH is now a STRUCTURED-VERDICT call (schemas.EnrichVerdict: tone enum + verbatim grounded facts + a grounded bool); a deterministic templater (nodes._phrase_from_verdict + config.ENRICH_TEMPLATES) assembles the reply and independently re-verifies each fact is a substring of the tool result. A model that never emits prose cannot overreach — this replaces the old free-text call and the post-hoc `_scrub_ungrounded_questions` regex (constraint over cleanup). Gated by `enrich_preflight` in selftest. The SLM's only safe enrichment mode is framed structured output; free rephrasing is the anti-pattern.
+
+10. Post-Action Amnesia
+- Definition: Discarding all record of a completed action, so the very next turn classifies short replies ("cash", "thanks", "how do you know?") with zero knowledge that a checkout/cancellation just happened.
+- Why it's bad: Follow-ups to a successful action spawn fresh flows that contradict it — the agent reports an empty cart seconds after placing the order from that cart.
+- Correct Pattern: Every tool execution writes `last_action` {tool, summary, result} to persistent state (the FULL structured result, so grounding can quote any field — richer than a pre-selected fact subset); the intent prompt gets a LAST ACTION line, and knowledge/chitchat ground explanations on it.
+
+11. Slot Tunnel Vision
+- Definition: A Think step whose only moves are "act" or "ask for the first missing slot", combined with detour nodes that clear pending state.
+- Why it's bad: A user question embedded mid-flow is ignored, and any knowledge/chitchat detour silently kills the flow — the user must restart from scratch.
+- Correct Pattern: Think may answer an embedded question (from facts, conversation, or the injected date/time) before re-asking for the slot; detour nodes preserve `pending_*` and append a deterministic resume line.
+
+12. Unit-Blind Extraction
+- Definition: Mapping a user quantity straight into a slot with no unit normalization, bounds check, or acknowledgment ("1000 kgs" → packages=1000).
+- Why it's bad: The agent silently acts on an absurd or misread quantity — worst on destructive flows like checkout.
+- Correct Pattern: Quantity/measure slots get `Flow.validators` hooks (bounds + unit normalization); a failed validator forces a clarification question, never an Act. Destructive flows additionally set `confirm=True` for a yes/no gate before execution.
+
+13. Single-Model Tiering
+- Definition: Pointing all three tiers (INTENT / ANSWER / ENRICH) at one small model — usually by shipping a .env whose per-tier overrides are commented out.
+- Why it's bad: The ANSWER tier's reasoning (Think→Act, grounded answers) degrades exactly where correctness matters; this configuration reproduced failures #7-#10 in `Same_Turn_Pipeline.txt` live.
+- Correct Pattern: Ship a real tier split by default (small INTENT, mid/large ANSWER, small ENRICH). A small ANSWER model requires an explicit user waiver; the CLI should print the resolved tier map and warn when all tiers collapse to one model.
+
+14. Context-Blind Fallback (Mock Amnesia)
+- Definition: A deterministic mock/heuristic fallback that only inspects the raw current-turn message, ignoring pending_intent/pending_slots/recent_messages already available in state.
+- Why it's bad: State isn't actually wiped when a live model call fails, but a fallback that can't see conversation history behaves as if it were — the user has to repeat information they already gave, reading as a session reset even though nothing reset.
+- Correct Pattern: Every heuristic fallback function must read the same pending-state fields the live path would use, not just the current message string (`Same_Turn_Pipeline.txt` failure #12).
+
+15. Create-Only Trap (No CRUD Flows)
+- Definition: A Flow catalog that can create entities (bookings, tickets, orders) but has no companion Flow to modify or cancel one already created.
+- Why it's bad: A follow-up like "move it an hour later" or "cancel that" re-enters the Create flow from scratch, producing duplicate/contradictory side effects (e.g. double-booking the same ticket).
+- Correct Pattern: For every entity-creating Flow the client needs to later change, author a companion Flow (reschedule/cancel) that resolves the target entity id from `last_action` instead of re-running Create. See `Same_Turn_Pipeline.txt`'s "Entity-Referencing Companion Flows" (failure #13).
+
+16. Lossy Slot Collapse
+- Definition: A slot resolver that maps a precise user value straight into a coarse display enum and discards the precise value (e.g. "9am" → `morning`).
+- Why it's bad: Any later request that needs the precise value ("an hour later than that") has nothing to compute against.
+- Correct Pattern: When a slot might need arithmetic or precision follow-up, resolve it into a machine-usable value (ISO datetime, numeric); derive the coarse enum from that value for prompts if still needed, rather than letting the enum replace it (`Same_Turn_Pipeline.txt` failure #14).
+
+17. Transaction Clobber
+- Definition: Letting a second tool flow that interrupts a pending one overwrite `pending_intent`/`pending_slots` — the interrupted transaction's identity and collected slots die the moment the new flow reaches a ready payload (pre-2026-07-10 engine behavior).
+- Why it's bad: The user who paused a booking to check an order must restart the booking from scratch, re-supplying everything already given; and the old flow's slots may silently leak into the new flow's slot dict (cross-flow contamination).
+- Correct Pattern: The depth-1 interrupt archive (`Same_Turn_Pipeline.txt` invariant 24): park the pending flow in `paused_flow` {intent, slots, offered}, isolate the new flow's slots, restore deterministically on re-entry by name or a matching slot answer, and offer resumption exactly once after the interrupting flow completes.
+
+18. Unbounded Intent Stack
+- Definition: Modeling flow interruptions as a pushdown stack of arbitrary depth with blind pop-and-resume — when the interrupting flow ends, the previous transaction is automatically re-pended and its question re-asked.
+- Why it's bad: It resurrects zombie flows the user has moved past (a failed, re-pended flow haunts every later completion); every pending-clear site plus the plan walk must now respect a second machinery, multiplying the plan × stack × confirmation interaction surface; and auto-resume assumes the user still wants the old flow after expressing a competing goal — a wrong guess is broken-record behavior (#5). It also violates the lean-state contract (`Same_Turn_Pipeline.txt`: "keep it lean").
+- Correct Pattern: Bound the archive to depth 1 (newest interruption wins) and never resume blindly — restore only on a deterministic match (re-entry by name, or a slot answer that passes the invariant-23 gate against the archived flow) plus a ONE-SHOT offer line after the interrupting flow completes (invariant 24).
+
+19. Vector-DB Plan RAG as the Core Router  [REJECTED 2026-07-12]
+- Definition: Replacing the deterministic INTENT tier with embedding similarity over a vector store (Qdrant/Pinecone/pgvector) as the PRIMARY skill-selection path — retrieve a pre-built plan ("Skill") by cosine similarity on every turn, and demote the LLM to a pure slot-filler. Proposed by a third-party "Dynamic Skill Library / Plan RAG" report (report-1-12072026, since discarded).
+- Why it's bad: The boilerplate ALREADY is a skill library under different names — the `Flow` dataclass (config.py) IS the report's (Index=INTENT_DESCRIPTIONS/KEYWORDS, Blueprint=Flow tool+slots, Schema=slots/validators), the Think node already extracts entities instead of free-planning, `cache_keys`→`session_facts` already is the variable-mapping bus, and `planner_node` already handles novel compound tasks. The only NET-NEW idea is vector retrieval, which buys nothing here and adds (a) a hard embedding-store dependency + network hop on EVERY turn, and (b) semantic collisions ("cancel meeting" vs "reschedule meeting" score alike but need different Flows). Tellingly, the report's own fix for the collision is "add a deterministic classifier before the vector search" — i.e. re-add the INTENT tier we already have, in front of a new dependency. This is the dependency-not-headroom trap (cf. context compression): fine as a documented scale-out, never a core requirement.
+- Correct Pattern: Keep the deterministic INTENT tier as the router (fast, zero-infra, collision-free by construction). Treat vector plan-retrieval as an OPTIONAL reference pattern for clients with 100+ skills only, always fronted by the deterministic classifier — never a mandatory part of the boilerplate. The one salvageable sub-idea (design-TIME crystallization of a repeated compound plan into a first-class Flow) is tracked separately; runtime auto-persist of agent-authored plans is itself rejected (it revives anti-pattern #18's zombie-flow failure mode).

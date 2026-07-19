@@ -1,0 +1,152 @@
+VOICE SDR RELIABILITY — THE PRODUCTION FIELD GUIDE
+====================================================
+Distilled from industry evidence on production voice-SDR systems (Vapi, Sierra,
+Cresta, SignalWire engineering posts; Sequoia/BVP/a16z analyses; "Real-Time AI
+Voice Agents in SDR", 2026). Scope: what binds at OUR layer — the LangGraph
+brain and the SSE adapter behind a managed voice transport (Vapi/Retell). The
+transport owns audio (STT/TTS streaming, VAD, endpointing, echo cancellation);
+we own everything these rules cover. Read alongside
+Voice_Architecture_Principles.txt (the three immutable principles).
+
+RULE 1 — THE LATENCY LAW (the numbers everything else serves)
+--------------------------------------------------------------
+Pauses ≥300ms feel unnatural; beyond ~1.5s the illusion of conversation dies;
+industry consensus: "if it's not under 1.5 seconds, it's not real-time."
+The metric that matters is USER-PERCEIVED round trip: last word spoken by the
+user -> first word heard from the agent. Time-to-first-word under ~500ms is
+what makes an agent feel "alive". Nobody hits that with raw LLM reasoning
+(2-5s); you hit it by MASKING (Rule 2) and STREAMING (Rule 3). Providers
+quoting token-generation speed alone are measuring the wrong thing — so are
+we if we ever benchmark the graph without the transport in the loop. Every
+100ms of unnecessary padding is 100ms of perceived slowness; attack latency
+at every stage, never just the model.
+
+RULE 2 — DUAL-TRACK RESPONSES: SYSTEM 1 COVERS FOR SYSTEM 2
+--------------------------------------------------------------
+Real-time agents need two response tracks (Sequoia's framing):
+  System 1 — instant, instinctive utterances: acknowledgments, fillers,
+             back-channel. Deployable in ~50ms because they are CANNED.
+  System 2 — the deliberate reply: the LangGraph pass (INTENT -> ANSWER ->
+             tools -> ENRICH). Takes seconds.
+The pattern: System 1 speaks the moment the turn arrives; System 2 computes
+behind it; the real answer arrives as a seamless continuation. Our mapping:
+  - FILLER_THINKING (config) — the pre-think token, first SSE chunk out
+    before the graph runs. Covers reasoning TTFT on tool-less turns.
+  - FILLERS_BY_TOOL / FILLER_DEFAULT / FILLER_PLAN_CONTINUE — cover tool
+    latency mid-turn, tool-aware ("Let me pull up that order…" beats "One
+    moment…" because the filler itself carries conversational value).
+Iron constraints: System 1 text is DESIGN-TIME and canned — never a runtime
+model call (tokens + latency on the exact path that exists to hide latency,
+plus hallucination risk in a commitment-free channel). Every token must be
+safe ahead of ANY reply type (never "Sure!" — the reply may be a refusal).
+Managed transports cache TTS for repeated phrases: a STABLE, small filler
+bank gets faster over the life of a deployment; a paraphrasing bank defeats
+the cache. Same law for the OPENER — a fixed opener is a pre-cached opener.
+
+RULE 3 — STREAM EVERYTHING, BUFFER NOTHING
+--------------------------------------------------------------
+Batch pipelines (wait for full transcript -> full reply -> full audio) create
+4+ seconds of dead air "fundamentally designed to fail" at dialogue. The
+principle: THE FIRST BYTE OF AUDIO MUST LEAVE BEFORE THE LAST WORD OF THE
+REPLY IS GENERATED. At our layer that means: the final reply crosses the SSE
+seam sentence-by-sentence (TTS starts on sentence one while later sentences
+are still in flight); fillers cross the seam the instant they're emitted,
+never batched with the reply; and nothing upstream holds text it could
+release (the sanitizer buffers only to the next word boundary, never to the
+end of the reply).
+
+RULE 4 — THE PER-TURN TIER BUDGET (lean is a number, not a vibe)
+--------------------------------------------------------------
+The graph is a CYCLICAL ROUTER-BASED STATE MACHINE: one router hub
+(intent_detect, deterministic gates first), branches that all funnel through
+one exit validator, and re-entry from START each turn over checkpointed state
+— the conversation is the cycle; inside a turn the only loops are the two
+sanctioned bounded ones (RAG subgraph, plan-step walk). This shape is what
+makes the latency budget ENFORCEABLE, because every turn type has a fixed,
+countable path through the tiers:
+
+  turn type                          INTENT  ANSWER  ENRICH   notes
+  confirmation yes -> Act              0       0      0-1     gate is deterministic; 0 with enrich bypass
+  confirmation no                      0       0       0      deterministic decline
+  fast-routed slot answer              0       1      0-1     tier-0 gate skips INTENT
+  system (help/restart/handoff)       ≤1       0       0      system node is zero-model
+  chitchat / knowledge                 1       1       0
+  retrieval (RAG)                      1       1       0      +1 ANSWER rewrite ONLY on a miss
+  tool flow turn                       1       1      0-1     0 with Flow.enrich=False
+  compound (planner, once per plan)    1       1+1/step 0-1/step  doubly bounded
+
+A change that adds a model call to any row is a latency regression by
+definition and needs the same justification as an engine edit. When choosing
+tier models, pick for time-to-first-byte first (Voice_Architecture_Principles);
+escalate ANSWER only on flight-test evidence — the RAG corrective rewrite
+already gives a stronger ANSWER model exactly on the failure path for free.
+
+RULE 5 — BARGE-IN IS THE TRANSPORT'S JOB; SURVIVING IT IS OURS
+--------------------------------------------------------------
+The transport detects user speech mid-reply, cancels TTS, and clears audio
+buffers (the "barge-in = cancel" pattern). The brain never sees the cancel —
+it sees the AFTERMATH, and must be shaped for it:
+  - Corrected/duplicate transcripts: transports re-send a turn when STT
+    revises its transcript. The runtime's dedupe fingerprint guard makes the
+    double-fire idempotent — any new ingress path must keep that guard.
+  - Assume partial hearing: after an interruption the user may have heard
+    half the previous reply. Short single-question turns (≤20 words, one
+    question) mean an interruption costs one clause, not a paragraph; the
+    checkpointed pending state means the machine re-anchors from where the
+    CONVERSATION is, not from what was scripted. Never re-recite a truncated
+    reply; answer the interjection and resume via the pending-state line.
+  - An interrupting NEW request mid-flow is the depth-1 archive's job
+    (paused_flow), never a reason to widen state.
+60% of callers abandon systems they can't interrupt — a prospect saying
+"actually, I'm already a customer" mid-pitch must land as a routed turn, not
+be talked over.
+
+RULE 6 — THE TRANSCRIPT IS UNTRUSTED INPUT
+--------------------------------------------------------------
+STT mishears: names, emails, numbers, dates — exactly the fields an SDR
+exists to capture. The brain's guards are structural, not optional:
+  - ENTITY_RESOLVERS ground raw transcript text against real catalogs;
+    slot validators bound quantities — a mishear becomes a re-ask, never a
+    silent wrong Act.
+  - READ BACK before you WRITE: any captured contact/booking datum that
+    feeds a CRM/calendar write gets confirmed aloud in the playbook
+    ("That's dana at acme dot com — right?"). A confirm gate on the write
+    flow is the mechanism; the read-back phrasing is the playbook's job.
+  - Low confidence -> re-ask in different words; never guess and never
+    fabricate a plausible value (that is how wrong records enter a CRM).
+
+RULE 7 — THE WRITE IS THE PRODUCT (system of action)
+--------------------------------------------------------------
+An SDR agent's value is the meeting booked and the lead logged — not the
+chat. "The AI could reason correctly, but if the CRM write fails the value
+is lost." Binding rules for tool bodies that write to systems of record:
+  - Idempotent by design: keyed on a natural/request id so a retry can never
+    double-book a meeting or double-create a lead.
+  - Typed failure, spoken fallback: a failed write returns a typed error the
+    execution validator routes to the graceful-failure path — the agent SAYS
+    what it will do ("I'll make sure this gets logged — you'll get the
+    invite by email"), and the failure is queued/logged for retry or human
+    follow-up. Silently dropping a lead is the worst failure this system
+    has; it costs real revenue and is invisible for days.
+  - Log every integration attempt and its result (observability pays here
+    first). Rate limits and outages are WHEN, not IF.
+
+RULE 8 — FAIL-SAFE OVER DEAD AIR, ALWAYS
+--------------------------------------------------------------
+On a phone, an unhandled exception IS dead air, and dead air is a hangup.
+Every failure path must terminate in SPEECH: the runtime's queue sentinel +
+wall-clock ceiling + spoken apology is the pattern — a crashed graph, a hung
+LLM, a timed-out tool all end with the agent saying something and the call
+staying alive. "The most sophisticated AI means nothing if the call drops."
+Never add an await on the turn path without asking what the caller hears if
+it never returns.
+
+RULE 9 — YOU CAN'T OPTIMIZE WHAT YOU CAN'T SEE
+--------------------------------------------------------------
+Instrument per-stage timing on real calls (turn arrival -> first SSE byte,
+graph wall-clock, per-tier model time, tool time). Lab tests pass every
+time; real users break agents with accents, noise, interruptions, and
+half-duplex phone audio — which is why the flight test (a real call at the
+end of every working half-day) is the verification gate no unit test
+replaces. Test the failure modes deliberately: kill the LLM key, time out a
+tool, interrupt mid-pitch — the agent must degrade to speech, not silence.

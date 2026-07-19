@@ -1,0 +1,112 @@
+# Filler Channel: canned pre-answer acknowledgments, frontend-agnostic
+
+STATUS: SHIPPED, config-driven, on by default. The engine implements this today
+(`filler.py`, the config bank, two emit sites, the Shell drain, `filler_preflight`).
+The architect's design work is NOT a build — it is content: on opt-in, GENERATE
+the per-tool phrase bank from the tool catalog (§6) in the agent's own voice.
+On decline, set `FILLER_ENABLED = False` (the generic dot-spinner stays) and
+record the decision. Sections 1-5 are the rationale and the invariants behind
+the shipped code; skim once, don't re-derive.
+
+The_Shell_Contract.txt makes the Shell the owner of latency-covering output
+("the spinner (fork)"). This document generalizes that single dumb spinner into
+tool-aware, frontend-agnostic acknowledgments that both the text Shell and a
+future voice/SSE frontend consume through one seam.
+
+1. WHAT IT IS — canned acks that cover tool latency
+- The graph runs to completion via `ainvoke`; only `final_response` crosses back
+  to the Shell. A tool call (order lookup, booking) adds real latency mid-turn.
+  A filler is a short phrase — "Let me pull up that order…" — emitted WHILE the
+  tool runs so the user sees/hears the agent working before the answer lands.
+- DESIGN-TIME BANK, ZERO RUNTIME TOKENS: the phrases live in config
+  (`FILLERS_BY_TOOL`, `FILLER_DEFAULT`, `FILLER_PLAN_CONTINUE`), written once by
+  the architect. Runtime is pure dict-lookup + rotate — no model, no tokens, ~0
+  added latency. This is deliberate: an SLM crafting a contextual filler every
+  turn would pay tokens and latency on the hot path for a phrase the user barely
+  registers. Make once, use many.
+
+2. DISPLAY-ONLY — the load-bearing invariant
+- Fillers are SHOWN, never appended to the LangGraph message history / model
+  context. They cost nothing downstream (ENRICH prompt, history, grounding) and
+  never contaminate reasoning — the model must not "see" that it said "one
+  moment" and treat it as a turn. This mirrors the trace/spinner boundary: what
+  covers latency is a Shell concern, not a conversational message.
+- Consequence: fillers never enter AgentState. The channel is a side sink, not a
+  state field — nothing to reset per turn, nothing to serialize.
+
+3. THE SINK CONTRACT — the frontend seam (voice/SSE)
+- `filler.py` holds a `contextvars.ContextVar` whose value is a "sink" — anything
+  with `put_nowait` (concretely an `asyncio.Queue`). The frontend sets the sink
+  before invoking the graph and drains it concurrently; nodes call
+  `filler.emit(event)`, which puts to the current sink or no-ops.
+- A ContextVar, NOT config["configurable"] or AgentState: an asyncio.Queue is not
+  serializable and would break the sqlite `--session` checkpointer if it rode
+  along in either. The ContextVar sidesteps serialization entirely. (Fallback if
+  ContextVar propagation into node tasks ever fails: pass the sink via a
+  non-persisted `config["configurable"]["_filler_sink"]` read through a node's
+  `config` param — verify sqlite resume still works.)
+- Event shape (renderers read ONLY `text`; never branch on `kind`):
+    {"type":"filler", "kind":"tool", "text":"Let me pull up that order…", "tool":"lookup_order"}
+    {"type":"filler", "kind":"plan", "text":"Still working on it…", "step":2, "total":3}
+  `step`/`total` are silent metadata (logging / a voice adapter), never spoken.
+- The text Shell drains the sink and prints each event as its own persistent
+  line before the final reply. A Vapi/Retell SSE adapter sets its OWN queue as
+  the sink and yields each `event["text"]` as a content chunk. Same emit code,
+  different renderer — that is how one mechanism serves text and voice.
+
+3b. TONE RULE — fillers are heard aloud
+- Every phrase (tool banks, default, plan continuations) must read as NATURAL
+  SPOKEN CONVERSATION in the agent's own voice. No step numbers, no status
+  readouts ("Working on step 2 of 3" exposes internal plan mechanics and sounds
+  robotic aloud), no system chatter. Plan continuations are phrases like
+  "Still working on it…", "Almost there…", "Just a moment more…".
+
+4. DEBOUNCE — fast tools stay silent
+- A filler is emitted only if the tool outlasts `FILLER_DELAY_MS` (default 300).
+  In text, a filler before a 50ms tool is noise; in voice, silence rules differ,
+  so a voice adapter sets a low value or 0 (always cover the gap).
+- Mechanics (in `tool_exec_node`): an ASYNC tool is wrapped in
+  `asyncio.wait(timeout=FILLER_DELAY_MS/1000)`; if it hasn't finished, the canned
+  phrase is emitted, then the tool is awaited. A SYNC tool blocks the loop (no
+  timer can race it), so it is covered only when the debounce is disabled
+  (`FILLER_DELAY_MS <= 0` — the voice/selftest forced path). MOCK tools are sync
+  and instant, which is why `filler_preflight` forces delay 0 to exercise the
+  path.
+- Plan continuations are NOT debounced — a compound request's inter-step gap is
+  guaranteed slow. They fire on dispatch of every step AFTER the first (the first
+  step's own tool filler already signals work; the first spoken line must not be
+  a bare "still working" before anything has run).
+- A filler failure must NEVER fail the tool or the turn: `emit` swallows all
+  errors, and the emit lives inside the tool's existing try/except.
+
+5. SHIPPED IMPLEMENTATION (already in the boilerplate — do not rebuild)
+- `filler.py`: `set_sink/reset_sink` (ContextVar), `pick_from(variants, key)`
+  (deterministic rotation), `pick(tool)` (per-tool bank -> FILLER_DEFAULT),
+  `emit(event)` (put-or-no-op, swallow-all), `reset_rotation()` (selftest).
+- `config.py` (after NEXT_STEP_HINTS): `FILLER_ENABLED` (env toggle),
+  `FILLER_DELAY_MS`, `FILLERS_BY_TOOL`, `FILLER_DEFAULT`, `FILLER_PLAN_CONTINUE`.
+- `nodes.py`: emit in `tool_exec_node` (debounced, keyed on the cold payload's
+  tool) and in `plan_step_node` (natural continuation on step idx>=1 dispatch).
+- `cli.py`: `run_turn` branches on `FILLER_ENABLED` — the filler sink + concurrent
+  `_drain_fillers` when on, the legacy `_spinner` when off. A `_STOP` sentinel
+  enqueued after `ainvoke` flushes queued fillers before the answer prints.
+- `selftest.py`: `filler_preflight()` gates bank shape, per-flow-tool
+  exhaustiveness (when enabled), emit + rotation (delay forced to 0), and the
+  FILLER_ENABLED=False kill switch.
+
+6. ARCHITECT'S DESIGN-TIME OBLIGATION (the only per-client work)
+- On opt-in, populate `FILLERS_BY_TOOL` with 3-5 variants for EVERY flow tool,
+  plus a neutral `FILLER_DEFAULT` and natural `FILLER_PLAN_CONTINUE` phrases —
+  all in the agent's conversational tone, worded for the ear (§3b). Exhaustiveness
+  is gated by `filler_preflight`: a flow tool without its own bank is a failure,
+  because the whole ROI is tool-SPECIFIC acks, not the generic fallback.
+- On decline: `FILLER_ENABLED = False`, ship with the dot-spinner, record the
+  decision — do not half-implement (no partial banks, no dead config).
+
+WHY THE SPLIT MATTERS (the failure it prevents)
+Covering latency with a runtime LLM ("let me think of a nice way to say wait")
+puts tokens and a model round-trip on the one path where every millisecond is
+heard as dead air — and risks the filler itself hallucinating a commitment
+("checking your refund status" when no refund tool ran). A design-time canned
+bank makes the ack instant, free, and safe by construction, while the sink seam
+keeps the exact same mechanism working when the agent grows a voice.

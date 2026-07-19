@@ -1,0 +1,19 @@
+# Alta Agent Studio — one venv runs everything: the builder platform (FastAPI + Claude
+# Agent SDK) and the generated voice agents it spawns (LangGraph brains).
+# Versions pinned to the tested working set.
+
+# Builder platform
+fastapi==0.127.0
+uvicorn==0.40.0
+pydantic==2.12.5
+httpx==0.28.1
+python-dotenv==1.2.1
+claude-agent-sdk==0.2.120
+
+# Generated agents (selftest + voice runtime run in this same venv)
+langgraph==1.0.5
+langchain-core==1.2.5
+openai==2.8.1
+
+# Dev / verification (optional)
+pytest==8.3.4

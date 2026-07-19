@@ -1,0 +1,77 @@
+PROVEN ARCHITECTURE — Engine-Encoded, Never Re-Derive
+
+(Proof: NorthwindSDR flight call 2026-07-17, real Vapi + gpt-4o-mini)
+
+SAME-TURN PIPELINE
+- Intent tier: hierarchical classification (what does the lead want?)
+- Answer tier: reasoning + Think→Act (what tool solves it? what filler covers latency?)
+- Enrich tier: SLM phrasing (how do we say the result in ≤20 words, human-like?)
+- Three tiers = three model calls max per turn; each tier has its own model + cache.
+
+LATENCY LAW
+- Dead air on a call = failure. Filler banks (FILLER_BY_TOOL + FILLER_THINKING) must
+  cover EVERY latency source. FILLER_THINKING (sub-second: "Hmm…", "Right.") is safe
+  ahead of ANY reply type.
+- Opener is cached via Vapi firstMessage — zero model calls at pickup (~500ms).
+
+RELIABILITY
+- Read-backs before writes: "That's dana@acme.com — right?" — every captured fact.
+- Write-tools are idempotent; failed writes get logged retries + spoken fallback.
+- Circuit breakers on tool failures; stall/handoff exits wired + tested.
+
+DETERMINISM
+- Mock mode: keyword extractors + resolvers, zero LLM. Selftest runs mock; PASS = safe.
+- Live mode: LLM calls gated by OPENAI_API_KEY + OPENAI_BASE_URL (env, provider-agnostic).
+
+STATE & MEMORY
+- Single typed state schema per graph (LangGraph TypedDict).
+- Cross-turn persistence: only what the checkpointer saves (thread_id → call.id).
+- No cross-session memory; client decides if they want it (corpus sync, CRM lookup, etc.).
+- Session memory defaults OFF (env: MEMORY_ENABLED=0).
+
+VALIDATION & GUARDS
+- Catalog resolvers: synonym/plural/bounds logic from integrations/ recipes.
+- Validators: per-slot; bounds from the catalog entry, never hardcoded.
+- BLOCKED_PATTERNS: client declares unsupported asks; agent declines + handoff.
+
+FILLERS & TONE
+- Filler banks live in config.py, canned at design time (never runtime LLM calls).
+- Tone block in prompts.py: the ONLY prose-generation constraint on ANSWER tier.
+- Generated ANSWER system prompt includes the spoken-style block (≤20 words, contractions, one Q/turn).
+
+WHAT THE BUILDER CONFIGURES (ONLY)
+- config.py: OPENER, KNOWLEDGE_INTENTS, FLOWS, ENTITY_RESOLVERS, FACTS, NEXT_STEP_HINTS,
+  filler banks, BLOCKED_PATTERNS, HANDOFF_TEXT, mock keywords/extractors.
+- tools.py: tool signatures, structured returns, "summary" sentence per tool.
+- prompts.py: tone lines + spoken-style block.
+- selftest.py: SCRIPT (playbook happy path), HOOK_CHECKS (resolver/validator edge cases).
+- corpus (if RAG): docs with aliases, retrieval intents, probes.
+
+WHAT THE BUILDER DOES NOT READ / EDIT
+- Engine files (graph.py, nodes.py, schemas.py, llm_client.py, rag_subgraph.py,
+  compaction.py, filler.py): written once in boilerplate/, copied verbatim per agent.
+  Engine fixes go upstream, never per-agent. Write-blocked.
+- Theory references (Voice_Agent_Anti_Patterns, Agentic_RAG_Explained, etc.):
+  knowledge is compiled into the engine code + skill instructions. Reading theory at
+  design time wastes tokens — the engine already enforces it.
+- Same_Turn_Pipeline.txt, Voice_Architecture_Principles.txt: these are internal derivations,
+  not design-time reads. Only Voice_SDR_Reliability rules 1, 4, 6, 7 apply (latency law,
+  tier budget, read-backs, write-reliability).
+
+PROVIDER AGNOSTIC (STRICT CONTRACT)
+- Zero vendor SDKs imported. Zero provider/base-URL hardcoded in code.
+- ONLY OpenAI-compatible /v1 interface via env (OPENAI_BASE_URL, OPENAI_API_KEY,
+  AGENT_INTENT/ANSWER/ENRICH_MODEL). Blank key = MOCK mode.
+- Swapping providers = .env edit, zero code change. If a design needs a code change
+  to swap providers, the design is wrong.
+
+VAPI WIRING (Proven Trap Fixes)
+- Custom-LLM model cannot carry a secret (PATCH model.secret → 400).
+- A blank/whitespace firstMessage silently wedges TTS queue (the " " trap).
+- firstMessage is installed ONLY when the agent's OPENER is a plain string literal,
+  ≤20 words, and non-blank. Otherwise, the dashboard's firstMessage is left untouched.
+
+SELFTEST GATE
+- Mock mode, deterministic. PASS = the agent can be dialed safely.
+- Cap: max 2 runs per session (builder refuses run 3+). FAIL tail trimmed to 1,200 chars.
+- Never skip: no agent ships without PASS.

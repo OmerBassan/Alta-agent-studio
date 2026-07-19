@@ -1,0 +1,1160 @@
+"""Pipeline nodes: the multi-model chain, all executed within ONE user turn.
+Generic — the domain enters via config.py; do not edit per client.
+
+Roles (each a model tier via llm_client):
+  1. intent_detect  (INTENT) — hierarchical classify (category -> intent) +
+                               extract slots (+ carry a pending flow, resolve a
+                               pending yes/no confirmation). Two deterministic
+                               tier-0 gates run BEFORE the model: the
+                               confirmation gate and the FAST ROUTER (a
+                               mid-slot-fill message that deterministically
+                               fills a missing slot bypasses the INTENT call).
+                               A second FLOW interrupting a pending one is
+                               parked in the depth-1 interrupt archive
+                               (paused_flow) and restored deterministically.
+  2. knowledge / chitchat / closing (ANSWER) — direct LLM answer, no tool;
+                               grounded on last_action, never kills a pending flow
+  2b. agentic_retrieval (subgraph) — for RETRIEVAL_INTENTS: run the private
+                               retrieve->grade->rewrite loop, hand back ONLY
+                               retrieved_context (semantic memory)
+  2c. system (no model)        — deterministic SYSTEM intents: help / restart /
+                                 human_handoff (escalation: raises the
+                                 Shell-observable handoff_requested flag)
+  2d. planner (ANSWER, ONCE)   — COMPOUND requests: turn a multi-action
+                                 utterance into an ordered plan_steps array
+  2e. plan_step (no model)     — deterministic plan controller: record the
+                                 previous step's outcome, dispatch the next
+                                 step into the ordinary think->act machinery
+                                 (monotonic index, doubly bounded)
+  3. think (ANSWER)            — Think step for any config.FLOWS intent:
+                                 entity resolution + slot validators, then
+                                 act-now (cold tool payload), need-info, a
+                                 confirm question (Flow.confirm), or the HITL
+                                 gate (Flow.hitl)
+  3b. hitl_gate (no model)     — interrupt(): suspend for OPERATOR approval of
+                                 a high-stakes payload before Act
+  4. tool_exec (no model)      — Act step: deterministic side-effect via
+                                 registry, circuit-breaker guarded
+  4b. execution_validator (no model) — Layer 2.5: inspect the tool result;
+                                 route failure vs enrich vs SLM-bypass
+  4c. failure (no model)       — graceful tool-failure reply, flow retryable
+  5. enrichment (ENRICH, SLM)  — terse tool result -> warm prose (only when the
+                                 execution validator asked for it)
+  6. validator (no model)      — RESPONSE validator (Layer 3): exit filter ->
+                                 final_response; carries the deterministic
+                                 STALL gate (invariant 25): the N-th
+                                 consecutive identical reply is swapped for
+                                 the clarify-then-escalate STALL_TEXT
+
+Every node returns a state-update dict only; routing lives on edges (graph.py).
+In MOCK mode each model-backed node uses a deterministic fallback so the whole
+chain runs with zero credentials. Every LIVE call also degrades to its mock
+fallback on error (auth, rate limit, network) so a turn never crashes.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from datetime import datetime
+
+import asyncio
+
+from langchain_core.messages import AIMessage
+from langgraph.types import interrupt
+
+import compaction
+import config
+import filler
+import prompts
+import tools
+from llm_client import llm_client, INTENT_MODEL, ANSWER_MODEL, ENRICH_MODEL
+from rag_subgraph import rag_subgraph
+from schemas import EnrichVerdict, IntentResult, PlanResult, PlanStep, ThinkDecision
+
+logger = logging.getLogger(__name__)
+
+# tool name -> Flow (for the execution validator's enrich decision and the
+# router's HITL check on confirmed payloads).
+FLOW_BY_TOOL = {flow.tool: flow for flow in config.FLOWS.values()}
+
+_HISTORY_TURNS = 6
+
+# Yes/no resolution for the confirmation gate. Negation is checked FIRST so
+# "no, don't do it" never reads as an affirmative.
+_NEGATE_RE = re.compile(r"\b(no|nope|don'?t|cancel|stop|wait|not yet|hold on|"
+                        r"changed my mind|never ?mind)\b", re.IGNORECASE)
+_AFFIRM_RE = re.compile(r"\b(yes|yep|yeah|sure|confirm|confirmed|go ahead|do it|"
+                        r"ok(ay)?|please do|correct|right|absolutely)\b", re.IGNORECASE)
+
+# Mock-mode heuristic for "explain yourself" questions grounded on last_action.
+_GROUNDING_Q_RE = re.compile(r"\b(how do you know|how would you know|are you sure|"
+                             r"based on what|how come|why is that|says who)\b", re.IGNORECASE)
+
+
+def _fast_route(user_message: str, intent: str, collected: dict) -> dict | None:
+    """Fast-router gate (tier-0, deterministic, NO model): mid slot-fill,
+    decide whether the message simply fills a missing slot of `intent`. On a
+    confident match, return the exact dict a continuation turn would produce
+    (routing straight to Think); return None to fall through to the normal
+    INTENT-tier path. Every guard is fall-through-biased — a false negative
+    costs one model call, a false positive misroutes an interruption — so on
+    ANY doubt, return None. This gate fronts the INTENT tier; it never
+    replaces it."""
+    if not config.FAST_ROUTER_ENABLED:
+        return None
+    flow = config.FLOWS.get(intent)
+    if flow is None:
+        return None
+    # Negation ("no wait", "cancel") may be an abandonment — the model decides.
+    if _NEGATE_RE.search(user_message):
+        return None
+    # Interruption guard: a keyword of ANY other intent (another flow, goodbye,
+    # restart, an FAQ) means this is not a bare slot answer.
+    low = user_message.lower()
+    for name, keys in config.INTENT_KEYWORDS.items():
+        if name != intent and any(k in low for k in keys):
+            return None
+    missing = [s for s in flow.slots if not collected.get(s)]
+    if not missing:
+        return None
+    extracted: dict = {}
+    for s in missing:
+        fn = config.SLOT_EXTRACTORS.get(s)
+        val = fn(user_message) if fn else None
+        if not val:
+            continue
+        # Pre-TEST with the same hooks Think will run (result discarded —
+        # Think stays the single authoritative resolver/validator pass and
+        # receives the raw value; hooks are idempotent on canonical values).
+        # A bounce ("any branch") needs a conversation, not a bypass.
+        for hooks in (config.ENTITY_RESOLVERS, flow.validators):
+            check = hooks.get(s)
+            if check is not None:
+                ok, _ = check(str(val), {**collected, **extracted, s: val})
+                if not ok:
+                    return None
+        extracted[s] = val
+    if not extracted:
+        return None   # bare "ok" / free text extracted nothing — LLM decides
+    return {"intent": intent, "category": config.CATEGORY_OF.get(intent, "FLOW"),
+            "slots": {**collected, **extracted}, "fast_routed": True}
+
+
+def _history(state) -> list:
+    role_map = {"human": "user", "ai": "assistant"}
+    out = []
+    for m in state.get("recent_messages", [])[-_HISTORY_TURNS:]:
+        out.append({"role": role_map.get(getattr(m, "type", ""), "user"), "content": str(m.content)})
+    return out
+
+
+# ======================================================================== #
+# 1. INTENT DETECTION (Tier: INTENT)                                        #
+# ======================================================================== #
+async def intent_detect_node(state) -> dict:
+    user_message = state.get("user_message", "")
+    pending = state.get("pending_intent")
+    pending_slots = dict(state.get("pending_slots") or {})
+
+    # Confirmation gate resolution: a stashed payload is waiting for yes/no.
+    # Deterministic (no model) — a yes/no on a destructive action must never
+    # depend on a model's mood. Anything that is neither falls through to
+    # normal classification (a detour); the confirmation stays pending.
+    confirm = state.get("pending_confirmation") or {}
+    if confirm:
+        if _NEGATE_RE.search(user_message):
+            logger.info("confirmation declined for %s", confirm.get("tool"))
+            # A decline also aborts any active plan: later steps may depend on
+            # the declined action, so never execute past a refused gate.
+            return _clear_plan({"intent": "chitchat", "category": "ANSWER", "slots": {},
+                                "pending_intent": None, "pending_slots": {},
+                                "pending_confirmation": {}, "confirmation_declined": True})
+        if _AFFIRM_RE.search(user_message):
+            logger.info("confirmation accepted for %s", confirm.get("tool"))
+            # The flow is handed to Act — nothing is pending anymore (mirrors
+            # think's act branch). A stale pending left here would later be
+            # parked by the interrupt archive as a zombie of a DONE flow.
+            return {"intent": confirm.get("intent", ""), "category": "FLOW",
+                    "slots": pending_slots,
+                    "cold_payload": {"tool": confirm.get("tool", ""),
+                                     "args": confirm.get("args", {})},
+                    "tool_action_pending": True, "pending_confirmation": {},
+                    "pending_intent": None, "pending_slots": {}}
+
+    # Fast-router gate (tier-0, deterministic): mid slot-fill, a message that
+    # simply fills a missing slot of the pending flow skips the INTENT-tier
+    # call entirely and routes straight to Think, which re-runs the
+    # authoritative resolver/validator pass on the raw value. Any doubt
+    # (negation, other-intent keyword, no extraction, hook bounce) falls
+    # through to normal classification below.
+    if pending and pending in config.FLOWS:
+        fast = _fast_route(user_message, pending, pending_slots)
+        if fast is not None:
+            logger.info("fast_router: bypassed INTENT tier for %s slots=%s",
+                        pending, fast["slots"])
+            return fast
+
+    # Paused-flow restore by slot answer: no flow is pending, but the archive
+    # holds an interrupted one and this message deterministically fills its
+    # missing slot — restore it through the same fast-router gate (matched
+    # input only, NEVER a blind re-pend). Any doubt falls through and the
+    # archive stays inert.
+    paused = dict(state.get("paused_flow") or {})
+    if (not pending and not confirm and paused and not _plan_active(state)
+            and paused.get("intent") in config.FLOWS):
+        fast = _fast_route(user_message, paused["intent"], dict(paused.get("slots") or {}))
+        if fast is not None:
+            logger.info("fast_router: restored paused flow %s", paused["intent"])
+            return {**fast, "paused_flow": {}}
+
+    # COMPOUND detection (mock mode): a fresh multi-action utterance routes to
+    # the planner. Guarded by the same seniority rule as live mode — an
+    # in-progress flow, confirmation, or plan is NEVER re-planned mid-way.
+    if (llm_client.mock and not pending and not confirm and not _plan_active(state)
+            and _mock_compound(user_message)):
+        logger.info("compound request detected (mock heuristic)")
+        return {"intent": "compound_request", "category": "COMPOUND", "slots": {}}
+
+    if llm_client.mock:
+        result = _mock_intent(user_message)
+    else:
+        pending_ctx = ""
+        if pending and pending in config.FLOWS:
+            missing = [s for s in config.FLOWS[pending].slots if not pending_slots.get(s)]
+            pending_ctx = (f"\n\nPENDING flow: '{pending}'. You previously asked the user for: "
+                           f"{', '.join(missing) or 'a detail'}. Treat their message as the answer.")
+        messages = ([{"role": "system",
+                      "content": prompts.build_intent_system(pending_ctx, _last_action_intent_ctx(state),
+                                                             _session_facts_ctx(state))}]
+                    + _history(state) + [{"role": "user", "content": user_message}])
+        try:
+            result = await llm_client.generate_structured(INTENT_MODEL, IntentResult, messages, temperature=0.1)
+        except Exception as e:
+            logger.warning("intent tier failed (%s); using heuristic fallback", type(e).__name__)
+            result = _mock_intent(user_message)
+
+    intent = result.intent
+    extracted = {k: v for k, v in (result.slots or {}).items() if v}
+    slots = {**pending_slots, **extracted}
+
+    # Clamp: an unknown intent name from the model becomes the pending flow if
+    # one exists, else chitchat — never a session-ending guess.
+    if intent not in config.VALID_INTENTS:
+        intent = pending or "chitchat"
+
+    # Never re-plan mid-way: a compound classification while a flow, a
+    # confirmation, or a plan is in progress stays with the work in progress.
+    if intent == "compound_request" and (pending or _plan_active(state)):
+        intent = pending or "chitchat"
+
+    # Continuation guard: mid slot-fill, a bare value ("downtown at 3pm") often
+    # classifies as chitchat/knowledge. If the turn produced a slot value, stay
+    # in the pending flow instead of dropping it.
+    if pending and intent in ("chitchat",) + config.KNOWLEDGE_INTENTS and extracted:
+        intent = pending
+
+    # Depth-1 interrupt archive: a second tool FLOW interrupting the pending
+    # one PARKS the pending flow (intent + collected slots) instead of letting
+    # think/_clear_pending clobber it, and isolates the new flow's slots (the
+    # old flow's values must not leak into the new tool — session_facts is the
+    # sanctioned cross-flow value bus). Newest interruption wins (depth 1,
+    # never a stack). Re-entering the archived flow by name restores its slots
+    # so nothing already collected is re-asked. The plan walk has its own
+    # pause/resume machinery — never archive/restore mid-plan.
+    extra: dict = {}
+    if not _plan_active(state):
+        if (pending and pending in config.FLOWS and intent in config.FLOWS
+                and intent != pending):
+            extra["paused_flow"] = {"intent": pending, "slots": pending_slots,
+                                    "offered": False}
+            slots = extracted
+            logger.info("interrupt archive: parked %s (slots=%s) for %s",
+                        pending, pending_slots, intent)
+        elif paused and intent == paused.get("intent"):
+            slots = {**(paused.get("slots") or {}), **extracted}
+            extra["paused_flow"] = {}
+            logger.info("interrupt archive: re-entered %s by name", intent)
+
+    # The category is DERIVED from the final intent (config.CATEGORY_OF is the
+    # source of truth) — the model's own category pick is a classification aid,
+    # never a routing input, so a category/intent mismatch cannot corrupt routing.
+    category = config.CATEGORY_OF.get(intent, "ANSWER")
+
+    logger.info("category=%s intent=%s slots=%s (pending was %s)", category, intent, slots, pending)
+    return {"intent": intent, "category": category, "slots": slots, **extra}
+
+
+def _mock_intent(text: str) -> IntentResult:
+    low = (text or "").lower()
+    intent = "chitchat"
+    for name, keys in config.INTENT_KEYWORDS.items():
+        if any(k in low for k in keys):
+            intent = name
+            break
+    # Run every extractor unconditionally so a bare slot answer to a pending
+    # flow is captured even when the phrase carries no intent keyword.
+    slots = {name: fn(text) for name, fn in config.SLOT_EXTRACTORS.items()}
+    return IntentResult(intent=intent, slots={k: v for k, v in slots.items() if v})
+
+
+def _last_action_intent_ctx(state) -> str:
+    la = state.get("last_action") or {}
+    if not la:
+        return ""
+    return (f"\n\nLAST COMPLETED ACTION: tool '{la.get('tool')}' -> {la.get('summary', '')}\n"
+            "A short reply (a payment word, 'thanks', 'why?', 'ok') most likely refers to "
+            "this action — classify it as chitchat (or a matching knowledge intent), "
+            "NOT as a new tool flow, unless the user clearly requests a new action.")
+
+
+def _session_facts_ctx(state) -> str:
+    """Functional session cache injection: verified transactional identifiers
+    from earlier tool runs, injected as an immutable prompt line exactly like
+    the date injection. The cache itself is written ONLY by tool_exec's
+    deterministic whitelist merge — no model output ever lands in it."""
+    facts = state.get("session_facts") or {}
+    if not facts:
+        return ""
+    return ("\n\nKNOWN FACTS (verified this session — reuse these identifiers "
+            f"instead of re-asking): {json.dumps(facts, ensure_ascii=False)}")
+
+
+# Compound detection (mock mode): split on sequencing conjunctions and see
+# whether at least TWO clauses map to DISTINCT tool flows. Runs only on fresh
+# utterances (no pending flow/confirmation/plan), so slot answers like
+# "downtown and 3pm" can never be misread as a plan.
+_CONJ_RE = re.compile(r"\b(?:and then|then|after that|afterwards)\b|;", re.IGNORECASE)
+
+
+def _mock_compound(text: str) -> list[PlanStep] | None:
+    clauses = [c.strip() for c in _CONJ_RE.split(text or "") if c.strip()]
+    if len(clauses) < 2:
+        clauses = [c.strip() for c in re.split(r"\band\b", text or "", flags=re.IGNORECASE)
+                   if c.strip()]
+    if len(clauses) < 2:
+        return None
+    steps: list[PlanStep] = []
+    for clause in clauses:
+        low = clause.lower()
+        intent = next((name for name, keys in config.INTENT_KEYWORDS.items()
+                       if name in config.FLOWS and any(k in low for k in keys)), None)
+        if intent is None or any(s.action == intent for s in steps):
+            continue
+        # Context isolation, mock edition: extract slots from THIS clause only.
+        slots = {name: fn(clause) for name, fn in config.SLOT_EXTRACTORS.items()
+                 if name in config.FLOWS[intent].slots}
+        steps.append(PlanStep(action=intent, slots={k: v for k, v in slots.items() if v}))
+    return steps if len(steps) >= 2 else None
+
+
+# ======================================================================== #
+# 2. DIRECT-ANSWER NODES (Tier: ANSWER) — no tool, no enrichment            #
+#    A pending flow SURVIVES these nodes (detours don't kill flows): the    #
+#    reply gets a deterministic resume line instead.                        #
+# ======================================================================== #
+# Referential queries ("how much does IT cost?") mean nothing standalone —
+# they get deterministic context priming (rule 8) and are NEVER cached
+# (rule 9): their answer depends on conversation state, not the string.
+_REFERENTIAL_RE = re.compile(r"\b(it|its|that one|this one|that|this|those|these|"
+                             r"they|them|the same)\b", re.IGNORECASE)
+
+# TTL context cache (Agentic_RAG_Explained.txt rule 9): normalized query ->
+# (monotonic timestamp, finalized context). In-process, bounded, exact-match
+# only — semantic cache matching would need an embedding call and is exactly
+# the latency this cache exists to avoid. Stores CONTEXT, never the phrased
+# answer: synthesis stays live and grounded.
+_RAG_CACHE: dict = {}
+_RAG_CACHE_MAX = 128
+
+
+def _rag_cache_key(message: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", (message or "").lower()))
+
+
+def _rag_cache_get(key: str):
+    if config.RAG_CACHE_TTL_SECONDS <= 0:
+        return None
+    entry = _RAG_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, context = entry
+    if time.monotonic() - ts > config.RAG_CACHE_TTL_SECONDS:
+        _RAG_CACHE.pop(key, None)
+        return None
+    return context
+
+
+def _rag_cache_put(key: str, context: str) -> None:
+    if config.RAG_CACHE_TTL_SECONDS <= 0 or not key or not context:
+        return
+    if len(_RAG_CACHE) >= _RAG_CACHE_MAX:      # bounded: evict the oldest entry
+        _RAG_CACHE.pop(next(iter(_RAG_CACHE)))
+    _RAG_CACHE[key] = (time.monotonic(), context)
+
+
+def _context_hint(state) -> str:
+    """Deterministic co-reference context (rule 8, ZERO model calls): salient
+    content words the retrieval query/rewrite can ground a pronoun against —
+    last_action summary, session_facts, the pending flow name, then recent
+    messages newest-first. Words already in the current message, stopwords,
+    and short tokens are dropped; the hint is hard-capped so it can prime a
+    query but never drown it. A pre-search LLM rewrite would resolve
+    co-reference better — and add 300-600ms to EVERY retrieval turn, which is
+    the exact latency conditional retrieval exists to save (report-12 R-01)."""
+    parts = []
+    la = state.get("last_action") or {}
+    if la.get("summary"):
+        parts.append(str(la["summary"]))
+    parts.extend(str(v) for v in (state.get("session_facts") or {}).values())
+    if state.get("pending_intent"):
+        parts.append(str(state["pending_intent"]).replace("_", " "))
+    prior = (state.get("recent_messages") or [])[:-1]   # exclude the current message
+    parts.extend(str(m.content) for m in reversed(prior[-4:]))
+
+    current = set(re.findall(r"[a-z0-9']+", (state.get("user_message", "") or "").lower()))
+    words, seen = [], set()
+    for part in parts:
+        for w in re.findall(r"[A-Za-z0-9'-]+", part):
+            lw = w.lower()
+            if len(lw) < 3 or lw in config._STOPWORDS or lw in current or lw in seen:
+                continue
+            seen.add(lw)
+            words.append(w)
+            if len(words) >= 24:
+                return " ".join(words)
+    return " ".join(words)
+
+
+async def agentic_retrieval_node(state) -> dict:
+    """Semantic-memory hop for RETRIEVAL_INTENTS: invoke the compiled RAG
+    subgraph (private RagState loop) and copy back EXACTLY ONE key. The
+    subgraph's documents/grades/counters never touch the parent state.
+
+    Dynamic-RAG boundary work happens HERE, deterministically (rules 8-9):
+    a referential query is PRIMED with a context hint before the first
+    retrieve (and the same hint rides along as history_hint so a rewrite-on-
+    miss can resolve the pronoun), and a non-referential repeat question is
+    served from the TTL context cache without touching the subgraph at all.
+
+    The wall-clock ceiling also lives HERE (Agentic_RAG_Explained.txt rule 6):
+    the whole loop runs under config.RAG_TIMEOUT_SECONDS. On timeout, degrade
+    to ONE deterministic retrieve pass and use whatever it returns — degraded
+    context beats a hung prompt; an empty result routes to the knowledge
+    node's honest fallback, never to a retry."""
+    message = state.get("user_message", "")
+    referential = bool(_REFERENTIAL_RE.search(message))
+    hint = _context_hint(state) if referential else ""
+    query = f"{message} {hint}".strip() if hint else message
+
+    cache_key = _rag_cache_key(message)
+    if not referential:
+        cached = _rag_cache_get(cache_key)
+        if cached is not None:
+            logger.info("agentic_retrieval: context cache hit (subgraph skipped)")
+            return {"retrieved_context": cached}
+
+    try:
+        out = await asyncio.wait_for(
+            rag_subgraph.ainvoke({"query": query, "original_query": message,
+                                  "history_hint": hint, "rewrite_count": 0}),
+            timeout=config.RAG_TIMEOUT_SECONDS,
+        )
+        context = out.get("context", "")
+    except asyncio.TimeoutError:
+        logger.warning("retrieval subgraph exceeded %.1fs wall clock; degrading to single-hop",
+                       config.RAG_TIMEOUT_SECONDS)
+        try:
+            docs = [d for d in config.RETRIEVER(query)
+                    if d.get("score", 0) >= config.RETRIEVAL_MIN_SCORE]
+            context = "\n".join(f"[{d['title']}] {d['text']}" for d in docs)
+        except Exception:
+            context = ""
+    except Exception as e:
+        logger.warning("retrieval subgraph failed (%s); continuing without context",
+                       type(e).__name__)
+        context = ""
+    if not referential:
+        _rag_cache_put(cache_key, context)
+    logger.info("agentic_retrieval -> %d chars of context%s", len(context),
+                " (primed)" if hint else "")
+    return {"retrieved_context": context}
+
+
+async def knowledge_node(state) -> dict:
+    intent = state.get("intent", "")
+    retrieval = intent in config.RETRIEVAL_INTENTS
+    retrieved = state.get("retrieved_context", "") if retrieval else ""
+
+    if retrieval and not retrieved:
+        # Zero-hallucination fallback: retrieval found nothing relevant ->
+        # say so deterministically; never let a model guess a policy.
+        # WARNING (not INFO): an honest decline is indistinguishable from a
+        # recall failure at every other surface — this line is the only signal
+        # an operator can grep to audit whether declined questions were truly
+        # out of scope or a corpus/alias gap (see retrieval_coverage_preflight).
+        logger.warning("rag recall exhausted: intent=%s query=%r — declined honestly; "
+                       "if this should be answerable, DOCS/aliases have a gap",
+                       intent, state.get("user_message", ""))
+        text = ("I don't have that information on hand, so I won't guess — "
+                "a human agent can confirm the details for you.")
+        return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
+
+    if retrieval:
+        # Deterministic mock synthesis from the retrieved context; live mode
+        # gets the context injected into the knowledge prompt instead of FACTS.
+        mock = f"Here's what our policy says: {retrieved.splitlines()[0]} Anything else I can help with?"
+    else:
+        mock = config.MOCK_KNOWLEDGE.get(intent,
+                                         "I can help with that — could you tell me a bit more?")
+    text = await _answer_or_mock(
+        state, prompts.build_knowledge_system(_grounding_ctx(state), retrieved), mock)
+    return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
+
+
+async def system_node(state) -> dict:
+    """SYSTEM intents are session control — always deterministic, never a
+    model. help preserves a pending flow (it's a detour); restart is the one
+    EXPLICIT abandonment that clears pending state; human_handoff (invariant
+    26) is the structurally reachable escalation path — it sets the
+    handoff_requested flag the Shell/host observes, clears pending work
+    (invariant 11 names handoff as a legitimate clearer: a person takes over),
+    and keeps last_action/session_facts so the human inherits the context."""
+    intent = state.get("intent", "")
+    if intent == "restart":
+        return _clear_plan(_clear_pending({"draft_response": config.RESTART_TEXT,
+                                           "needs_enrichment": False, "last_action": {},
+                                           "session_facts": {}, "paused_flow": {},
+                                           "stall_count": 0, "last_reply_fingerprint": ""}))
+    if intent == "human_handoff":
+        logger.info("escalation: human handoff requested")
+        return _clear_plan(_clear_pending({"draft_response": config.HANDOFF_TEXT,
+                                           "needs_enrichment": False, "paused_flow": {},
+                                           "handoff_requested": True,
+                                           "stall_count": 0, "last_reply_fingerprint": ""}))
+    return {"draft_response": config.HELP_TEXT + _resume_suffix(state),
+            "needs_enrichment": False}
+
+
+async def chitchat_node(state) -> dict:
+    if state.get("confirmation_declined"):
+        # Deterministic decline acknowledgment — never let a model improvise
+        # around an aborted destructive action.
+        return {"draft_response": config.CONFIRM_DECLINED_TEXT, "needs_enrichment": False}
+    la = state.get("last_action") or {}
+    if llm_client.mock and la and _GROUNDING_Q_RE.search(state.get("user_message", "")):
+        text = f"That comes straight from our live system — {la.get('summary', '')}"
+    else:
+        text = await _answer_or_mock(state, prompts.build_chitchat_system(_grounding_ctx(state)),
+                                     config.MOCK_CHITCHAT)
+    return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
+
+
+async def closing_node(state) -> dict:
+    text = await _answer_or_mock(state, prompts.CLOSING_SYSTEM, config.MOCK_CLOSING)
+    return _clear_plan(_clear_pending({"draft_response": text, "needs_enrichment": False,
+                                       "exit_conversation": True, "paused_flow": {}}))
+
+
+async def _answer_or_mock(state, system: str, mock_text: str) -> str:
+    if llm_client.mock:
+        return mock_text
+    messages = ([{"role": "system", "content": system}] + _history(state)
+                + [{"role": "user", "content": state.get("user_message", "")}])
+    try:
+        return await llm_client.generate_text(ANSWER_MODEL, messages, temperature=0.5)
+    except Exception as e:
+        logger.warning("answer tier failed (%s); using mock text", type(e).__name__)
+        return mock_text
+
+
+def _grounding_ctx(state) -> str:
+    """Ground direct answers on the last completed tool action so the agent can
+    explain WHERE a fact came from instead of deflecting to a capabilities pitch."""
+    la = state.get("last_action") or {}
+    if not la:
+        return ""
+    return (f"\n\nMOST RECENT COMPLETED ACTION (ground truth from our live system): tool "
+            f"'{la.get('tool')}' returned: {json.dumps(la.get('result', {}), ensure_ascii=False)}\n"
+            "If the user asks how you know something or questions your last answer, explain that "
+            "it comes from this live system check and restate the key fact. If their message "
+            "refers to this action (payment remarks, thanks, follow-ups), respond grounded in it; "
+            "if it involves something you cannot do on this channel, say so plainly — never "
+            "invent options or claim things changed.")
+
+
+def _resume_suffix(state) -> str:
+    """If a flow (or confirmation) is pending, remind the user how to continue —
+    a detour must never silently abandon the task in progress."""
+    confirm = state.get("pending_confirmation") or {}
+    if confirm.get("question"):
+        return " Now, back to where we were: " + confirm["question"]
+    pending = state.get("pending_intent")
+    if pending and pending in config.FLOWS:
+        flow = config.FLOWS[pending]
+        pending_slots = state.get("pending_slots") or {}
+        missing = [s for s in flow.slots if not pending_slots.get(s)]
+        if missing:
+            hint = flow.slot_prompts.get(missing[0], missing[0])
+            return (f" Now, back to your {pending.replace('_', ' ')} — "
+                    f"could you tell me {hint}?")
+    return ""
+
+
+# ======================================================================== #
+# 2d. PLANNER (Tier: ANSWER, called EXACTLY ONCE per compound request)      #
+# ======================================================================== #
+async def planner_node(state) -> dict:
+    """Plan-and-Execute entry: convert a multi-action utterance into an ordered
+    plan_steps array. The heavy model runs ONCE here; every subsequent step is
+    executed deterministically by plan_step_node through the ordinary
+    think->act machinery. The output is clamped in code: unknown actions are
+    dropped, the array is truncated to MAX_PLAN_STEPS, and slot keys outside
+    the flow's contract are discarded — a hallucinated plan cannot widen the
+    agent's capabilities."""
+    if llm_client.mock:
+        steps = _mock_compound(state.get("user_message", "")) or []
+    else:
+        messages = ([{"role": "system",
+                      "content": prompts.build_planner_system(_session_facts_ctx(state))}]
+                    + _history(state)
+                    + [{"role": "user", "content": state.get("user_message", "")}])
+        try:
+            result = await llm_client.generate_structured(ANSWER_MODEL, PlanResult, messages,
+                                                          temperature=0.2)
+            steps = result.steps or []
+        except Exception as e:
+            logger.warning("planner tier failed (%s); heuristic fallback", type(e).__name__)
+            steps = _mock_compound(state.get("user_message", "")) or []
+
+    plan = []
+    for step in steps[: config.MAX_PLAN_STEPS]:
+        if step.action not in config.FLOWS:
+            logger.info("planner: dropping unknown action %r", step.action)
+            continue
+        allowed = config.FLOWS[step.action].slots
+        slots = {k: v for k, v in (step.slots or {}).items() if v and k in allowed}
+        plan.append({"step": len(plan) + 1, "action": step.action, "slots": slots,
+                     "status": "pending", "summary": "", "reported": False,
+                     "dispatch_calls": 0})
+
+    if not plan:
+        logger.info("planner: no valid steps — declining deterministically")
+        return _clear_plan({"draft_response": config.PLAN_UNSUPPORTED_TEXT,
+                            "needs_enrichment": False})
+    logger.info("planner: %d step(s): %s", len(plan), [s["action"] for s in plan])
+    return {"plan_steps": plan, "current_step_index": 0}
+
+
+# ======================================================================== #
+# 2e. PLAN STEP CONTROLLER (no model) — the ONE sanctioned parent-graph     #
+#     loop: a deterministic, monotonic walk over plan_steps, doubly bounded #
+#     (MAX_PLAN_STEPS at creation, MAX_TOOL_CALLS_PER_TURN at execution).   #
+#     No model ever decides whether to continue.                            #
+# ======================================================================== #
+async def plan_step_node(state) -> dict:
+    plan = [dict(s) for s in (state.get("plan_steps") or [])]
+    idx = state.get("current_step_index", 0)
+    updates: dict = {}
+
+    # 1) Book-keeping: record the outcome of the step in flight (re-entry from
+    #    the execution path, or from a think question that pauses the plan).
+    if idx < len(plan) and plan[idx]["status"] in ("running", "paused"):
+        step = plan[idx]
+        if state.get("execution_error"):
+            # Abort policy: a failed step stops the plan. failure_node already
+            # produced the reply and re-pended the single flow for retry.
+            step["status"] = "failed"
+            for later in plan[idx + 1:]:
+                later["status"] = "skipped"
+            logger.info("plan: step %d (%s) failed — aborting remaining steps",
+                        step["step"], step["action"])
+            draft = state.get("draft_response", "") or config.FAILURE_TEXT
+            return _clear_plan({"draft_response": _with_plan_report(plan, draft),
+                                "needs_enrichment": False})
+        if state.get("tool_call_count", 0) > step.get("dispatch_calls", 0):
+            # An execution happened since dispatch -> the step completed.
+            step["status"] = "complete"
+            step["summary"] = (state.get("tool_result") or {}).get("summary", "")
+            idx += 1
+            updates["current_step_index"] = idx
+            logger.info("plan: step %d (%s) complete", step["step"], step["action"])
+        else:
+            # Think asked something (missing slot / confirm question): pause.
+            # pending_intent / pending_confirmation are already set by think —
+            # the existing continuation machinery IS the resume mechanism.
+            step["status"] = "paused"
+            step["dispatch_calls"] = 0   # next turn's counter restarts at 0
+            logger.info("plan: step %d (%s) paused awaiting the user",
+                        step["step"], step["action"])
+            return {"plan_steps": plan,
+                    "draft_response": _with_plan_report(plan, state.get("draft_response", ""))}
+
+    # 2) Finished? Emit the aggregated report (the last step's phrased reply
+    #    plus any earlier unreported summaries) and clear the plan.
+    if idx >= len(plan):
+        if plan:
+            plan[-1]["reported"] = True   # its content is the draft itself
+        draft = state.get("draft_response", "") or ""
+        logger.info("plan: all %d step(s) complete", len(plan))
+        return _clear_plan({"draft_response": _with_plan_report(plan, draft),
+                            "needs_enrichment": False})
+
+    # 3) Dispatch the next step, context-isolated: the step's action IS the
+    #    intent (no INTENT-tier call), and its slots are a deterministic merge
+    #    of session_facts (earlier steps' outputs — the variable-mapping bus)
+    #    with the planner's per-step extraction (planner values win).
+    step = plan[idx]
+    flow = config.FLOWS[step["action"]]
+    facts = state.get("session_facts") or {}
+    slots = {**{k: v for k, v in facts.items() if k in flow.slots}, **step["slots"]}
+    step["status"] = "running"
+    step["dispatch_calls"] = state.get("tool_call_count", 0)
+    # Filler channel: a natural "still working" continuation covers the gap
+    # before each step AFTER the first (the first step's own tool filler already
+    # signals work; the first spoken line should not be a bare "still working").
+    if idx >= 1 and config.FILLER_ENABLED:
+        cont = filler.pick_from(config.FILLER_PLAN_CONTINUE, key="_plan")
+        if cont:
+            filler.emit({"type": "filler", "kind": "plan", "text": cont,
+                         "step": idx + 1, "total": len(plan)})
+    logger.info("plan: dispatching step %d/%d (%s) slots=%s",
+                step["step"], len(plan), step["action"], slots)
+    return {**updates, "plan_steps": plan, "intent": step["action"],
+            "category": "FLOW", "slots": slots}
+
+
+def _with_plan_report(plan: list, draft: str) -> str:
+    """Prefix a reply with the summaries of completed-but-unreported steps so a
+    pause, an abort, or the final reply always accounts for what already ran."""
+    earlier = [s["summary"] for s in plan
+               if s["status"] == "complete" and not s["reported"] and s["summary"]]
+    for s in plan:
+        if s["status"] == "complete":
+            s["reported"] = True
+    return " ".join(earlier + ([draft] if draft else [])).strip()
+
+
+# ======================================================================== #
+# 3. THINK (Tier: ANSWER) — one generic node for every config.FLOWS intent  #
+# ======================================================================== #
+async def think_node(state) -> dict:
+    intent = state.get("intent", "")
+    flow = config.FLOWS[intent]
+    slots = dict(state.get("slots") or {})
+
+    if llm_client.mock:
+        decision = _mock_think(flow, slots)
+    else:
+        now = datetime.now().astimezone()
+        known = {s: slots.get(s) for s in flow.slots}
+        messages = ([{"role": "system",
+                      "content": prompts.build_think_system(intent, known, now.isoformat(), f"{now:%A}",
+                                                            _session_facts_ctx(state))}]
+                    + _history(state) + [{"role": "user", "content": state.get("user_message", "")}])
+        try:
+            decision = await llm_client.generate_structured(ANSWER_MODEL, ThinkDecision, messages, temperature=0.2)
+        except Exception as e:
+            logger.warning("think tier failed (%s); heuristic fallback", type(e).__name__)
+            decision = _mock_think(flow, slots)
+
+    slots.update({k: v for k, v in (decision.slots or {}).items() if v})
+
+    # SEMANTIC ENTITY RESOLUTION first (config.ENTITY_RESOLVERS): referential
+    # values ("all vegetables", "any branch", aliases) are grounded against the
+    # domain catalog — canonicalized or bounced with a clarifying question —
+    # BEFORE scalar validators see them. A literal referential string never
+    # reaches a tool.
+    # Then Flow.validators: normalize units/bounds/format or reject with a
+    # clarification — silent unit/bounds mismatches never reach a tool either.
+    for hooks in (config.ENTITY_RESOLVERS, flow.validators):
+        for s in flow.slots:
+            val = slots.get(s)
+            fn = hooks.get(s)
+            if not val or fn is None:
+                continue
+            ok, out = fn(str(val), slots)
+            if ok:
+                slots[s] = out
+            else:
+                slots[s] = None
+                logger.info("slot %s=%r rejected (%s)", s, val,
+                            "entity resolver" if hooks is config.ENTITY_RESOLVERS else "validator")
+                return {"draft_response": out, "needs_enrichment": False,
+                        "tool_action_pending": False, "pending_confirmation": {},
+                        "pending_intent": intent, "pending_slots": slots, "slots": slots}
+
+    missing = [s for s in flow.slots if not slots.get(s)]
+
+    if decision.status == "act" and not missing:
+        args = {s: slots[s] for s in flow.slots}
+        if flow.confirm:
+            # Destructive flow: stash the ready payload and ask before acting.
+            question = _confirm_question(intent, flow, args)
+            return {"draft_response": question, "needs_enrichment": False,
+                    "tool_action_pending": False, "slots": slots,
+                    "pending_intent": intent, "pending_slots": slots,
+                    "pending_confirmation": {"intent": intent, "tool": flow.tool,
+                                             "args": args, "question": question}}
+        if flow.hitl:
+            # High-stakes flow: the payload is ready but an OPERATOR must
+            # approve it — route to the interrupt gate instead of acting.
+            return _clear_pending({
+                "cold_payload": {"tool": flow.tool, "args": args},
+                "tool_action_pending": False, "awaiting_human": True, "slots": slots,
+            })
+        return _clear_pending({
+            "cold_payload": {"tool": flow.tool, "args": args},
+            "tool_action_pending": True, "slots": slots,
+        })
+    # need_info: ask for the first missing slot, remember the flow for next turn.
+    ask = decision.response or _ask_for(flow, missing)
+    return {
+        "draft_response": ask,
+        "needs_enrichment": False,
+        "tool_action_pending": False,
+        "pending_intent": intent,
+        "pending_slots": slots,
+        "pending_confirmation": {},   # a new Think supersedes any stale confirmation
+    }
+
+
+def _ask_for(flow: config.Flow, missing: list) -> str:
+    slot = missing[0] if missing else flow.slots[0]
+    hint = flow.slot_prompts.get(slot, slot)
+    return f"Could you tell me {hint}?"
+
+
+def _confirm_question(intent: str, flow: config.Flow, args: dict) -> str:
+    if flow.confirm_template:
+        try:
+            return flow.confirm_template.format(**args)
+        except (KeyError, IndexError):
+            pass
+    detail = f" ({', '.join(f'{k}: {v}' for k, v in args.items())})" if args else ""
+    return f"Just to confirm — should I go ahead and {intent.replace('_', ' ')}{detail}? (yes/no)"
+
+
+def _mock_think(flow: config.Flow, slots: dict) -> ThinkDecision:
+    missing = [s for s in flow.slots if not slots.get(s)]
+    if not missing:
+        return ThinkDecision(status="act", slots={s: slots[s] for s in flow.slots})
+    return ThinkDecision(status="need_info", slots={}, response=_ask_for(flow, missing))
+
+
+# ======================================================================== #
+# 3b. HITL GATE (no model) — interrupt() for OPERATOR approval               #
+# ======================================================================== #
+async def hitl_gate_node(state) -> dict:
+    """Flow.hitl=True: the graph SUSPENDS here (checkpoint-persisted) with the
+    ready payload and resumes only on a human Command(resume={"approved": ...}).
+    Distinct from Flow.confirm (end-user yes/no): this is the hard
+    excessive-agency gate — the model cannot talk its way past it."""
+    payload = state.get("cold_payload", {})
+    decision = interrupt({
+        "type": "hitl_approval",
+        "intent": state.get("intent", ""),
+        "tool": payload.get("tool", ""),
+        "args": payload.get("args", {}),
+    })
+    approved = bool(decision.get("approved")) if isinstance(decision, dict) else bool(decision)
+    logger.info("hitl %s for %s", "APPROVED" if approved else "DENIED", payload.get("tool"))
+    if approved:
+        return {"tool_action_pending": True, "awaiting_human": False}
+    denial = config.HITL_DENIED_TEXT
+    updates = {"needs_enrichment": False, "tool_action_pending": False,
+               "awaiting_human": False, "cold_payload": {}}
+    if _plan_active(state):
+        # A denial mid-plan aborts the remaining steps (later steps may depend
+        # on the denied one) but still reports what already completed.
+        plan = [dict(s) for s in state.get("plan_steps") or []]
+        denial = _with_plan_report(plan, denial)
+        updates = _clear_plan(updates)
+    updates["draft_response"] = denial
+    return _clear_pending(updates)
+
+
+# ======================================================================== #
+# 4. ACT (deterministic tool execution via registry, circuit-breaker guarded)#
+# ======================================================================== #
+async def tool_exec_node(state) -> dict:
+    payload = state.get("cold_payload", {})
+    name = payload.get("tool", "")
+    calls = state.get("tool_call_count", 0)
+
+    # Circuit breaker: a turn gets a hard budget of tool executions. One
+    # Think->Act hop needs exactly 1; anything past the cap is a runaway.
+    if calls >= config.MAX_TOOL_CALLS_PER_TURN:
+        logger.warning("circuit breaker: %d tool calls this turn (cap %d) — refusing %s",
+                       calls, config.MAX_TOOL_CALLS_PER_TURN, name)
+        result = {"tool": name or "unknown",
+                  "error": f"circuit breaker: exceeded {config.MAX_TOOL_CALLS_PER_TURN} tool calls per turn",
+                  "summary": "Too many actions were attempted in one turn."}
+        return {"tool_result": result, "tool_action_pending": False,
+                "tool_call_count": calls}
+
+    fn = tools.TOOL_REGISTRY.get(name)
+    if fn is None:
+        result = {"tool": name or "unknown", "error": "no such tool",
+                  "summary": "I hit a snag completing that — a human agent will follow up."}
+    else:
+        # Filler channel: cover the tool's latency with a canned acknowledgment
+        # over the display-only side sink (never enters model context). Debounced
+        # — the phrase is emitted ONLY if an async tool outlasts FILLER_DELAY_MS,
+        # so fast tools stay silent. A sync tool blocks the loop (no timer can
+        # race it), so it can only be covered when the debounce is disabled
+        # (FILLER_DELAY_MS<=0 — the voice/selftest forced path). Filler failures
+        # never affect the tool result.
+        filler_text = filler.pick(name)
+        try:
+            result = fn(**payload.get("args", {}))
+            if asyncio.iscoroutine(result):   # MCP-wrapped tools are async
+                task = asyncio.ensure_future(result)
+                if filler_text is not None:
+                    done, _ = await asyncio.wait({task}, timeout=max(config.FILLER_DELAY_MS, 0) / 1000)
+                    if not done:
+                        filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
+                result = await task
+            elif filler_text is not None and config.FILLER_DELAY_MS <= 0:
+                filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
+        except Exception as e:
+            logger.exception("tool %s crashed", name)
+            result = {"tool": name, "error": str(e),
+                      "summary": "I hit a snag completing that — a human agent will follow up."}
+    logger.info("tool %s -> %s", name, result)
+
+    # Tool-result compaction (zero-model, never raises): oversized list fields
+    # in a HEALTHY result are crushed to a salient subset + retrieval sentinel
+    # BEFORE the result reaches state — every downstream consumer (ENRICH
+    # prompt, last_action grounding, history) pays for the compact form only.
+    # Error results pass through untouched; the retrieval store keeps the
+    # original for retrieve_full_result.
+    if config.COMPACTION_ENABLED and isinstance(result, dict):
+        result = compaction.crush_result(result)
+
+    # Functional session cache (zero-inference update): after a HEALTHY run,
+    # copy the flow's whitelisted result fields into session_facts with a
+    # code-level dict merge — no model, no token cost, no reasoning errors.
+    facts = dict(state.get("session_facts") or {})
+    flow = FLOW_BY_TOOL.get(name)
+    if flow is not None and isinstance(result, dict) and not result.get("error"):
+        for key in flow.cache_keys:
+            if result.get(key):
+                facts[key] = str(result[key])
+
+    return {"tool_result": result, "tool_action_pending": False,
+            "tool_call_count": calls + 1, "session_facts": facts,
+            # Grounding memory: persists across turns so follow-ups ("cash",
+            # "how do you know?") are understood in context of this action.
+            "last_action": {"tool": result.get("tool", name),
+                            "summary": result.get("summary", ""), "result": result}}
+
+
+# ======================================================================== #
+# 4b. EXECUTION VALIDATOR (no model) — Layer 2.5, decoupled from the exit    #
+#     filter. Inspects the raw tool result BEFORE any phrasing: failures     #
+#     route to the failure node; healthy results route to ENRICH or bypass   #
+#     it entirely (Flow.enrich=False) for deterministic sub-600ms replies.   #
+# ======================================================================== #
+async def execution_validator_node(state) -> dict:
+    result = state.get("tool_result", {}) or {}
+    tool = result.get("tool") or state.get("cold_payload", {}).get("tool", "")
+    malformed = not isinstance(result, dict) or not result.get("summary")
+    if (isinstance(result, dict) and result.get("error")) or malformed:
+        error = result.get("error", "malformed tool result") if isinstance(result, dict) else "malformed tool result"
+        logger.info("execution validator: FAIL for %s (%s)", tool, error)
+        return {"execution_error": {"tool": tool, "error": str(error)},
+                "needs_enrichment": False}
+    flow = FLOW_BY_TOOL.get(tool)
+    enrich = flow.enrich if flow is not None else True
+    logger.info("execution validator: OK for %s (enrich=%s)", tool, enrich)
+    if not enrich:
+        # SLM bypass: the tool's summary is already user-ready — phrase it
+        # deterministically here (summary + declared hint), zero model hops.
+        return {"execution_error": {}, "needs_enrichment": False,
+                **_offer_paused(state, _phrase_result(result))}
+    return {"execution_error": {}, "needs_enrichment": True}
+
+
+def _phrase_result(result: dict) -> str:
+    """Deterministic tool-result phrasing: the structured summary plus the ONE
+    config-declared follow-up. Used by the enrich bypass and as the enrichment
+    node's mock/error fallback."""
+    text = result.get("summary") or "Done."
+    hint = getattr(config, "NEXT_STEP_HINTS", {}).get(result.get("tool", ""), "")
+    if hint:
+        text = f"{text.rstrip()} {hint}"
+    if not text.rstrip().endswith("?"):
+        text = f"{text.rstrip()} Anything else I can help with?"
+    return text
+
+
+def _offer_paused(state, draft: str) -> dict:
+    """Append the ONE-SHOT resume offer for an archived flow to a completed
+    tool reply, and mark the archive as offered (deterministic — never a model
+    line, never repeated: a second nag is the broken-record anti-pattern).
+    Skipped mid-plan (the plan reports its own progress) and when
+    config.PAUSED_RESUME_TEXT is empty (offer disabled; restore still works)."""
+    paused = dict(state.get("paused_flow") or {})
+    flow = config.FLOWS.get(paused.get("intent", ""))
+    if (not paused or paused.get("offered") or flow is None
+            or _plan_active(state) or not config.PAUSED_RESUME_TEXT):
+        return {"draft_response": draft}
+    slots = paused.get("slots") or {}
+    missing = [s for s in flow.slots if not slots.get(s)]
+    hint = (flow.slot_prompts.get(missing[0], missing[0]) if missing
+            else "whether you'd like to continue")
+    offer = config.PAUSED_RESUME_TEXT.format(
+        flow=paused["intent"].replace("_", " "), slot_hint=hint)
+    paused["offered"] = True
+    return {"draft_response": f"{draft.rstrip()} {offer}", "paused_flow": paused}
+
+
+# ======================================================================== #
+# 4c. FAILURE (no model) — graceful degradation for a failed Act             #
+# ======================================================================== #
+async def failure_node(state) -> dict:
+    """A tool failed (or the breaker tripped): tell the user plainly, keep the
+    session alive, and keep the flow RETRYABLE by re-pending it with its slots
+    — the next 'try again' resumes without re-collecting everything."""
+    intent = state.get("intent", "")
+    updates = {"draft_response": config.FAILURE_TEXT, "needs_enrichment": False}
+    if intent in config.FLOWS:
+        updates["pending_intent"] = intent
+        updates["pending_slots"] = dict(state.get("slots") or {})
+    return updates
+
+
+# ======================================================================== #
+# 5. ENRICHMENT (Tier: ENRICH / SLM) — only when the execution validator    #
+#    asked for it (healthy result + Flow.enrich=True)                       #
+#    The SLM is FRAMED, never trusted with free prose: it returns an        #
+#    EnrichVerdict (tone + grounded facts), and a DETERMINISTIC templater   #
+#    builds the sentence from config.ENRICH_TEMPLATES. A small model cannot #
+#    steer the conversation it never writes. This is why the old free-text  #
+#    call + post-hoc question-scrubber are gone: the constraint replaces    #
+#    the cleanup. Follow-ups stay config-declared (NEXT_STEP_HINTS).        #
+# ======================================================================== #
+async def enrichment_node(state) -> dict:
+    result = state.get("tool_result", {})
+    result_json = json.dumps(result, ensure_ascii=False)
+
+    if llm_client.mock:
+        return _offer_paused(state, _phrase_result(result))
+
+    messages = [
+        {"role": "system", "content": prompts.ENRICH_SYSTEM},
+        {"role": "user", "content": result_json},
+    ]
+    try:
+        verdict = await llm_client.generate_structured(
+            ENRICH_MODEL, EnrichVerdict, messages, temperature=0.2)
+    except Exception as e:
+        logger.warning("enrichment tier failed (%s); deterministic phrasing", type(e).__name__)
+        return _offer_paused(state, _phrase_result(result))
+
+    text = _phrase_from_verdict(verdict, result)
+    if text is None:                       # verdict failed grounding -> safe fallback
+        return _offer_paused(state, _phrase_result(result))
+    return _offer_paused(state, _finish_enriched(text, result))
+
+
+def _phrase_from_verdict(verdict: EnrichVerdict, result: dict) -> str | None:
+    """Assemble the user sentence DETERMINISTICALLY from the SLM's verdict.
+    Independently re-verifies grounding (never trusts verdict.grounded alone):
+    every key_fact must appear verbatim in the tool result. Returns None if the
+    verdict is unusable (no grounded facts / unknown tone) so the caller falls
+    back to _phrase_result — never to model-authored prose."""
+    source = json.dumps(result, ensure_ascii=False)
+    facts = [f.strip() for f in (verdict.key_facts or []) if f.strip() and f.strip() in source]
+    if not facts:
+        return None
+    template = getattr(config, "ENRICH_TEMPLATES", {}).get(verdict.tone)
+    if not template:
+        return None
+    return template.format(facts=_join_facts(facts))
+
+
+def _join_facts(facts: list[str]) -> str:
+    """Join grounded facts into one natural clause (a, b and c)."""
+    facts = [f.rstrip(". ") for f in facts]
+    if len(facts) == 1:
+        return facts[0]
+    return f"{', '.join(facts[:-1])} and {facts[-1]}"
+
+
+def _finish_enriched(text: str, result: dict) -> str:
+    """Append the config next-step hint + closing question deterministically —
+    identical tail to _phrase_result, shared so both paths end the same way."""
+    hint = getattr(config, "NEXT_STEP_HINTS", {}).get(result.get("tool", ""), "")
+    if hint:
+        text = f"{text.rstrip()} {hint}"
+    if not text.rstrip().endswith("?"):
+        text = f"{text.rstrip()} Anything else I can help with?"
+    return text
+
+
+# ======================================================================== #
+# 6. RESPONSE VALIDATOR (exit filter, Layer 3) — the only door to the user  #
+# ======================================================================== #
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_MD_RE = re.compile(r"[*_`#>~]")
+
+
+def validator_node(state) -> dict:
+    text = state.get("draft_response", "") or ""
+    text = _ANSI_RE.sub("", text)
+    text = _MD_RE.sub("", text)
+    for pattern, replacement in config.BLOCKED_PATTERNS:
+        text = pattern.sub(replacement, text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Stall detector (invariant 25) — an IN-NODE deterministic gate, like the
+    # fast router, never a graph node. Repetition is the earliest, cheapest
+    # signal of a broken-record loop: if this exact reply would go out for the
+    # STALL_THRESHOLD-th consecutive turn, swap in the clarify-then-escalate
+    # STALL_TEXT instead (its escape phrase routes to human_handoff). The
+    # comparison is on the post-scrub text, so cosmetic differences don't
+    # mask a stall. The stall reply then becomes the new fingerprint — if THE
+    # LOOP persists, the gate fires again after another THRESHOLD repeats.
+    updates = {"final_response": text}
+    if text and config.STALL_THRESHOLD > 0:
+        fingerprint = text.casefold()
+        if fingerprint == state.get("last_reply_fingerprint", ""):
+            count = state.get("stall_count", 0) + 1
+        else:
+            count = 1
+        if count >= config.STALL_THRESHOLD:
+            logger.warning("stall detector: reply repeated %d consecutive turns — escalating", count)
+            text = config.STALL_TEXT
+            fingerprint, count = text.casefold(), 1
+            updates["final_response"] = text
+        updates["last_reply_fingerprint"] = fingerprint
+        updates["stall_count"] = count
+
+    if text:
+        updates["recent_messages"] = [AIMessage(content=text)]
+    return updates
+
+
+# --- helpers ---
+def _clear_pending(updates: dict) -> dict:
+    updates.update({"pending_intent": None, "pending_slots": {}, "pending_confirmation": {}})
+    return updates
+
+
+def _plan_active(state) -> bool:
+    """A plan is active while its walk index still points inside plan_steps.
+    Deliberately SEPARATE from pending_* (think clears those on every ready
+    payload; that must never kill the plan)."""
+    plan = state.get("plan_steps") or []
+    return bool(plan) and state.get("current_step_index", 0) < len(plan)
+
+
+def _clear_plan(updates: dict) -> dict:
+    """End a plan (completion or abort). Called on: finish, step failure,
+    confirm decline, HITL denial, restart, and goodbye."""
+    updates.update({"plan_steps": [], "current_step_index": 0})
+    return updates

@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Alta — AI Builder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #faf8f5;
+            --surface: #ffffff;
+            --surface-2: #f4f1ec;
+            --ink: #1a1a1f;
+            --ink-2: #4a4a55;
+            --muted: #8a8a97;
+            --border: #eae5dd;
+            --border-strong: #d9d3c7;
+            --accent: #5b4bff;
+            --accent-soft: #efeafe;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --warn: #d97706;
+            --grad: linear-gradient(135deg, #5b4bff 0%, #a855f7 60%, #ec4899 100%);
+            --shadow-sm: 0 1px 2px rgba(20, 20, 40, .04), 0 1px 1px rgba(20, 20, 40, .03);
+            --shadow-md: 0 4px 12px rgba(20, 20, 40, .06), 0 2px 4px rgba(20, 20, 40, .04);
+            --shadow-lg: 0 20px 40px -12px rgba(91, 75, 255, .18), 0 8px 16px rgba(20, 20, 40, .06);
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%
+        }
+
+        body {
+            font: 14px/1.5 "Inter", system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            -webkit-font-smoothing: antialiased;
+            overflow: hidden;
+        }
+
+        .serif {
+            font-family: "Instrument Serif", Georgia, serif;
+            font-weight: 400;
+            font-style: italic;
+            letter-spacing: .01em
+        }
+
+        button {
+            font: inherit;
+            cursor: pointer;
+            border: 0;
+            background: none;
+            color: inherit
+        }
+
+        input,
+        textarea {
+            font: inherit;
+            color: inherit
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d9d3c7;
+            border-radius: 10px
+        }
+
+        /* ============ Layout ============ */
+        .app {
+            display: grid;
+            grid-template-rows: 56px minmax(0, 1fr);
+            height: 100vh
+        }
+
+        header.topbar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 15px
+        }
+
+        .brand-mark {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: var(--grad);
+            display: grid;
+            place-items: center;
+            color: #fff;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .brand small {
+            color: var(--muted);
+            font-weight: 400;
+            margin-left: 6px
+        }
+
+        .top-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            align-items: center
+        }
+
+        .sid-input {
+            background: none;
+            border: none;
+            outline: none;
+            font: inherit;
+            color: inherit;
+            width: 9ch;
+            padding: 0;
+            cursor: text;
+            border-bottom: 1px dashed var(--border-strong);
+        }
+
+        .sid-input:focus {
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .sid-warning {
+            font-size: 11px;
+            color: var(--warn);
+        }
+
+        .session-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: var(--surface-2);
+            color: var(--ink-2);
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border);
+        }
+
+        /* 2-column layout (no left sidebar) */
+        main {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            min-height: 0;
+            height: 100%
+        }
+
+        /* ============ Chat column ============ */
+        section.chat {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            background: var(--bg)
+        }
+
+        .chat-head {
+            padding: 18px 28px 8px;
+        }
+
+        .chat-title {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -.01em
+        }
+
+        .chat-title .serif {
+            font-size: 26px;
+            color: var(--accent)
+        }
+
+        .chat-sub {
+            color: var(--muted);
+            font-size: 13px;
+            margin-top: 2px
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 28px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-height: 0;
+        }
+
+        .msg {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            animation: fadeUp .3s ease
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(6px)
+            }
+
+            to {
+                opacity: 1;
+                transform: none
+            }
+        }
+
+        .msg.user {
+            align-self: flex-end;
+            flex-direction: row-reverse
+        }
+
+        .msg-avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            flex: none;
+            display: grid;
+            place-items: center;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--ink-2);
+        }
+
+        .msg.assistant .msg-avatar {
+            background: var(--grad);
+            color: #fff;
+            border: 0
+        }
+
+        .msg.user .msg-avatar {
+            background: var(--ink);
+            color: #fff;
+            border: 0
+        }
+
+        .bubble {
+            padding: 11px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.55;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .msg.user .bubble {
+            background: var(--ink);
+            color: #fff;
+            border-color: transparent;
+            border-bottom-right-radius: 4px
+        }
+
+        .msg.assistant .bubble {
+            border-bottom-left-radius: 4px
+        }
+
+        .msg.error .bubble {
+            background: #fdf2f2;
+            border-color: #f4c9c9;
+            color: var(--danger);
+        }
+
+        .tool-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            margin-right: 6px;
+            padding: 4px 8px;
+            background: var(--surface-2);
+            color: var(--ink-2);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border);
+        }
+
+        .typing-indicator {
+            display: none;
+            align-self: flex-start;
+            margin-left: 42px;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--muted);
+            margin: 0 2px;
+            animation: blink 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: .2s
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: .4s
+        }
+
+        @keyframes blink {
+
+            0%,
+            60%,
+            100% {
+                opacity: .4
+            }
+
+            30% {
+                opacity: 1
+            }
+        }
+
+        .chips {
+            padding: 0 28px 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px
+        }
+
+        .chip {
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            font-size: 12.5px;
+            color: var(--ink-2);
+            cursor: pointer;
+        }
+
+        .chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-soft)
+        }
+
+        .composer {
+            margin: 0 20px 20px;
+            padding: 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .composer:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-soft)
+        }
+
+        .composer textarea {
+            width: 100%;
+            border: 0;
+            resize: none;
+            background: transparent;
+            font-size: 14px;
+            min-height: 24px;
+            max-height: 140px;
+            padding: 4px 6px;
+        }
+
+        .composer textarea:focus {
+            outline: none
+        }
+
+        .composer-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 6px
+        }
+
+        .composer-row .hint {
+            color: var(--muted);
+            font-size: 12px;
+            margin-left: 4px
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-weight: 500;
+            font-size: 13px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            transition: all .15s;
+        }
+
+        .btn.primary {
+            background: var(--ink);
+            color: #fff;
+            border-color: transparent;
+        }
+
+        .btn.primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn.sm {
+            padding: 5px 12px;
+            font-size: 12px;
+            border-radius: 8px
+        }
+
+        /* ============ Inspector (Right Sidebar) ============ */
+        aside.inspector {
+            border-left: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            gap: 24px;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .summary-card {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            display: none;
+        }
+
+        .summary-card h2 {
+            margin: 0 0 10px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--muted);
+        }
+
+        .summary-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            border-radius: 8px;
+            padding: 6px 8px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            font: inherit;
+            color: inherit;
+        }
+
+        .summary-item:hover {
+            background: var(--surface-3, rgba(127, 127, 127, .12));
+        }
+
+        .summary-item .summary-phase {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
+        }
+
+        .summary-item .summary-line {
+            font-size: 13px;
+            color: var(--ink);
+            white-space: pre-wrap;
+        }
+
+        /* Test call Orb */
+        .call-hero {
+            background: var(--grad);
+            border-radius: 16px;
+            padding: 24px 16px;
+            text-align: center;
+            color: #fff;
+            box-shadow: var(--shadow-md);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .orb {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            position: relative;
+            background: rgba(255, 255, 255, .15);
+            backdrop-filter: blur(4px);
+            display: grid;
+            place-items: center;
+        }
+
+        .orb::before,
+        .orb::after {
+            content: "";
+            position: absolute;
+            inset: -8px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255, 255, 255, .4);
+        }
+
+        .orb.active::before,
+        .orb.active::after {
+            animation: ripple 2.4s infinite;
+            border-color: rgba(255, 255, 255, .7)
+        }
+
+        .orb.active::after {
+            animation-delay: 1.2s
+        }
+
+        .orb.idle::before,
+        .orb.idle::after {
+            opacity: .2;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: scale(1);
+                opacity: .7
+            }
+
+            100% {
+                transform: scale(1.5);
+                opacity: 0
+            }
+        }
+
+        .orb-core {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #fff;
+            display: grid;
+            place-items: center;
+            color: var(--accent);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .2);
+        }
+
+        .call-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 0 0 6px;
+            position: relative
+        }
+
+        .call-sub {
+            font-size: 12.5px;
+            opacity: .9;
+            margin: 0 0 16px;
+            position: relative;
+            line-height: 1.4
+        }
+
+        .call-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 100%;
+            padding: 10px;
+            background: #fff;
+            color: var(--ink);
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 13px;
+            position: relative;
+            transition: transform 0.15s;
+        }
+
+        .call-btn:not(:disabled):hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
+        }
+
+        .call-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            color: var(--muted)
+        }
+
+        /* ===== Guided wizard (additive — reuses existing tokens only) ===== */
+        .stepper {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 4px 28px 10px;
+        }
+
+        .step {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--muted);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+        }
+
+        .step .step-num {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 9.5px;
+            background: var(--border-strong);
+            color: #fff;
+        }
+
+        .step.active {
+            color: var(--accent);
+            background: var(--accent-soft);
+            border-color: var(--accent);
+        }
+
+        .step.active .step-num {
+            background: var(--accent)
+        }
+
+        .step.done {
+            color: var(--success);
+            border-color: rgba(22, 163, 74, .3);
+        }
+
+        .step.done .step-num {
+            background: var(--success)
+        }
+
+        .ask-card {
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            box-shadow: var(--shadow-md);
+            padding: 16px;
+            width: 100%;
+        }
+
+        .ask-card .ask-phase {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .ask-card .ask-intro {
+            font-size: 14px;
+            color: var(--ink);
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        .ask-q {
+            margin-bottom: 14px
+        }
+
+        .ask-q label {
+            display: block;
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--ink);
+            margin-bottom: 4px;
+        }
+
+        .ask-q .ask-hint {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .ask-q textarea {
+            width: 100%;
+            border: 1px solid var(--border-strong);
+            border-radius: 10px;
+            background: var(--surface-2);
+            padding: 9px 11px;
+            font-size: 13.5px;
+            resize: none;
+            min-height: 40px;
+            max-height: 160px;
+        }
+
+        .ask-q textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+
+        .ask-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+
+        /* Inline design editor: the "I'd change something" flow turns the design
+           text into this editable field so the user corrects it in place. */
+        .ask-card .ask-edit {
+            width: 100%;
+            border: 1px solid var(--accent);
+            border-radius: 10px;
+            background: var(--surface);
+            padding: 9px 11px;
+            font-size: 13.5px;
+            line-height: 1.5;
+            resize: none;
+            min-height: 60px;
+            max-height: 320px;
+            margin-bottom: 8px;
+        }
+
+        .ask-card .ask-edit:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+
+        .ask-card.answered {
+            pointer-events: none;
+        }
+
+        .ask-card.answered .ask-q,
+        .ask-card.answered .ask-actions,
+        .ask-card.answered .ask-edit,
+        .ask-card.answered .ask-intro {
+            display: none;
+        }
+
+        .ask-card.answered .ask-phase {
+            margin-bottom: 0;
+            color: var(--success);
+        }
+
+        .ask-card.answered .ask-phase::after {
+            content: ' — completed ✓';
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 500;
+        }
+
+        /* ===== Submitted answer card ===== */
+        .answer-card {
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+            padding: 14px 16px;
+            max-width: 420px;
+            border-left: 3px solid var(--accent);
+        }
+
+        .answer-card .answer-header {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .answer-card .answer-pair {
+            padding: 7px 0;
+        }
+
+        .answer-card .answer-pair + .answer-pair {
+            border-top: 1px solid var(--border);
+        }
+
+        .answer-card .answer-label {
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--muted);
+            margin-bottom: 2px;
+        }
+
+        .answer-card .answer-value {
+            font-size: 13.5px;
+            color: var(--ink);
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .answer-card .answer-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--success);
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: rgba(22, 163, 74, .08);
+        }
+
+        /* ===== Recruiter setup + agent settings ===== */
+        .setup-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(20, 20, 40, .35);
+            backdrop-filter: blur(3px);
+            display: grid;
+            place-items: center;
+            z-index: 50;
+        }
+
+        .setup-card {
+            max-width: 460px;
+            margin: 16px;
+        }
+
+        .auth-disconnect {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--danger);
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+
+        .auth-disconnect:hover {
+            background: #fdf2f2;
+        }
+
+        .settings-card {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+        }
+
+        .settings-card h2 {
+            margin: 0 0 6px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--muted);
+        }
+
+        .settings-sub,
+        .settings-note {
+            font-size: 11.5px;
+            color: var(--muted);
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+
+        .settings-note {
+            margin: 8px 0 0;
+        }
+
+        .env-field {
+            margin-bottom: 8px;
+        }
+
+        .env-field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--ink-2);
+            margin-bottom: 3px;
+        }
+
+        .env-field input {
+            width: 100%;
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            background: var(--surface);
+            padding: 6px 9px;
+            font-size: 12px;
+        }
+
+        .settings-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        /* Tic Tac Toe styles */
+        #tictactoe-container {
+            margin: 16px 20px;
+            text-align: center;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 4px 12px var(--shadow);
+            position: relative;
+        }
+        .ttt-close {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: var(--ink-2);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px;
+        }
+        .ttt-close:hover {
+            color: var(--ink);
+        }
+        .ttt-title {
+            font-size: 13px;
+            color: var(--ink-2);
+            margin-bottom: 12px;
+            margin-top: 4px;
+        }
+        .ttt-board {
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            gap: 6px;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        .ttt-cell {
+            width: 50px;
+            height: 50px;
+            background-color: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.2s;
+            border: 1px solid var(--border);
+        }
+        .ttt-cell:hover {
+            background-color: var(--border);
+        }
+        .ttt-cell.x { color: var(--accent); }
+        .ttt-cell.o { color: var(--danger); }
+        .ttt-winner {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 10px;
+            min-height: 20px;
+            color: var(--ink);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-mark">A</div>
+                Alta <small>Voice Agent Studio</small>
+            </div>
+            <div class="top-actions">
+                <span class="session-pill" id="authPill" style="display:none" title="How the builder is powered">
+                    <span id="authPillText"></span>
+                    <button id="authDisconnect" class="auth-disconnect" title="Stop using this credential now">Disconnect</button>
+                </span>
+                <span class="session-pill" title="Session ID — click to edit, Enter to switch">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                    </svg>
+                    <input id="sidDisplay" class="sid-input" spellcheck="false" />
+                </span>
+                <span id="sidWarning" class="sid-warning" style="display:none">No project found for this session</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="chat">
+                <div class="chat-head">
+                    <h1 class="chat-title">Let's <span class="serif">build</span> your agent</h1>
+                    <div class="chat-sub">Describe what your agent should do. The AI builder will write the code and
+                        test it automatically.</div>
+                </div>
+
+                <div class="messages" id="messages"></div>
+
+                <div class="typing-indicator" id="typing">
+                    Builder is working<span></span><span></span><span></span>
+                </div>
+
+                <div id="tictactoe-container" style="display: none;">
+                    <button class="ttt-close" id="tttClose" title="Hide game">✕</button>
+                    <div class="ttt-title">Loading data... meanwhile, play against me:</div>
+                    <div class="ttt-board" id="tttBoard">
+                        <div class="ttt-cell" data-idx="0"></div><div class="ttt-cell" data-idx="1"></div><div class="ttt-cell" data-idx="2"></div>
+                        <div class="ttt-cell" data-idx="3"></div><div class="ttt-cell" data-idx="4"></div><div class="ttt-cell" data-idx="5"></div>
+                        <div class="ttt-cell" data-idx="6"></div><div class="ttt-cell" data-idx="7"></div><div class="ttt-cell" data-idx="8"></div>
+                    </div>
+                    <div class="ttt-winner" id="tttWinner"></div>
+                    <button class="btn sm" id="tttReset" style="display:none; margin: 0 auto;">Play Again</button>
+                </div>
+
+                <div class="chips" id="chips">
+                    <!--
+                    <button class="chip"
+                        data-prompt="Build a voice SDR agent for my SaaS that qualifies inbound leads and books demos.">🚀
+                        Qualify SaaS leads</button>
+                    <button class="chip"
+                        data-prompt="Build a friendly agent that books dental appointments and handles cancellations.">📅
+                        Book appointments</button>
+                    <button class="chip"
+                        data-prompt="Build a support agent that answers FAQs and routes angry callers to a human.">💬
+                        Support & Escalation</button>
+                    -->
+                </div>
+
+                <form class="composer" id="composer">
+                    <textarea id="input" placeholder="Tell Alta what to build or change..." rows="1"></textarea>
+                    <div class="composer-row">
+                        <span class="hint">Press <kbd
+                                style="font-family:inherit;background:var(--surface-2);padding:1px 5px;border-radius:4px;border:1px solid var(--border)">Enter</kbd>
+                            to send</span>
+                        <button type="submit" class="btn primary sm" id="sendBtn" style="margin-left:auto">
+                            Send
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M5 12h14m0 0l-6-6m6 6l-6 6" />
+                            </svg>
+                        </button>
+                        <button type="button" class="btn sm" id="stopBtn" style="margin-left:auto; display:none">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="5" y="5" width="14" height="14" rx="2" />
+                            </svg>
+                            Stop
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <aside class="inspector">
+
+
+                <div class="summary-card" id="summaryCard">
+                    <h2>Design summary</h2>
+                    <div id="summaryList"></div>
+                </div>
+
+                <div class="settings-card" id="settingsCard" style="display:none">
+                    <h2>Your agent</h2>
+                    <div class="settings-sub">Take the generated agent with you — a complete,
+                        standalone project.</div>
+                    <div class="settings-actions">
+                        <button class="btn sm" id="agentDownload">Download agent (.zip)</button>
+                    </div>
+                </div>
+
+                <div class="call-hero">
+                    <div class="orb idle" id="orb">
+                        <div class="orb-core">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z" />
+                            </svg>
+                        </div>
+                    </div>
+                    <h3 class="call-title" id="callTitle">Waiting for build</h3>
+                    <p class="call-sub" id="callSub">The test call will unlock once the agent passes its selftest.</p>
+                    <button class="call-btn" id="callBtn" disabled>
+                        Call agent
+                    </button>
+                </div>
+
+            </aside>
+        </main>
+    </div>
+
+    <!-- First-run setup: informed consent BEFORE any tokens burn. -->
+    <div class="setup-overlay" id="setupOverlay" style="display:none">
+        <div class="ask-card setup-card">
+            <div class="ask-phase">Reviewer Setup</div>
+            <div class="ask-intro" style="margin-bottom: 20px;">
+                <div style="background: var(--accent-soft); color: var(--accent); padding: 12px 16px; border-radius: 10px; font-size: 13.5px; margin-bottom: 16px; display: flex; gap: 10px; align-items: flex-start; line-height: 1.45;">
+                    <span style="font-size: 16px; margin-top: 1px;">👋</span>
+                    <div>
+                        <strong style="font-weight: 600;">Hello!</strong> This quick setup is just for the review process so you can test the builder locally. It is not part of the core product experience.
+                    </div>
+                </div>
+                The builder needs to connect to an AI model to work. It runs entirely on this machine and uses <strong>your</strong> Anthropic credential (an API key or your Claude login). You have full control — nothing runs until you choose, and you can disconnect anytime.
+            </div>
+            <div class="ask-q">
+                <label for="setupKey">Anthropic API Key</label>
+                <div class="ask-hint">Powers the AI builder. Starts with sk-ant-. Stored locally in .env.</div>
+                <textarea id="setupKey" rows="1" placeholder="sk-ant-…"></textarea>
+            </div>
+            <div class="ask-q">
+                <label for="setupOpenaiKey">OpenAI API Key <span style="font-weight: 400; color: var(--muted);">(Optional)</span></label>
+                <div class="ask-hint">Powers the generated voice agent's brain. Without it, agents run in offline mock mode. Stored locally in .env.</div>
+                <textarea id="setupOpenaiKey" rows="1" placeholder="sk-…"></textarea>
+            </div>
+            <div class="ask-hint" style="margin-top: 8px; margin-bottom: 16px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--ink-2); line-height: 1.45;">
+                <strong style="color: var(--ink);">Good news:</strong> Voice calling is already wired! We've pre-configured Vapi with restricted credentials, so you don't need a Vapi account. Just the keys above and you're ready to go.
+            </div>
+            <div class="ask-actions">
+                <button class="btn primary sm" id="setupUseKey">Use this API key</button>
+                <button class="btn sm" id="setupUseSub">Use my Claude subscription login</button>
+            </div>
+            <div class="settings-note" id="setupError" style="color: var(--danger); margin-top: 12px; margin-bottom: 0;"></div>
+        </div>
+    </div>
+
+    <script>
+        "use strict";
+
+        // Session Management
+        const sessionId = (localStorage.getItem("alta_sid") ||
+            (() => {
+                const v = "web_" + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem("alta_sid", v); return v;
+            })());
+        const sidInput = document.getElementById("sidDisplay");
+        sidInput.value = sessionId;
+        sidInput.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter") return;
+            const next = sidInput.value.trim();
+            if (!/^[A-Za-z0-9_-]{1,64}$/.test(next)) { sidInput.value = sessionId; return; }
+            localStorage.setItem("alta_sid", next);
+            sessionStorage.setItem("alta_sid_switched", "1");
+            location.reload();
+        });
+        sidInput.addEventListener("blur", () => { sidInput.value = sessionId; });
+        // One-shot: only warn right after a manual switch, not on every normal
+        // page load of a brand-new session (which never expected a project).
+        const justSwitchedSession = sessionStorage.getItem("alta_sid_switched") === "1";
+        sessionStorage.removeItem("alta_sid_switched");
+
+        // DOM Elements
+        const messagesEl = document.getElementById("messages");
+        const inputEl = document.getElementById("input");
+        const sendBtn = document.getElementById("sendBtn");
+        const stopBtn = document.getElementById("stopBtn");
+
+        // Single source of truth for "a turn is running": show Stop, hide Send.
+        // Stop stays visible for the WHOLE active turn — including after a
+        // dropped stream — so it can never disappear while the agent runs.
+        function setBusy(on) {
+            sendBtn.disabled = on;
+            sendBtn.style.display = on ? "none" : "inline-flex";
+            stopBtn.style.display = on ? "inline-flex" : "none";
+            typingEl.style.display = on ? "block" : "none";
+
+            const ttt = document.getElementById("tictactoe-container");
+            if (ttt && !document.getElementById("tttClose").dataset.closed) {
+                if (on && window.currentPhase === "build") {
+                    ttt.style.display = "block";
+                    if (window.resetTicTacToe) window.resetTicTacToe();
+                } else {
+                    ttt.style.display = "none";
+                }
+            }
+        }
+
+        // Hard stop: abort the browser stream AND tell the backend to interrupt
+        // the running agent turn. Aborting the fetch alone left the turn (and
+        // its token spend) running server-side — the interrupt is what stops it.
+        async function stopTurn() {
+            if (activeAbort) activeAbort.abort();
+            try {
+                await fetch("/api/chat/stop", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId }),
+                });
+            } catch (e) { /* best-effort; UI still resets below */ }
+            setBusy(false);
+        }
+        stopBtn.addEventListener("click", stopTurn);
+        const typingEl = document.getElementById("typing");
+        const composer = document.getElementById("composer");
+
+        // Tool mapping for beautiful tags
+        const TOOL_LABELS = {
+            "Read": "Reading references",
+            "Grep": "Searching docs",
+            "Glob": "Scanning codebase",
+            "Write": "Writing files",
+            "Edit": "Editing files",
+            "TodoWrite": "Planning steps",
+            "mcp__platform__instantiate_boilerplate": "Creating project",
+            "mcp__platform__run_selftest": "Running validation checks",
+        };
+
+        // Auto-resize textarea
+        inputEl.addEventListener("input", () => {
+            inputEl.style.height = "auto";
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+        });
+
+        // UI Helpers
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+        }
+
+        // Minimal markdown for chat bubbles. The builder is instructed to emit
+        // plain prose; this is the demo backstop so a slipped **bold** never
+        // renders as literal asterisks. Input MUST already be escapeHtml'd —
+        // these regexes only ever emit the tags below, so no XSS surface.
+        function mdLite(s) {
+            return s
+                .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+                .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, "$1<em>$2</em>")
+                .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+                .replace(/^#{1,3}\s+(.+)$/gm, "<strong>$1</strong>");
+        }
+
+        function addMsg(role, text) {
+            const div = document.createElement("div");
+            div.className = `msg ${role}`;
+            const avatar = role === 'user' ? 'You' : 'A';
+            div.innerHTML = `
+    <div class="msg-avatar">${avatar}</div>
+    <div class="bubble">${mdLite(escapeHtml(text))}</div>
+  `;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            return div.querySelector('.bubble');
+        }
+
+        function addToolTag(bubble, toolName) {
+            const label = TOOL_LABELS[toolName] || toolName;
+            const tag = document.createElement("div");
+            tag.className = "tool-tag";
+            tag.innerHTML = `⚙ ${escapeHtml(label)}`;
+            bubble.appendChild(tag);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // ===== Guided wizard: alta:ask protocol =====
+        const ASK_OPEN = "```alta:ask";
+        const ASK_FENCE_RE = /```alta:ask\s*([\s\S]*?)```/;
+        const STEP_ORDER = ["mission", "qualification", "objections", "close", "boundaries", "review", "build"];
+        const STEP_LABELS = {
+            mission: "Mission", qualification: "Qualify", objections: "Objections",
+            close: "Close", boundaries: "Boundaries", review: "Review", build: "Build"
+        };
+        let stepperEl = null;
+
+        // Hide the fenced block from the live stream so raw JSON never flashes.
+        function stripFenceForLive(text) {
+            const i = text.indexOf(ASK_OPEN);
+            return (i >= 0 ? text.slice(0, i) : text).replace(/\s+$/, "");
+        }
+
+        // Extract the ask-block object from a completed turn, or null (degrade to chat).
+        function parseAskBlock(text) {
+            const m = text.match(ASK_FENCE_RE);
+            if (!m) return null;
+            try {
+                const obj = JSON.parse(m[1].trim());
+                return (obj && typeof obj === "object") ? obj : null;
+            } catch (e) { return null; }
+        }
+
+        // ===== Design summary card (Fin: client-side only, zero backend) =====
+        // Keyed by phase so a later answer in the same phase replaces the
+        // earlier one instead of piling up duplicates.
+        const designSummary = {};       // phase -> {label, lines}
+
+        function recordSummary(block, lines) {
+            if (!block || !block.phase || block.kind === "approve") return;
+            designSummary[block.phase] = {
+                label: STEP_LABELS[block.phase] || block.phase,
+                lines,
+            };
+            renderSummary();
+        }
+
+        function renderSummary() {
+            const card = document.getElementById("summaryCard");
+            const list = document.getElementById("summaryList");
+            const phases = Object.keys(designSummary);
+            if (phases.length === 0) { card.style.display = "none"; return; }
+            card.style.display = "block";
+            list.innerHTML = "";
+            for (const phase of STEP_ORDER) {
+                const entry = designSummary[phase];
+                if (!entry) continue;
+                const btn = document.createElement("button");
+                btn.className = "summary-item";
+                btn.type = "button";
+                btn.innerHTML = `<div class="summary-phase">${escapeHtml(entry.label)}</div>` +
+                    `<div class="summary-line">${escapeHtml(entry.lines)}</div>`;
+                btn.addEventListener("click", () => {
+                    inputEl.value = `Change this: ${entry.lines}\n\n`;
+                    inputEl.focus();
+                    inputEl.style.height = "auto";
+                    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+                });
+                list.appendChild(btn);
+            }
+        }
+
+        function initStepper() {
+            stepperEl = document.createElement("div");
+            stepperEl.className = "stepper";
+            stepperEl.style.display = "none";
+            document.querySelector(".chat-head").insertAdjacentElement("afterend", stepperEl);
+        }
+
+        function renderStepper(activeIdx) {
+            if (!stepperEl) return;
+            stepperEl.innerHTML = STEP_ORDER.map((k, i) => {
+                const cls = i < activeIdx ? "done" : (i === activeIdx ? "active" : "");
+                const mark = i < activeIdx ? "✓" : (i + 1);
+                return `<span class="step ${cls}"><span class="step-num">${mark}</span>${STEP_LABELS[k]}</span>`;
+            }).join("");
+        }
+
+        function setStepper(phase) {
+            window.currentPhase = phase;
+            const idx = STEP_ORDER.indexOf(phase);
+            if (idx < 0 || !stepperEl) return;
+            stepperEl.style.display = "flex";
+            renderStepper(idx);
+        }
+
+        // Render an alta:ask block as a question card (open answers) or an approve card.
+        function renderAskCard(block) {
+            const msg = document.createElement("div");
+            msg.className = "msg assistant";
+            msg.innerHTML = `<div class="msg-avatar">A</div>`;
+
+            const card = document.createElement("div");
+            card.className = "ask-card";
+            const phaseLabel = STEP_LABELS[block.phase] || (block.phase || "");
+            const stepInfo = (block.step && block.of) ? ` · Step ${block.step} of ${block.of}` : "";
+            const head = `<div class="ask-phase">${escapeHtml(phaseLabel)}${stepInfo}</div>`;
+
+            if (block.kind === "approve") {
+                const designText = block.intro || "Does this look right?";
+                card.innerHTML = head +
+                    `<div class="ask-intro" data-role="design">${escapeHtml(designText)}</div>
+                     <div class="ask-actions">
+                       <button class="btn primary sm" data-act="approve">${escapeHtml(block.approve_label || "Looks great")}</button>
+                       <button class="btn sm" data-act="revise">${escapeHtml(block.revise_label || "I'd change something")}</button>
+                     </div>`;
+                const actions = card.querySelector(".ask-actions");
+                card.querySelector('[data-act="approve"]').addEventListener("click", () => {
+                    card.classList.add("answered");
+                    sendRequest(block.approve_label || "Approved — please build it.");
+                });
+                // Revise = edit the design text in place, then submit the
+                // corrected version for final approval (not a freehand retype).
+                card.querySelector('[data-act="revise"]').addEventListener("click", () => {
+                    const designEl = card.querySelector('[data-role="design"]');
+                    const ta = document.createElement("textarea");
+                    ta.className = "ask-edit";
+                    ta.value = designEl.textContent;
+                    designEl.replaceWith(ta);
+                    actions.innerHTML =
+                        `<button class="btn primary sm" data-act="submit-edit">Submit for approval</button>`;
+                    const grow = () => {
+                        ta.style.height = "auto";
+                        ta.style.height = Math.min(ta.scrollHeight, 320) + "px";
+                    };
+                    ta.addEventListener("input", grow);
+                    ta.focus();
+                    grow();
+                    card.querySelector('[data-act="submit-edit"]').addEventListener("click", () => {
+                        const edited = ta.value.trim();
+                        if (!edited) { ta.focus(); return; }
+                        card.classList.add("answered");
+                        sendRequest(`Here is the corrected design — please use exactly this and build it:\n\n${edited}`);
+                    });
+                });
+            } else {
+                const qs = Array.isArray(block.questions) ? block.questions : [];
+                const qHtml = qs.map((q, i) => `
+                    <div class="ask-q">
+                      <label for="askq_${i}">${escapeHtml(q.label || "")}</label>
+                      ${q.hint ? `<div class="ask-hint">${escapeHtml(q.hint)}</div>` : ""}
+                      <textarea id="askq_${i}" rows="1" placeholder="${escapeHtml(q.placeholder || "Type your answer…")}"></textarea>
+                    </div>`).join("");
+                card.innerHTML = head +
+                    (block.intro ? `<div class="ask-intro">${escapeHtml(block.intro)}</div>` : "") +
+                    qHtml +
+                    `<div class="ask-actions"><button class="btn primary sm" data-act="continue">Continue</button></div>`;
+                card.querySelector('[data-act="continue"]').addEventListener("click", () => {
+                    const pairs = qs.map((q, i) => {
+                        const val = (card.querySelector(`#askq_${i}`)?.value || "").trim();
+                        return { label: q.label || "", value: val || "(no answer)" };
+                    });
+                    const lines = pairs.map(p => `${p.label}\n${p.value}`).join("\n\n");
+                    card.classList.add("answered");
+                    recordSummary(block, lines);
+                    addAnswerCard(pairs);
+                    sendRequest(lines, { skipUserMsg: true });
+                });
+                card.querySelectorAll("textarea").forEach(t => {
+                    t.addEventListener("input", () => {
+                        t.style.height = "auto";
+                        t.style.height = Math.min(t.scrollHeight, 160) + "px";
+                    });
+                });
+            }
+
+            msg.appendChild(card);
+            messagesEl.appendChild(msg);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // Render a structured answer card for submitted quiz responses
+        function addAnswerCard(pairs) {
+            const div = document.createElement("div");
+            div.className = "msg user";
+            const pairsHtml = pairs.map(p =>
+                `<div class="answer-pair">
+                    <div class="answer-label">${escapeHtml(p.label)}</div>
+                    <div class="answer-value">${escapeHtml(p.value)}</div>
+                </div>`
+            ).join("");
+            div.innerHTML = `
+                <div class="answer-card">
+                    <div class="answer-header">Your answers</div>
+                    ${pairsHtml}
+                    <div class="answer-status">✓ Submitted</div>
+                </div>
+                <div class="msg-avatar">You</div>
+            `;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // Core Chat Logic (Claude's SSE logic merged)
+        let activeAbort = null;   // AbortController for the in-flight turn, or null
+
+        async function sendRequest(text, opts = {}) {
+            if (!text || sendBtn.disabled) return;
+
+            inputEl.value = "";
+            inputEl.style.height = "auto";
+            if (!opts.skipUserMsg) addMsg("user", text);
+
+            setBusy(true);
+            activeAbort = new AbortController();
+
+            let currentBotBubble = null;
+            let turnText = "";     // full assistant text this turn (ask-block parse)
+            let bubbleRaw = "";    // raw text of the current bubble (live fence-strip)
+
+            try {
+                const resp = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId, message: text }),
+                    signal: activeAbort.signal,
+                });
+
+                if (!resp.ok) {
+                    addMsg("error", "Request failed: HTTP " + resp.status);
+                    setBusy(false);       // request completed (with an error) — no turn is running
+                    activeAbort = null;
+                    return;
+                }
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buf = "";
+
+                for (; ;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(value, { stream: true });
+
+                    let idx;
+                    while ((idx = buf.indexOf("\n\n")) >= 0) {
+                        const frame = buf.slice(0, idx);
+                        buf = buf.slice(idx + 2);
+
+                        if (!frame.startsWith("data: ")) continue;
+                        const data = frame.slice(6);
+                        if (data === "[DONE]") continue;
+
+                        const ev = JSON.parse(data);
+
+                        if (ev.type === "text") {
+                            if (!currentBotBubble) { currentBotBubble = addMsg("assistant", ""); bubbleRaw = ""; }
+                            turnText += ev.text;
+                            bubbleRaw += ev.text;
+                            // Live-render only the text before any alta:ask fence,
+                            // so raw JSON never flashes in the bubble.
+                            currentBotBubble.innerHTML = mdLite(escapeHtml(stripFenceForLive(bubbleRaw)));
+                            messagesEl.scrollTop = messagesEl.scrollHeight;
+                        }
+                        else if (ev.type === "tool") {
+                            // Tool activity is INTERNAL — the client never sees which
+                            // files/tools ran (that read as the agent editing its own
+                            // source). No chip, no bubble; the top stepper and the
+                            // typing indicator are the only progress shown. Reset the
+                            // bubble so any following client text starts fresh.
+                            if (ev.name === "mcp__platform__instantiate_boilerplate") setStepper("build");
+                            currentBotBubble = null;
+                            bubbleRaw = "";
+                        }
+                        else if (ev.type === "error") {
+                            addMsg("error", "Builder error: " + ev.detail);
+                        }
+                        else if (ev.type === "result") {
+                            const block = parseAskBlock(turnText);
+                            if (block) {
+                                // If the visible bubble is now empty (turn was only the
+                                // fenced block), drop it so just the card shows.
+                                if (currentBotBubble && currentBotBubble.textContent.trim() === "") {
+                                    const m = currentBotBubble.closest(".msg");
+                                    if (m) m.remove();
+                                }
+                                renderAskCard(block);
+                                if (block.phase) setStepper(block.phase);
+                            }
+                            refreshAgent();
+                        }
+                    }
+                }
+                // Stream ended cleanly.
+                setBusy(false);
+                inputEl.focus();
+            } catch (err) {
+                activeAbort = null;
+                if (err.name === "AbortError") {
+                    setBusy(false);   // user pressed Stop — already interrupted
+                } else {
+                    // The stream dropped, but the builder turn may STILL be
+                    // running server-side. Keep Stop visible so it can be
+                    // halted; do NOT restore Send (would risk a double-run).
+                    addMsg("error", "Connection lost — the builder may still be "
+                        + "running. Press Stop to halt it, then try again.");
+                }
+                return;
+            }
+            activeAbort = null;
+        }
+
+        // Event Listeners
+        composer.addEventListener("submit", e => {
+            e.preventDefault();
+            sendRequest(inputEl.value.trim());
+        });
+
+        inputEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendRequest(inputEl.value.trim());
+            }
+        });
+
+        document.getElementById("chips").addEventListener("click", e => {
+            const chip = e.target.closest(".chip");
+            if (!chip) return;
+            sendRequest(chip.dataset.prompt);
+        });
+
+        // Agent Status Polling (Claude's Logic + Lovable UI triggers)
+        async function refreshAgent() {
+            try {
+                const r = await fetch("/api/agent?session_id=" + encodeURIComponent(sessionId));
+                const a = await r.json();
+
+                const orb = document.getElementById("orb");
+                const callBtn = document.getElementById("callBtn");
+
+                document.getElementById("sidWarning").style.display =
+                    (justSwitchedSession && !a.exists) ? "inline" : "none";
+
+                // A live call owns the call button: this poll fires every few
+                // seconds and would otherwise reset the label to "Start call"
+                // and re-enable it mid-conversation.
+                const callOwnsBtn = window.altaCall && window.altaCall.active;
+
+                // Agent takeaway card: visible once the project exists.
+                document.getElementById("settingsCard").style.display =
+                    a.exists ? "block" : "none";
+
+                if (a.exists && a.selftest_passed) {
+                    if (stepperEl && stepperEl.style.display !== "none") renderStepper(STEP_ORDER.length);
+
+                    // Ignite the Orb!
+                    orb.classList.remove("idle");
+                    orb.classList.add("active");
+                    if (!callOwnsBtn) {
+                        document.getElementById("callTitle").textContent = "Agent is live";
+                        document.getElementById("callSub").textContent = "The architecture is verified and ready for a voice test.";
+                        callBtn.disabled = false;
+                        callBtn.innerHTML = `Start call <span>→</span>`;
+                    }
+
+                } else if (a.exists) {
+                    orb.classList.remove("active");
+                    orb.classList.add("idle");
+                    if (!callOwnsBtn) callBtn.disabled = true;
+                } else {
+                    orb.classList.remove("active");
+                    orb.classList.add("idle");
+                    if (!callOwnsBtn) callBtn.disabled = true;
+                }
+            } catch (e) { /* silent fail on poll */ }
+        }
+
+        // ===== Recruiter auth: informed consent + disconnect =====
+        const setupOverlay = document.getElementById("setupOverlay");
+        const authPill = document.getElementById("authPill");
+
+        async function refreshAuth() {
+            try {
+                const s = await (await fetch("/api/auth/status")).json();
+                setupOverlay.style.display = s.configured ? "none" : "grid";
+                inputEl.disabled = !s.configured;
+                authPill.style.display = s.configured ? "inline-flex" : "none";
+                document.getElementById("authPillText").textContent =
+                    s.mode === "api_key" ? "Powered by your API key"
+                                         : "Powered by your Claude subscription";
+            } catch (e) { /* status poll only */ }
+        }
+
+        async function authSetup(mode, apiKey) {
+            const errEl = document.getElementById("setupError");
+            errEl.textContent = "";
+            const openaiKey = document.getElementById("setupOpenaiKey").value.trim();
+            try {
+                const r = await fetch("/api/auth/setup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode, api_key: apiKey || null,
+                                           openai_key: openaiKey || null }),
+                });
+                const body = await r.json().catch(() => ({}));
+                if (!r.ok) { errEl.textContent = body.detail || ("HTTP " + r.status); return; }
+                refreshAuth();
+            } catch (e) { errEl.textContent = String(e.message || e); }
+        }
+
+        document.getElementById("setupUseKey").addEventListener("click", () =>
+            authSetup("api_key", document.getElementById("setupKey").value.trim()));
+        document.getElementById("setupUseSub").addEventListener("click", () =>
+            authSetup("subscription"));
+        document.getElementById("authDisconnect").addEventListener("click", async () => {
+            if (!confirm("Disconnect now? The builder stops using your credential and all sessions close.")) return;
+            await fetch("/api/auth/logout", { method: "POST" });
+            refreshAuth();
+        });
+
+        // ===== Agent takeaway: zip download =====
+        document.getElementById("agentDownload").addEventListener("click", () => {
+            window.location.href = "/api/agent/download?session_id=" + encodeURIComponent(sessionId);
+        });
+
+        // Initialize
+        // Tic-Tac-Toe Game Logic (Vanilla JS)
+        (function initTicTacToe() {
+            let board = Array(9).fill(null);
+            let isPlayerTurn = true;
+            let winner = null;
+            let timer = null;
+
+            const cells = document.querySelectorAll('.ttt-cell');
+            const winnerText = document.getElementById('tttWinner');
+            const resetBtn = document.getElementById('tttReset');
+            const closeBtn = document.getElementById('tttClose');
+            const container = document.getElementById('tictactoe-container');
+
+            closeBtn.addEventListener('click', () => {
+                closeBtn.dataset.closed = "true";
+                container.style.display = "none";
+            });
+
+            function checkWinner(squares) {
+                const lines = [
+                    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                    [0, 4, 8], [2, 4, 6]
+                ];
+                for (let i = 0; i < lines.length; i++) {
+                    const [a, b, c] = lines[i];
+                    if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) return squares[a];
+                }
+                return squares.includes(null) ? null : 'Tie';
+            }
+
+            function updateUI() {
+                cells.forEach((cell, idx) => {
+                    cell.textContent = board[idx] || "";
+                    cell.className = 'ttt-cell' + (board[idx] === 'X' ? ' x' : (board[idx] === 'O' ? ' o' : ''));
+                });
+                if (winner) {
+                    winnerText.textContent = winner === 'Tie' ? 'Tie!' : `Winner: ${winner}`;
+                    resetBtn.style.display = "block";
+                } else {
+                    winnerText.textContent = "";
+                    resetBtn.style.display = "none";
+                }
+            }
+
+            function computerMove() {
+                const currentWinner = checkWinner(board);
+                if (currentWinner) { winner = currentWinner; updateUI(); return; }
+
+                timer = setTimeout(() => {
+                    const emptyIndices = board.map((v, i) => v === null ? i : null).filter(v => v !== null);
+                    if (emptyIndices.length > 0) {
+                        const randomIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+                        board[randomIdx] = 'O';
+                        isPlayerTurn = true;
+                        const w = checkWinner(board);
+                        if (w) winner = w;
+                        updateUI();
+                    }
+                }, 500);
+            }
+
+            cells.forEach((cell, idx) => {
+                cell.addEventListener('click', () => {
+                    if (board[idx] || winner || !isPlayerTurn) return;
+                    board[idx] = 'X';
+                    isPlayerTurn = false;
+                    const w = checkWinner(board);
+                    if (w) { winner = w; updateUI(); return; }
+                    updateUI();
+                    computerMove();
+                });
+            });
+
+            window.resetTicTacToe = function() {
+                if (timer) clearTimeout(timer);
+                board = Array(9).fill(null);
+                isPlayerTurn = true;
+                winner = null;
+                updateUI();
+            };
+
+            resetBtn.addEventListener('click', window.resetTicTacToe);
+        })();
+
+        initStepper();
+        refreshAuth();
+        refreshAgent();
+        // Keep status live without needing a chat turn (e.g. a pre-existing
+        // project after switching session id). callOwnsBtn guards a live call.
+        setInterval(refreshAgent, 5000);
+        addMsg("assistant", "Hi! I'm Alta's builder. Tell me about the voice agent you need — who it calls, what it should accomplish, and any specific behaviors. I'll design it with you step by step, then build and test it for you.");
+
+    </script>
+
+    <!-- The test call. A module so it can import the Vapi Web SDK; it shares no
+         scope with the script above, so it reads the session id from
+         localStorage and coordinates over window.altaCall (which refreshAgent
+         checks before touching the button). -->
+    <script type="module">
+        import Vapi from "https://esm.sh/@vapi-ai/web@2.3.8";
+
+        const callBtn = document.getElementById("callBtn");
+        const callTitle = document.getElementById("callTitle");
+        const callSub = document.getElementById("callSub");
+        const orb = document.getElementById("orb");
+
+        // refreshAgent() polls every few seconds and rewrites this button; the
+        // flag tells it to keep its hands off while a call is up.
+        window.altaCall = { active: false };
+
+        let vapi = null;
+
+        function say(title, sub) {
+            callTitle.textContent = title;
+            callSub.textContent = sub;
+        }
+
+        function setIdle() {
+            window.altaCall.active = false;
+            callBtn.disabled = false;
+            callBtn.innerHTML = `Start call <span>→</span>`;
+            orb.classList.remove("calling");
+        }
+
+        async function beginCall() {
+            window.altaCall.active = true;
+            callBtn.disabled = true;
+            callBtn.textContent = "Connecting…";
+            say("Starting the runtime", "Loading your agent's brain — this takes a few seconds on first call.");
+
+            let cfg;
+            try {
+                const sid = localStorage.getItem("alta_sid");
+                const resp = await fetch("/api/call", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sid }),
+                });
+                const body = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    // The server's 4xx/5xx details are operator-actionable
+                    // (missing key, no tunnel, selftest not passed) — surface
+                    // them verbatim instead of a generic failure.
+                    throw new Error(body.detail || ("HTTP " + resp.status));
+                }
+                cfg = body;
+            } catch (e) {
+                say("Call failed", String(e.message || e));
+                setIdle();
+                return;
+            }
+
+            // Surface the brain mode BEFORE the call connects: a mock brain
+            // (no OPENAI_API_KEY) demos keyword matching, and the operator
+            // must know that now, not mid-conversation. Kept on the shared
+            // state because the call-start handler registers once but must
+            // read the CURRENT call's config.
+            window.altaCall.note = (cfg.brain === "mock"
+                ? "Heads up: mock brain (no OPENAI_API_KEY set) — answers are keyword-matched."
+                : "Live brain connected.") + (cfg.first_message
+                ? " The agent speaks first."
+                : " Say hello to start.");
+
+            try {
+                if (!vapi) {
+                    vapi = new Vapi(cfg.public_key);
+                    vapi.on("call-start", () => {
+                        say("You're connected", window.altaCall.note || "Talk to your agent.");
+                        callBtn.disabled = false;
+                        callBtn.textContent = "End call";
+                        orb.classList.add("calling");
+                    });
+                    vapi.on("call-end", () => {
+                        say("Call ended", "Press start to run another test call.");
+                        setIdle();
+                    });
+                    vapi.on("error", (e) => {
+                        const msg = (e && (e.errorMsg || e.message)) || "the call dropped";
+                        say("Call error", String(msg));
+                        setIdle();
+                    });
+                }
+                await vapi.start(cfg.assistant_id);
+            } catch (e) {
+                // Most common cause here is a denied microphone permission.
+                say("Could not start the call", String((e && e.message) || e) +
+                    " — check that this page is allowed to use your microphone.");
+                setIdle();
+            }
+        }
+
+        callBtn.addEventListener("click", () => {
+            if (window.altaCall.active && vapi) {
+                vapi.stop();          // fires call-end -> setIdle()
+                return;
+            }
+            beginCall();
+        });
+    </script>
+</body>
+
+</html>

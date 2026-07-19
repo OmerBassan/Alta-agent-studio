@@ -1,0 +1,248 @@
+"""Same-turn multi-model pipeline graph (v3). Generic — routing adapts to config.
+
+    START
+      -> intent_detect            (INTENT tier; hierarchical category->intent;
+                                   deterministic gates FIRST: a pending yes/no
+                                   confirmation, then the FAST ROUTER — a
+                                   mid-slot-fill message that deterministically
+                                   fills a missing slot skips the model call
+                                   and routes straight to think)
+      -> [route by intent]
+           confirmed action (yes at a gate) -> tool_exec (Act) directly
+                                               (or hitl_gate if Flow.hitl)
+           SYSTEM intents (help/restart/
+                           human_handoff)   -> system   -> validator
+           chitchat                         -> validator
+           config.RETRIEVAL_INTENTS: agentic_retrieval (RAG SUBGRAPH, private
+                                     state) -> knowledge -> validator
+           other config.KNOWLEDGE_INTENTS: knowledge -> validator
+           goodbye  -> closing              -> validator
+           compound_request (multi-action utterance) -> planner (ANSWER tier,
+                ONCE: emits plan_steps) -> plan_step (deterministic controller)
+                -> think ... tool ... -> plan_step -> ... until done/paused
+           any config.FLOWS intent: think (ANSWER tier)
+                -> need_info?               -> validator
+                -> confirm flow ready?      -> ask yes/no      -> validator
+                -> hitl flow ready?         -> hitl_gate: interrupt() —
+                                               OPERATOR approves/denies
+                -> ready?                   -> tool_exec (Act, breaker-guarded)
+                     -> execution_validator (Layer 2.5, deterministic)
+                          failure           -> failure -> validator
+                          ok, enrich=False  -> validator   (SLM BYPASS)
+                          ok, enrich=True   -> enrichment (ENRICH/SLM)
+                                            -> validator
+      -> validator (RESPONSE validator, exit filter) -> END
+
+A knowledge/chitchat detour NEVER clears a pending flow or confirmation — the
+reply carries a deterministic resume line instead (nodes._resume_suffix).
+A second tool FLOW interrupting a pending one is PARKED in the depth-1
+interrupt archive (paused_flow: intent + collected slots) instead of being
+clobbered; the interrupting flow's completion appends a one-shot resume offer,
+and a matching slot answer or re-entry by name restores the parked flow
+deterministically (never a blind re-pend; never a stack).
+
+Every path reaches END within a single invocation, so a question is answered
+in the SAME turn it's asked (an open hitl_gate interrupt is the ONE sanctioned
+suspension: the Shell surfaces it and resumes with Command(resume=...)).
+Turn-taking is the Shell's job (the host frontend — voice/SSE runtime, test
+harness — re-invokes from START per user message, resetting TURN_RESET fields).
+The checkpointer persists pending_* slots across turns for multi-turn
+slot-filling; pass a durable checkpointer (e.g. sqlite) for cross-restart
+session resume — mandatory if hitl approvals may span restarts.
+
+Loops: the agentic_retrieval node encapsulates one loop (a compiled RAG
+subgraph with a private state namespace, bounded by config.RAG_MAX_ITERATIONS).
+The parent graph stays loop-free with ONE sanctioned exception: the plan-step
+walk (plan_step -> think -> ... -> plan_step). It is deterministic (no model
+decides whether to continue), monotonic (current_step_index only increases),
+and doubly bounded (MAX_PLAN_STEPS at creation, MAX_TOOL_CALLS_PER_TURN at
+execution). Budget note: each plan step costs ~5 graph super-steps; the
+LangGraph default recursion_limit (25) fits MAX_PLAN_STEPS=3 — raise both
+together if a client needs longer plans.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
+import config
+from schemas import AgentState
+from nodes import (
+    intent_detect_node, knowledge_node, agentic_retrieval_node, chitchat_node,
+    closing_node, system_node, think_node, hitl_gate_node, tool_exec_node,
+    execution_validator_node, failure_node, enrichment_node, validator_node,
+    planner_node, plan_step_node, FLOW_BY_TOOL, _plan_active,
+)
+
+
+def route_by_intent(state: AgentState) -> Literal[
+        "knowledge", "retrieval", "chitchat", "closing", "system",
+        "think", "tool_exec", "hitl_gate", "planner"]:
+    # A resolved confirmation gate (user said yes) carries a ready payload from
+    # intent_detect — execute it directly, no second Think pass. A Flow.hitl
+    # payload still has to pass the operator gate first.
+    if state.get("tool_action_pending") and state.get("cold_payload"):
+        flow = FLOW_BY_TOOL.get(state["cold_payload"].get("tool", ""))
+        if flow is not None and flow.hitl:
+            return "hitl_gate"
+        return "tool_exec"
+    intent = state.get("intent", "chitchat")
+    if intent == "compound_request":
+        return "planner"
+    if intent in config.SYSTEM_INTENTS:
+        return "system"
+    if intent in config.RETRIEVAL_INTENTS:
+        return "retrieval"
+    if intent in config.KNOWLEDGE_INTENTS:
+        return "knowledge"
+    if intent == "goodbye":
+        return "closing"
+    if intent in config.FLOWS:
+        return "think"
+    return "chitchat"
+
+
+def route_after_planner(state: AgentState) -> Literal["plan_step", "validator"]:
+    """A valid plan enters the step walk; an empty plan (every action was
+    outside the catalog) already carries a deterministic decline reply."""
+    return "plan_step" if _plan_active(state) else "validator"
+
+
+def route_after_plan_step(state: AgentState) -> Literal["think", "validator"]:
+    """The controller either dispatched a step (its action is now the intent ->
+    think) or produced a terminal reply (finished / paused / aborted)."""
+    plan = state.get("plan_steps") or []
+    idx = state.get("current_step_index", 0)
+    # "running" is set ONLY by a dispatch; pause/finish/abort all leave the
+    # current step non-running (or clear the plan), so status is the routing
+    # truth — never draft_response, which may carry a previous step's text.
+    if idx < len(plan) and plan[idx].get("status") == "running":
+        return "think"
+    return "validator"
+
+
+def route_after_think(state: AgentState) -> Literal["tool_exec", "hitl_gate", "plan_step", "validator"]:
+    """Think -> Act only if the reasoning tier produced a ready tool call; a
+    Flow.hitl payload detours through the operator gate; otherwise (need_info,
+    confirm question) the reply goes straight to the exit — via the plan
+    controller first when a plan is active, so the pause is book-kept."""
+    if state.get("awaiting_human"):
+        return "hitl_gate"
+    if state.get("tool_action_pending"):
+        return "tool_exec"
+    return "plan_step" if _plan_active(state) else "validator"
+
+
+def route_after_hitl(state: AgentState) -> Literal["tool_exec", "validator"]:
+    """Operator approved -> Act; denied -> the deterministic denial reply
+    (hitl_gate itself aborts and reports an active plan on denial)."""
+    return "tool_exec" if state.get("tool_action_pending") else "validator"
+
+
+def route_after_execution(state: AgentState) -> Literal["failure", "enrichment", "plan_step", "validator"]:
+    """Layer 2.5 verdict: failure -> graceful degradation; healthy result ->
+    ENRICH tier, or straight to the exit when Flow.enrich=False (SLM bypass) —
+    the bypass detours through the plan controller when a plan is active."""
+    if state.get("execution_error"):
+        return "failure"
+    if state.get("needs_enrichment"):
+        return "enrichment"
+    return "plan_step" if _plan_active(state) else "validator"
+
+
+def route_to_exit(state: AgentState) -> Literal["plan_step", "validator"]:
+    """failure/enrichment normally exit; with a plan active they return to the
+    controller so the step outcome is recorded (advance or abort)."""
+    return "plan_step" if _plan_active(state) else "validator"
+
+
+# Transient per-turn fields — every Shell (text CLI, voice/SSE runtime, any
+# future frontend) resets these at the start of a turn so nothing leaks between
+# turns. Lives HERE in the engine because it is part of the turn contract, not
+# any one shell's concern. pending_*, pending_confirmation, last_action,
+# session_facts, plan_steps, and current_step_index are intentionally NOT
+# reset (the checkpointer carries them: multi-turn slot-fill, confirmation
+# gates, grounding on the last completed action, the functional session cache,
+# and plan pause/resume). last_reply_fingerprint / stall_count are NOT reset
+# either — the stall detector (invariant 25) is by definition a cross-turn
+# comparison.
+TURN_RESET = {
+    "intent": "", "category": "", "slots": {},
+    "cold_payload": {}, "tool_action_pending": False, "tool_result": {},
+    "needs_enrichment": False, "draft_response": "", "final_response": "",
+    "exit_conversation": False, "confirmation_declined": False,
+    "retrieved_context": "", "execution_error": {},
+    "tool_call_count": 0, "awaiting_human": False, "fast_routed": False,
+    "handoff_requested": False,
+}
+
+
+def build_pipeline(checkpointer=None):
+    b = StateGraph(AgentState)
+
+    b.add_node("intent_detect", intent_detect_node)
+    b.add_node("knowledge", knowledge_node)
+    b.add_node("agentic_retrieval", agentic_retrieval_node)
+    b.add_node("chitchat", chitchat_node)
+    b.add_node("closing", closing_node)
+    b.add_node("system", system_node)
+    b.add_node("planner", planner_node)
+    b.add_node("plan_step", plan_step_node)
+    b.add_node("think", think_node)
+    b.add_node("hitl_gate", hitl_gate_node)
+    b.add_node("tool_exec", tool_exec_node)
+    b.add_node("execution_validator", execution_validator_node)
+    b.add_node("failure", failure_node)
+    b.add_node("enrichment", enrichment_node)
+    b.add_node("validator", validator_node)
+
+    b.add_edge(START, "intent_detect")
+    b.add_conditional_edges("intent_detect", route_by_intent, {
+        "knowledge": "knowledge", "retrieval": "agentic_retrieval",
+        "chitchat": "chitchat", "closing": "closing", "system": "system",
+        "think": "think", "tool_exec": "tool_exec", "hitl_gate": "hitl_gate",
+        "planner": "planner",
+    })
+
+    b.add_conditional_edges("planner", route_after_planner,
+                            {"plan_step": "plan_step", "validator": "validator"})
+    b.add_conditional_edges("plan_step", route_after_plan_step,
+                            {"think": "think", "validator": "validator"})
+
+    b.add_edge("agentic_retrieval", "knowledge")
+    b.add_edge("knowledge", "validator")
+    b.add_edge("chitchat", "validator")
+    b.add_edge("closing", "validator")
+    b.add_edge("system", "validator")
+
+    b.add_conditional_edges("think", route_after_think,
+                            {"tool_exec": "tool_exec", "hitl_gate": "hitl_gate",
+                             "plan_step": "plan_step", "validator": "validator"})
+    b.add_conditional_edges("hitl_gate", route_after_hitl,
+                            {"tool_exec": "tool_exec", "validator": "validator"})
+
+    b.add_edge("tool_exec", "execution_validator")
+    b.add_conditional_edges("execution_validator", route_after_execution,
+                            {"failure": "failure", "enrichment": "enrichment",
+                             "plan_step": "plan_step", "validator": "validator"})
+    b.add_conditional_edges("failure", route_to_exit,
+                            {"plan_step": "plan_step", "validator": "validator"})
+    b.add_conditional_edges("enrichment", route_to_exit,
+                            {"plan_step": "plan_step", "validator": "validator"})
+    b.add_edge("validator", END)
+
+    return b.compile(checkpointer=checkpointer or MemorySaver())
+
+
+if __name__ == "__main__":
+    g = build_pipeline()
+    try:
+        print(g.get_graph().draw_ascii())
+    except Exception:
+        print("compiled: START -> intent_detect -> [route] -> "
+              "[system/retrieval+knowledge/planner->plan_step/think -> hitl? -> tool "
+              "-> exec-validator -> failure|enrich|bypass [-> plan_step]] "
+              "-> validator -> END")

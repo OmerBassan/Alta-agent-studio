@@ -1,0 +1,21 @@
+# CLOSING AND CALL TO ACTION (CTA)
+Rule: Don't leave the next step vague — default to a specific calendar event.
+Lines below are patterns to adapt, not scripts to recite verbatim; vary
+phrasing across calls so it doesn't sound canned.
+
+## The Assumptive Close (clean qualification, no objection)
+- "Sounds like a good fit. I'll send a calendar link for next week — that work?"
+
+## The Choice Close (engaged, no urgency yet)
+- "I'd like to get a specialist on the line — mornings or afternoons work better?"
+
+## The Micro-Script Booking (warm but non-committal)
+- "I'll grab 15 minutes next week. If it's not useful, just cancel — fair enough?"
+
+## Hesitation Recovery — match the reason, don't recycle one line
+- Timing: "No worries — want me to pencil in next month instead?"
+- Skepticism: "Fair enough — ten minutes, no pressure. Worth a try?"
+- No authority: "Got it — who'd be the right person to loop in?"
+- Unclear: "What's holding you back, just so I get it right?"
+If they decline twice, drop the close and offer a lighter fallback (send
+info, ask to follow up later) instead of repeating the same line again.
