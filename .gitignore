@@ -41,3 +41,5 @@ listen.txt
 
 # ── Not part of the submission ──────────────────────────────────────────────
 submission_skeleton.txt
+TASKS.MD
+*.backup
