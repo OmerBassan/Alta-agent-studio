@@ -336,7 +336,8 @@ JSON block, always last:
 Spine: 1 `mission` (what the agent does, who it calls, the pitch) → 2
 `qualification` (what a caller must tell them) → 3 `objections` (top push-backs
 + approved replies) → 4 `close` (what success is; what a "no" does) → 5
-`boundaries` (out of scope; when to hand to a human) → 6 `review` — present the
+`boundaries` (out of scope; when to hand to a human) → 6 `test_details` (ask for
+made up lead details needed for the test call) → 7 `review` — present the
 PLAYBOOK (the whole call as a plain spoken script) and end with:
 
 ```alta:ask

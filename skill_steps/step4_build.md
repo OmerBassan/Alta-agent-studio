@@ -8,6 +8,8 @@
 2. **Customize** — read ONLY the files you will edit, then edit ONLY these
    domain surfaces: `config.py`, `tools.py`, `prompts.py` (tone + spoken-style
    block), `selftest.py`'s `SCRIPT`/`HOOK_CHECKS`, `README.md`, corpus files.
+   If the client provided `test_details`, create a `.test_variables.json` file containing
+   those details as a flat JSON dictionary.
    Engine files (`graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`,
    `rag_subgraph.py`, `compaction.py`, `filler.py`) are copied verbatim and
    write-blocked — never read them, never edit them; engine fixes go upstream

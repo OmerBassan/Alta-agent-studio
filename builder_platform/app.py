@@ -633,6 +633,14 @@ async def start_call(req: CallRequest):
     except (vapi_control.VapiConfigError, vapi_control.VapiAPIError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    test_vars = {}
+    test_vars_path = project_dir / ".test_variables.json"
+    if test_vars_path.is_file():
+        try:
+            test_vars = json.loads(test_vars_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            pass
+
     return {
         "public_key": pub_key,
         "assistant_id": wiring["assistant_id"],
@@ -645,6 +653,7 @@ async def start_call(req: CallRequest):
         # from deterministic keyword matching — the operator must SEE that
         # before demoing, not discover it on the call.
         "brain": "live" if os.environ.get("OPENAI_API_KEY", "").strip() else "mock",
+        "variable_values": test_vars,
     }
 
 

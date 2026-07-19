@@ -1858,6 +1858,10 @@
                 ? " The agent speaks first."
                 : " Say hello to start.");
 
+            if (cfg.variable_values && Object.keys(cfg.variable_values).length > 0) {
+                window.altaCall.note += " Test variables injected.";
+            }
+
             try {
                 if (!vapi) {
                     vapi = new Vapi(cfg.public_key);
@@ -1877,7 +1881,11 @@
                         setIdle();
                     });
                 }
-                await vapi.start(cfg.assistant_id);
+                const overrides = {};
+                if (cfg.variable_values && Object.keys(cfg.variable_values).length > 0) {
+                    overrides.variableValues = cfg.variable_values;
+                }
+                await vapi.start(cfg.assistant_id, overrides);
             } catch (e) {
                 // Most common cause here is a denied microphone permission.
                 say("Could not start the call", String((e && e.message) || e) +

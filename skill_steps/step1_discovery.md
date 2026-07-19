@@ -28,7 +28,7 @@ opening answer left genuinely blank.
   card. A stuck card must not eat the turn budget; a missing field is a default
   or a slot the agent asks for live, never a reason to keep interrogating.
 
-## The five phases — what each must yield
+## The six phases — what each must yield
 
 1. **mission** — what the agent does, who it calls (role/company), and the
    pitch distilled to 1-2 spoken sentences. Seeds `OPENER`, `FACTS`, and the
@@ -56,6 +56,10 @@ opening answer left genuinely blank.
    that goes nowhere is the worst failure; every "plausible but unsupported"
    ask (order history, account records) gets an explicit spoken decline, never
    a fall-through to chitchat.
+6. **test_details** — the lead details (like full name, phone number, email,
+   or any other data points) required to test the agent properly. The builder asks for
+   these values. During the build, these are written to `.test_variables.json`.
+   If user refuses to provide these values, don't push him — just move on.
 
 ## Existing systems (fold into phases 2/4, don't add cards)
 
