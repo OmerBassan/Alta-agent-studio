@@ -80,6 +80,23 @@ _sessions: dict[str, tuple[BuilderSession, float, asyncio.Lock]] = {}
 
 SESSION_IDLE_TTL_S = int(os.environ.get("BUILDER_SESSION_IDLE_TTL_S", str(2 * 60 * 60)))
 
+# Warm-call machinery. The cold path (tunnel -> runtime spawn -> point assistant)
+# is expensive; /api/warm pre-runs it in the background so a later click is fast.
+# _prepare_locks serializes prepares PER PROJECT so a warm task and a concurrent
+# click can never double-spawn the runtime. _warm_tasks tracks the in-flight warm
+# task per project so repeated warms ride it instead of stacking spawns.
+_prepare_locks: dict[str, asyncio.Lock] = {}
+_warm_tasks: dict[str, asyncio.Task] = {}
+
+
+def _prepare_lock_for(project_dir: Path) -> asyncio.Lock:
+    key = str(project_dir)
+    lock = _prepare_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _prepare_locks[key] = lock
+    return lock
+
 # Persistent session/agent history (SQLite, stdlib-only). Bookkeeping layer:
 # the DISK pass marker remains the authoritative call gate (see _probe_disk).
 # init at import, not in a startup event: idempotent, and guarantees tables
@@ -300,13 +317,14 @@ def _sse(event: dict) -> str:
 _PY_FILE_RE = re.compile(r"\b[\w-]+\.py\b")
 _CODE_IDENT_RE = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")  # HOOK_CHECKS, PAUSED_RESUME_TEXT
 _INTERNAL_LEADIN_RE = re.compile(
-    r"\b(let me|now i'?ll|i'?ll now|now let'?s|let'?s|i'?m going to|i will)\b[^.?!]*\b"
+    r"\b(let me|now i'?ll|i'?ll now|now let'?s|let'?s|i'?m going to|i will|got it|building now)\b[^.?!]*\b"
     r"(check|look|view|read|updat|edit|writ|fix|run|see|examin|rewrit|inspect|"
-    r"scan|refactor|rework|open|instantiat|generat|verif)",
+    r"scan|refactor|rework|open|instantiat|generat|verif|customiz|setup|add)",
     re.IGNORECASE)
 _INTERNAL_TERM_RE = re.compile(
     r"\b(selftest|boilerplate|hook[_ ]?checks|hardcoded|codebase|engine file|"
-    r"domain-specific|config key|the full file)\b", re.IGNORECASE)
+    r"domain-specific|config key|the full file|fast router|validation limit|"
+    r"validation checks|preflight|invariants?)\b", re.IGNORECASE)
 
 
 def is_internal_narration(text: str) -> bool:
@@ -346,23 +364,37 @@ async def _chat_events(session_id: str, message: str) -> AsyncIterator[str]:
         session, lock = await _get_or_create_session(session_id)
     except HTTPException as exc:
         yield _sse({"type": "error", "detail": exc.detail})
+        yield "data: [DONE]\n\n"
+        return
+    except Exception as exc:
+        # A bad/invalid Anthropic key surfaces HERE, at SDK connect — not later
+        # in the turn loop. Format it into the stream (401 -> "re-enter your
+        # key") instead of letting it bubble out as a broken 500 response.
+        print(f"[app] session start failed for {session_id}: {exc!r}", flush=True)
+        yield _sse({"type": "error", "detail": _friendly_error(exc)})
+        yield "data: [DONE]\n\n"
         return
     async with lock:
         marker_before = _marker_bytes(session.project_dir)
+        result_event = None
         try:
             async for event in session.send(message):
-                # Code-enforced narration guard: never stream internal-work text
-                # to the client (see is_internal_narration). Tool events carry no
-                # client-facing text; the UI shows progress via the stepper only.
-                if (event.get("type") == "text"
-                        and is_internal_narration(event.get("text", ""))):
+                if event.get("type") == "result":
+                    result_event = event
                     continue
+                if event.get("type") == "text":
+                    if is_internal_narration(event.get("text", "")):
+                        continue
                 yield _sse(event)
-        except Exception as exc:  # a crashed builder turn must still close the
-                                  # stream cleanly for the chat UI, not hang it
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # We don't bubble exceptions here; we format them into the
+            # stream cleanly for the chat UI, not hang it
             print(f"[app] builder turn failed for {session_id}: {exc!r}",
                   flush=True)
             yield _sse({"type": "error", "detail": _friendly_error(exc)})
+            
     # Edit-loop staleness guard: the pass marker embeds the surface hash, so
     # changed marker bytes mean the agent was rewritten AND re-proven this
     # turn. A warm runtime for that project is now serving stale code — stop
@@ -370,11 +402,22 @@ async def _chat_events(session_id: str, message: str) -> AsyncIterator[str]:
     if _marker_bytes(session.project_dir) != marker_before:
         logger.info("agent built/re-proven: session=%s dir=%s",
                     session_id, session.project_dir)
+        
+        # Deterministically inject the success block if the test passed, bypassing
+        # the LLM's own narration and the anti-narration guard.
+        if getattr(session, "selftest_passed", False) and not getattr(session, "_notified_success", False):
+            session._notified_success = True
+            msg = '> [!SUCCESS] BUILD COMPLETE! The agent has passed the selftest. Click the "Start call" button below to activate it.'
+            yield _sse({"type": "text", "text": f"\n\n{msg}\n\n"})
+            
         active = runtime_supervisor.status()
         if (active["running"] and session.project_dir is not None
                 and Path(active["agent_dir"]).resolve()
                 == Path(session.project_dir).resolve()):
             await runtime_supervisor.stop()
+            
+    if result_event:
+        yield _sse(result_event)
     yield "data: [DONE]\n\n"
 
 
@@ -422,7 +465,7 @@ async def agent_status(session_id: str):
         return {
             "exists": project is not None,
             "project_dir": str(project) if project else None,
-            "selftest_passed": passed,
+            "selftest_passed": passed,  # authoritative: the surface-hash pass marker on disk
         }
     session, _, _ = entry
     return {
@@ -515,6 +558,78 @@ async def set_agent_env(req: AgentEnvRequest):
             "note": "The next test call starts the runtime with the new values."}
 
 
+# --- knowledge-base upload ---------------------------------------------------
+# "Drop a file" to teach the built agent: a .txt/.md file is written into the
+# project's knowledge/ folder, which config.py appends to FACTS at import. Sent
+# as JSON (filename + text), NOT multipart — the files are plain text, so we
+# avoid pulling in python-multipart just for this. .pdf is deliberately unsupported.
+
+_KNOWLEDGE_EXTS = (".txt", ".md")
+# Simple names only (no path separators) — the write target is fixed to
+# knowledge/, and basename() + this allowlist together forbid traversal.
+_KNOWLEDGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$")
+
+
+def _knowledge_dir(project: Path) -> Path:
+    return project / "knowledge"
+
+
+class KnowledgeUploadRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=64)
+    filename: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=1, max_length=200_000)
+
+
+@app.get("/api/agent/knowledge")
+async def list_knowledge(session_id: str):
+    project = _resolve_project(session_id)
+    kdir = _knowledge_dir(project)
+    files = []
+    if kdir.is_dir():
+        for p in sorted(kdir.iterdir()):
+            if p.is_file() and p.suffix.lower() in _KNOWLEDGE_EXTS:
+                files.append({"name": p.name, "bytes": p.stat().st_size})
+    return {"files": files}
+
+
+@app.post("/api/agent/knowledge")
+async def upload_knowledge(req: KnowledgeUploadRequest):
+    project = _resolve_project(req.session_id)
+    name = os.path.basename(req.filename.strip())
+    if (not _KNOWLEDGE_NAME_RE.fullmatch(name)
+            or not name.lower().endswith(_KNOWLEDGE_EXTS)):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .txt or .md files with simple names are accepted "
+                   "(no PDFs, no path characters).")
+    kdir = _knowledge_dir(project)
+    kdir.mkdir(exist_ok=True)
+    (kdir / name).write_text(req.content, encoding="utf-8")
+    # The voice runtime imports config once at spawn; stop the warm process so
+    # the NEXT call reloads config.py and picks up the new knowledge in FACTS.
+    restarted = False
+    active = runtime_supervisor.status()
+    if active.get("running") and active.get("agent_dir") == str(project):
+        await runtime_supervisor.stop()
+        restarted = True
+    return {"saved": name, "runtime_stopped": restarted}
+
+
+@app.delete("/api/agent/knowledge")
+async def delete_knowledge(session_id: str, name: str):
+    project = _resolve_project(session_id)
+    safe = os.path.basename(name.strip())
+    if not _KNOWLEDGE_NAME_RE.fullmatch(safe) or not safe.lower().endswith(_KNOWLEDGE_EXTS):
+        raise HTTPException(status_code=400, detail="Invalid knowledge file name.")
+    target = _knowledge_dir(project) / safe
+    if target.is_file():
+        target.unlink()
+    active = runtime_supervisor.status()
+    if active.get("running") and active.get("agent_dir") == str(project):
+        await runtime_supervisor.stop()
+    return {"deleted": safe}
+
+
 @app.get("/api/agent/download")
 async def download_agent(session_id: str):
     """The takeaway zip — INCLUDES .env, so it carries the operator's
@@ -553,25 +668,11 @@ class CallRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=64)
 
 
-@app.post("/api/call")
-async def start_call(req: CallRequest):
-    """Make the session's generated agent reachable by Vapi, and hand the
-    browser what it needs to open a web call.
-
-    Order matters: every cheap, deterministic check runs BEFORE the expensive
-    runtime spawn, so a misconfiguration costs a fast 4xx instead of a 90-second
-    graph load followed by failure.
-
-      1. the agent exists and its selftest PASSed  (never dial an unproven agent)
-      2. credentials + auth alignment              (vapi_control preflight)
-      3. a public URL resolves                     (tunnel)
-      4. spawn/reuse the runtime subprocess        (slow: graph first load)
-      5. point the Vapi assistant at that tunnel
-
-    The browser then calls vapi.start(assistant_id) with the PUBLIC key; the
-    private key never leaves this process.
-    """
-    entry = _sessions.get(req.session_id)
+def _resolve_callable_project(session_id: str) -> Path:
+    """Resolve a session id to a built, selftest-PASSED project dir, or raise
+    the appropriate HTTPException. Shared by /api/call and /api/warm so both
+    gate identically before any expensive work."""
+    entry = _sessions.get(session_id)
     if entry is not None:
         session, _, _ = entry
         project_dir, selftest_passed = session.project_dir, session.selftest_passed
@@ -579,7 +680,7 @@ async def start_call(req: CallRequest):
         # No live builder session (restart / pre-existing session id): the
         # call path only needs the project path and a trusted PASS, and the
         # disk marker provides both — no need to force a chat turn first.
-        project_dir, selftest_passed = _probe_disk(req.session_id)
+        project_dir, selftest_passed = _probe_disk(session_id)
         if project_dir is None:
             raise HTTPException(
                 status_code=404,
@@ -592,69 +693,137 @@ async def start_call(req: CallRequest):
     if not selftest_passed:
         raise HTTPException(
             status_code=409,
-            detail="This agent has not passed its selftest — it is not "
-                   "callable yet.")
+            detail="This agent has not passed its selftest validation — it is "
+                   "not callable yet.")
+    return project_dir
 
-    try:
-        vapi_control.preflight_auth()
-        assistant = vapi_control.assistant_id()
-        pub_key = vapi_control.public_key()
-        vapi_control._private_key()          # fail here, not after the spawn
-    except vapi_control.VapiConfigError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    try:
-        # Verified against the port the runtime will actually bind — a tunnel
-        # pointing at the wrong port passes a naive "is ngrok up?" check and
-        # then fails as silent dead air.
-        public_url = await tunnel.resolve_public_url(runtime_supervisor.RUNTIME_PORT)
-    except (tunnel.TunnelNotFound, tunnel.TunnelPortMismatch) as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+async def _prepare_call(project_dir: Path, session_id: str) -> dict:
+    """The expensive, idempotent cold path: credentials -> tunnel -> runtime
+    spawn/reuse -> point the Vapi assistant. Returns the browser payload.
 
-    try:
-        active = await runtime_supervisor.start(project_dir)
-    except runtime_supervisor.RuntimeStartError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"The voice runtime failed to start: {exc}") from exc
-
-    logger.info("call started: session=%s agent=%s port=%s brain=%s",
-                req.session_id, active.agent_dir, active.port,
-                "live" if os.environ.get("OPENAI_API_KEY", "").strip() else "mock")
-
-    # Cached opener: the agent's static OPENER becomes Vapi's firstMessage, so
-    # the first words play at pickup with zero model calls. None (missing or
-    # non-literal) leaves the dashboard's firstMessage untouched.
-    first_message = runtime_supervisor.opener_from_config(project_dir)
-
-    try:
-        wiring = await vapi_control.point_assistant_at(
-            public_url, assistant, first_message=first_message)
-    except (vapi_control.VapiConfigError, vapi_control.VapiAPIError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    test_vars = {}
-    test_vars_path = project_dir / ".test_variables.json"
-    if test_vars_path.is_file():
+    Serialized per project via _prepare_lock_for so a background warm and a
+    concurrent click cannot double-spawn the runtime — the second one waits,
+    then finds everything warm and returns fast. Every cheap check runs before
+    the ~90s spawn, so a misconfiguration costs a fast 4xx, not a slow one.
+    """
+    async with _prepare_lock_for(project_dir):
         try:
-            test_vars = json.loads(test_vars_path.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            pass
+            vapi_control.preflight_auth()
+            assistant = vapi_control.assistant_id()
+            pub_key = vapi_control.public_key()
+            vapi_control._private_key()          # fail here, not after the spawn
+        except vapi_control.VapiConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return {
-        "public_key": pub_key,
-        "assistant_id": wiring["assistant_id"],
-        "model_url": wiring["model_url"],
-        "public_url": public_url,
-        "agent_dir": str(active.agent_dir),
-        "runtime_port": active.port,
-        "first_message": wiring["first_message"],
-        # Deadlock visibility: a blank OPENAI_API_KEY means the agent answers
-        # from deterministic keyword matching — the operator must SEE that
-        # before demoing, not discover it on the call.
-        "brain": "live" if os.environ.get("OPENAI_API_KEY", "").strip() else "mock",
-        "variable_values": test_vars,
-    }
+        try:
+            # Verified against the port the runtime will actually bind — a tunnel
+            # pointing at the wrong port passes a naive "is ngrok up?" check and
+            # then fails as silent dead air.
+            public_url = await tunnel.resolve_public_url(runtime_supervisor.RUNTIME_PORT)
+        except (tunnel.TunnelNotFound, tunnel.TunnelPortMismatch) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        try:
+            active = await runtime_supervisor.start(project_dir)
+        except runtime_supervisor.RuntimeStartError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"The voice runtime failed to start: {exc}") from exc
+
+        logger.info("call prepared: session=%s agent=%s port=%s brain=%s",
+                    session_id, active.agent_dir, active.port,
+                    "live" if os.environ.get("OPENAI_API_KEY", "").strip() else "mock")
+
+        # Cached opener: the agent's static OPENER becomes Vapi's firstMessage, so
+        # the first words play at pickup with zero model calls. None (missing or
+        # non-literal) leaves the dashboard's firstMessage untouched.
+        first_message = runtime_supervisor.opener_from_config(project_dir)
+
+        try:
+            wiring = await vapi_control.point_assistant_at(
+                public_url, assistant, first_message=first_message)
+        except (vapi_control.VapiConfigError, vapi_control.VapiAPIError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        test_vars = {}
+        test_vars_path = project_dir / ".test_variables.json"
+        if test_vars_path.is_file():
+            try:
+                test_vars = json.loads(test_vars_path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                pass
+
+        return {
+            "public_key": pub_key,
+            "assistant_id": wiring["assistant_id"],
+            "model_url": wiring["model_url"],
+            "public_url": public_url,
+            "agent_dir": str(active.agent_dir),
+            "runtime_port": active.port,
+            "first_message": wiring["first_message"],
+            # Deadlock visibility: a blank OPENAI_API_KEY means the agent answers
+            # from deterministic keyword matching — the operator must SEE that
+            # before demoing, not discover it on the call.
+            "brain": "live" if os.environ.get("OPENAI_API_KEY", "").strip() else "mock",
+            "variable_values": test_vars,
+        }
+
+
+@app.post("/api/call")
+async def start_call(req: CallRequest):
+    """Make the session's generated agent reachable by Vapi, and hand the
+    browser what it needs to open a web call. If /api/warm already pre-ran the
+    cold path, this returns fast (warm runtime + already-pointed assistant);
+    otherwise it does the full spawn here. The browser then calls
+    vapi.start(assistant_id) with the PUBLIC key; the private key never leaves
+    this process."""
+    project_dir = _resolve_callable_project(req.session_id)
+    return await _prepare_call(project_dir, req.session_id)
+
+
+@app.post("/api/warm")
+async def warm_call(req: CallRequest):
+    """Pre-run the cold path in the background the moment the call button
+    enables (build passed), so the eventual click only does WebRTC setup.
+    Idempotent: repeated warms for the same project ride the in-flight task
+    instead of stacking spawns. Returns immediately — the frontend does not
+    block on it. A real failure stays quiet here and surfaces on the actual
+    /api/call click."""
+    project_dir = _resolve_callable_project(req.session_id)  # 404/409 surfaces now
+    key = str(project_dir)
+    existing = _warm_tasks.get(key)
+    if existing is not None and not existing.done():
+        return {"warming": True, "already": True}
+
+    task = asyncio.create_task(_prepare_call(project_dir, req.session_id))
+    _warm_tasks[key] = task
+
+    def _swallow(t: asyncio.Task) -> None:
+        # Retrieve any exception so asyncio doesn't log "never retrieved"; the
+        # failure re-surfaces when the user actually clicks /api/call.
+        if not t.cancelled():
+            exc = t.exception()
+            if exc is not None:
+                logger.info("warm prepare failed for %s: %s", key, exc)
+
+    task.add_done_callback(_swallow)
+    return {"warming": True}
+
+
+@app.on_event("startup")
+async def _ensure_tunnel() -> None:
+    """Warm a public tunnel as soon as the server boots so the first call is
+    fast. Runs in the BACKGROUND: spawning ngrok can take up to ~15s, and
+    blocking startup that long would delay the UI. The first /api/call rides the
+    same serialized resolve, so nothing double-spawns. Never fails startup."""
+    async def _warm() -> None:
+        try:
+            url = await tunnel.resolve_public_url(runtime_supervisor.RUNTIME_PORT)
+            logger.info("tunnel ready at startup: %s", url)
+        except Exception as exc:
+            logger.warning("tunnel not ready at startup (will retry on first call): %s", exc)
+    asyncio.create_task(_warm())
 
 
 @app.get("/health")
@@ -670,3 +839,6 @@ async def _close_all_sessions() -> None:
             await session.close()
     _sessions.clear()
     await runtime_supervisor.stop()
+    # Kill an ngrok WE spawned so it can't linger and block the next launch
+    # with ERR_NGROK_108 (free tier: one session).
+    tunnel.shutdown_tunnel()

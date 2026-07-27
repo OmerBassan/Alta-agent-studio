@@ -115,14 +115,60 @@ async def get_assistant(aid: str) -> dict:
     return await _request("GET", f"/assistant/{aid}")
 
 
+def _endpointing_enabled() -> bool:
+    """Whether to codify the turn-taking/endpointing knobs into the PATCH.
+
+    GATED OFF by default: Vapi's endpointing field names must be confirmed
+    against the LIVE account by a real flight call before we ship them (this
+    module already documents fields that silently changed — an un-probed
+    payload is exactly the "connects but never behaves" failure we avoid). Flip
+    VAPI_CODIFY_ENDPOINTING=1 only AFTER a flight test confirms these apply."""
+    return os.environ.get("VAPI_CODIFY_ENDPOINTING", "").strip().lower() in ("1", "true", "yes")
+
+
+def _endpointing_settings() -> dict:
+    """Turn-taking knobs, version-controlled here instead of left to
+    un-reproducible dashboard state. Tuned to minimize awkward silence without
+    cutting the caller off:
+      * startSpeakingPlan.smartEndpointingEnabled — let Vapi's model decide the
+        caller has finished, rather than a blunt fixed silence timer (fewer
+        mid-sentence cut-offs than a short numeric timeout).
+      * stopSpeakingPlan (numWords/voiceSeconds/backoffSeconds) — how readily
+        the agent yields when the caller barges in; small values = it stops
+        talking over the caller quickly (60% of callers abandon systems they
+        can't interrupt — Voice_SDR_Reliability Rule 5).
+    Merged into the PATCH only when _endpointing_enabled()."""
+    return {
+        "startSpeakingPlan": {"waitSeconds": 0, "smartEndpointingEnabled": True},
+        "stopSpeakingPlan": {"numWords": 1, "voiceSeconds": 0.2, "backoffSeconds": 1.0},
+    }
+
+
 def _patch_body(model: dict, first_message: str | None) -> dict:
     """The exact PATCH payload — pure, so tests can pin the firstMessage rules.
 
     firstMessage is included ONLY for a non-blank opener (blank/whitespace
     wedges the TTS queue); when set, firstMessageMode makes the assistant speak
     it unprompted at pickup — the whole point of the cached opener.
+
+    Latency/flow rules forced on every call:
+      * backchannelingEnabled=False — Vapi's automatic "mhm/yeah" interjections
+        talk OVER the caller and chop the flow; our own reply already carries
+        the acknowledgment. Off = one voice at a time.
+      * startSpeakingPlan.waitSeconds=0 — no artificial delay before the agent
+        speaks; the runtime's own fillers cover any real think-time, so any
+        extra Vapi pad is just dead air.
+      * endpointing/turn-taking (smart endpointing + barge-in yielding) is
+        added only behind VAPI_CODIFY_ENDPOINTING (see _endpointing_enabled),
+        so the default payload is unchanged until a flight test verifies it.
     """
-    body: dict = {"model": model}
+    body: dict = {
+        "model": model,
+        "backchannelingEnabled": False,
+        "startSpeakingPlan": {"waitSeconds": 0},
+    }
+    if _endpointing_enabled():
+        body.update(_endpointing_settings())
     text = (first_message or "").strip()
     if text:
         body["firstMessage"] = text

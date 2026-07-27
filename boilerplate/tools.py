@@ -16,9 +16,33 @@ Register each tool in TOOL_REGISTRY at the bottom.
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import re
 import smtplib
 from email.mime.text import MIMEText
 from typing import Callable, Dict
+
+logger = logging.getLogger(__name__)
+
+# SMTP config lives in the environment, NEVER in source (no hardcoded secrets).
+# A real deployment sets these in .env; with no credentials the tool runs in
+# MOCK mode (no network) so the agent and its selftest run credential-free —
+# mock-first, exactly like every other tool. The live send carries an explicit
+# timeout so a hung mail server returns a typed failure instead of hanging the
+# turn (a blocking socket with no timeout is the classic dead-air trap).
+_SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+_SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+_SMTP_USER = os.getenv("SMTP_USER", "")
+_SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+_SMTP_FROM = os.getenv("SMTP_FROM", "") or _SMTP_USER
+_SMTP_TIMEOUT_S = float(os.getenv("SMTP_TIMEOUT_S", "10"))
+
+# Canonical email pattern — used at the SMTP boundary to pull a clean address
+# out of a raw slot value. Voice STT frequently appends trailing punctuation
+# ("name@site.com?") or surrounding words; sending that verbatim makes Gmail
+# reject the recipient and the whole follow-up silently fails.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 _BRANCH_LABELS = {"downtown": "Downtown (12 River St)", "mall": "Mall (Westfield, level 2)",
                   "airport": "Airport (Terminal B)"}
@@ -75,26 +99,44 @@ def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
 
 
 def send_email(email: str = "", subject: str = "Follow-up from our call", body: str = "", **_) -> Dict[str, object]:
-    """Permanently available tool to send real emails to the lead. 
-    DO NOT REMOVE OR RENAME THIS TOOL. IT IS EDIT-PROOF."""
-    ok = bool(email and body)
-    if ok:
-        try:
-            msg = MIMEText(body)
-            msg['Subject'] = subject
-            msg['From'] = "alta.voice.bot@gmail.com"
-            msg['To'] = email
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login("alta.voice.bot@gmail.com", "ikbjhsfkmflqqekh")
-                server.send_message(msg)
-            summary = f"I have sent an email with the details to {email}."
-        except Exception as e:
-            ok = False
-            summary = "I tried to send the email, but a system error occurred."
-    else:
-        summary = "I could not send the email because the address or message was missing."
-    
-    return {"tool": "send_email", "email": email, "sent": ok, "summary": summary}
+    """Permanently available tool to send real emails to the lead.
+    DO NOT REMOVE OR RENAME THIS TOOL. IT IS EDIT-PROOF.
+
+    Boundary sanitation: the recipient is extracted with _EMAIL_RE, so a raw
+    slot value carrying trailing punctuation or stray words ("name@site.com?")
+    still yields a deliverable address. A value with no valid address fails
+    gracefully here instead of throwing at the SMTP layer.
+
+    Credentials come from the environment (SMTP_USER/SMTP_PASSWORD/…), never
+    from source. With no credentials set the tool runs in MOCK mode — it does
+    NOT touch the network and reports a mock send — so the agent and its
+    selftest run credential-free. The live SMTP call carries an explicit
+    timeout; a hung server returns a typed failure, never dead air."""
+    m = _EMAIL_RE.search(email or "")
+    clean = m.group(0) if m else ""
+    if not (clean and body):
+        return {"tool": "send_email", "email": clean or email, "sent": False,
+                "summary": "I could not send the email because the address or message was missing."}
+
+    if not (_SMTP_USER and _SMTP_PASSWORD):
+        # MOCK send: no credentials configured -> never touch the network.
+        return {"tool": "send_email", "email": clean, "sent": True, "mock": True,
+                "summary": f"I have sent an email with the details to {clean}."}
+
+    try:
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = _SMTP_FROM
+        msg['To'] = clean
+        with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT, timeout=_SMTP_TIMEOUT_S) as server:
+            server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.send_message(msg)
+        return {"tool": "send_email", "email": clean, "sent": True,
+                "summary": f"I have sent an email with the details to {clean}."}
+    except (smtplib.SMTPException, OSError) as exc:
+        logger.warning("send_email to %s failed: %s", clean, exc)
+        return {"tool": "send_email", "email": clean, "sent": False,
+                "summary": "I tried to send the email, but a system error occurred."}
 
 
 # name -> callable; the Think step's cold payload references these names.

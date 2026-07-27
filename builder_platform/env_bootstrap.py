@@ -15,7 +15,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ROOT_ENV = REPO_ROOT / ".env"
-LEGACY_PLATFORM_ENV = REPO_ROOT / "platform" / ".env"
+# This file lives in builder_platform/, and so does the legacy overflow .env
+# (Vapi keys, etc.). Derive it from __file__ so a folder rename can never make
+# it stale again — an earlier `platform/` -> `builder_platform/` rename left
+# this pointing at a non-existent dir, so the Vapi credentials were silently
+# never loaded and every call failed with "VAPI_ASSISTANT_ID is not set".
+LEGACY_PLATFORM_ENV = Path(__file__).resolve().parent / ".env"
 
 _LOADED = False
 

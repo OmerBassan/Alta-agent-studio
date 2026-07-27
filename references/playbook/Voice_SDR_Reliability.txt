@@ -78,8 +78,14 @@ countable path through the tiers:
 A change that adds a model call to any row is a latency regression by
 definition and needs the same justification as an engine edit. When choosing
 tier models, pick for time-to-first-byte first (Voice_Architecture_Principles);
-escalate ANSWER only on flight-test evidence — the RAG corrective rewrite
-already gives a stronger ANSWER model exactly on the failure path for free.
+escalate ANSWER only on flight-test evidence of insufficient REASONING given
+correct grounding — never as a response to a missing fact, a missing pitch,
+or a call-direction/tone gap left in prompts.py's boilerplate defaults. A
+stronger model raises fidelity to what the prompt says, not what's true; it
+executes a content gap more fluently, not away (skill_steps/step4_build.md's
+live-call triage runs this check before any tier change). The RAG corrective
+rewrite already gives a stronger ANSWER model exactly on the failure path
+that IS a reasoning gap, for free.
 
 RULE 5 — BARGE-IN IS THE TRANSPORT'S JOB; SURVIVING IT IS OURS
 --------------------------------------------------------------

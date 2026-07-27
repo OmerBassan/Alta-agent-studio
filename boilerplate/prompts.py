@@ -1,7 +1,12 @@
 """English system prompts, one per model role. Mostly generic: the domain
 enters through config.py (FACTS, INTENT_DESCRIPTIONS, FLOWS), so per-client
-customization usually means editing config.py — not this file. Adjust tone
-lines here only if the client wants a different voice.        [CUSTOMIZE tone]
+customization usually means editing config.py, not restructuring this file.
+NOT OPTIONAL, every generation: build_chitchat_system and build_knowledge_
+system MUST state the agent's name/tone AND its call direction (outbound —
+"you called them", never the boilerplate default "support assistant" +
+"steer to what you can help with", which reads as reactive inbound help desk
+and is why an unedited copy forgets it placed the call). Leaving this file's
+generic wording untouched is a build defect, not a shortcut.  [CUSTOMIZE tone]
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ _BUILTIN_DESCRIPTIONS = {
 
 
 def build_intent_system(pending_ctx: str = "", last_action_ctx: str = "",
-                        known_facts_ctx: str = "") -> str:
+                        known_facts_ctx: str = "", summary_ctx: str = "") -> str:
     # Hierarchical catalog: macro categories first, intents grouped inside.
     # Small models classify far more reliably against this two-level shape
     # than against one flat list.
@@ -61,10 +66,11 @@ Rules:
 - If PENDING flow context is provided, the user is likely answering a follow-up: keep that pending intent and fill the missing slot from their message.
 - Do NOT classify a mere greeting or name as goodbye. Only explicit closings are goodbye.
 - If a quantity carries a unit (kg, pieces, boxes...), extract the NUMBER into the slot exactly as the slot description defines the unit; never silently reinterpret units.
-- Always respond in the IntentResult structure (category + intent + slots).{pending_ctx}{last_action_ctx}{known_facts_ctx}"""
+- Always respond in the IntentResult structure (category + intent + slots).{pending_ctx}{last_action_ctx}{known_facts_ctx}{summary_ctx}"""
 
 
-def build_knowledge_system(grounding_ctx: str = "", retrieved_ctx: str = "") -> str:
+def build_knowledge_system(grounding_ctx: str = "", retrieved_ctx: str = "",
+                           objective_ctx: str = "", summary_ctx: str = "") -> str:
     if retrieved_ctx:
         # Agentic-RAG path: the retrieval subgraph produced a finalized context;
         # synthesize ONLY from it (voice-friendly, short, complete sentences, no chunk dumps).
@@ -75,29 +81,36 @@ def build_knowledge_system(grounding_ctx: str = "", retrieved_ctx: str = "") -> 
         source = f"""Answer the user's question using ONLY these facts; never invent details not present here:
 
 {config.FACTS}"""
-    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Answer in English, 1-3 sentences, plain text (no markdown, no emojis).
+    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Answer in English, in exactly one or two very short spoken sentences. Never exceed 20 words. One idea per turn. Plain text (no markdown, no emojis).
 {source}
 
-End by briefly offering further help.{grounding_ctx}"""
+End by briefly offering further help.{grounding_ctx}{objective_ctx}{summary_ctx}"""
 
 
-def build_chitchat_system(grounding_ctx: str = "") -> str:
-    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Reply in English, one or two friendly sentences, plain text.
+def build_chitchat_system(grounding_ctx: str = "", objective_ctx: str = "",
+                          summary_ctx: str = "") -> str:
+    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Reply in English, in one or two very short friendly sentences. Never exceed 20 words. Plain text.
 Engage naturally with the small talk, then gently steer to what you can help with. Do NOT end the conversation.
-You have NO access to account history, past transactions, or stored records beyond what appears in this conversation. If asked for such data (counts of past orders, purchase history, old confirmation numbers), say plainly that you can't access it on this channel and offer a human agent — NEVER estimate, reconstruct, or invent records or figures, no matter how many times or how insistently the user asks.{grounding_ctx}"""
+You have NO access to account history, past transactions, or stored records beyond what appears in this conversation. If asked for such data (counts of past orders, purchase history, old confirmation numbers), say plainly that you can't access it on this channel and offer a human agent — NEVER estimate, reconstruct, or invent records or figures, no matter how many times or how insistently the user asks.{grounding_ctx}{objective_ctx}{summary_ctx}"""
 
 
 CLOSING_SYSTEM = """You are a warm assistant. The user is ending the conversation — this may be a firm 'not interested'.
-Give a brief, friendly one-sentence goodbye in English that thanks them for their time. Do not add questions, do not pitch again, do not try to change their mind."""
+Give a brief, friendly one-sentence goodbye in English that thanks them for their time, then END the call.
+NON-NEGOTIABLE: if the user has firmly or finally declined, you must thank them and stop immediately —
+do NOT add a question, do NOT pitch again, do NOT offer alternatives, do NOT try to change their mind. One warm sentence, then silence."""
 
 
 def build_think_system(intent: str, known: dict, now_iso: str, weekday: str,
-                       known_facts_ctx: str = "") -> str:
+                       known_facts_ctx: str = "", objective_ctx: str = "",
+                       summary_ctx: str = "") -> str:
     flow = config.FLOWS[intent]
     needed = "\n".join(f"- {s}: {flow.slot_prompts.get(s, s)}" for s in flow.slots)
     known_doc = ", ".join(f"{k}={v}" for k, v in known.items() if v) or "none"
     return f"""You are the reasoning stage for the '{intent}' request at {config.AGENT_NAME}.
 CURRENT DATE/TIME: {now_iso} ({weekday}). Resolve relative times like 'tomorrow' against this; output times as ISO 8601.{known_facts_ctx}
+
+GROUND TRUTH (never state a detail, price, offer, or promotion beyond this):
+{config.FACTS}
 
 Required slots (all must be known before acting):
 {needed}
@@ -107,9 +120,9 @@ Known so far: {known_doc}.
 Decide:
 - If every required slot is known (from this message, the conversation, or the known list) -> status "act" and fill `slots` with all of them. Do NOT invent the outcome; a tool will run.
 - If any required slot is missing -> status "need_info" and set `response` to a short English question asking for exactly the first missing slot.
-- DETOURS: if the user's message also contains a question you can answer from the conversation or the CURRENT DATE/TIME above (e.g. "what time would that be?"), answer it in one short sentence at the START of `response`, THEN ask for the missing slot. Never ignore a direct question.
+- DETOURS: if the user's message also contains a question, answer it in one short sentence at the START of `response`, using ONLY the CURRENT DATE/TIME or the GROUND TRUTH above — never a detail, price, or promotion not stated there. If the detour asks something the ground truth doesn't cover, say plainly you don't have that and it'll be confirmed by the team, THEN still ask for the missing slot. Never ignore a direct question.
 - UNITS: when the user gives a quantity in a unit, restate your interpretation in `response` or map it exactly per the slot description; never silently convert.
-Think briefly, then output the ThinkDecision structure. Never invent slot values."""
+Think briefly, then output the ThinkDecision structure. Never invent slot values.{objective_ctx}{summary_ctx}"""
 
 
 def build_planner_system(known_facts_ctx: str = "") -> str:

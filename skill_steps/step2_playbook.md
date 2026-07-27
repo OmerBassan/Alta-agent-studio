@@ -13,6 +13,13 @@ acme dot com — right?"); and the failure exits (not interested → polite clos
 stuck/angry/asks-for-human → handoff with its one-line recap). Every advertised
 exit is a scene, not a hope.
 
+Number the PROACTIVE SPINE explicitly — the scenes the agent DRIVES in order
+(opener → discovery → qualify → close) — and mark each other scene as a REACTIVE
+overlay (objections, knowledge questions, read-backs, firm-no/handoff). The
+spine becomes the executable `CALL_ARC` in step3 (one Stage per spine scene);
+the overlays stay reactive and are never stages. An outbound agent that only
+answers is a spine that was written but never wired.
+
 ## THE OPENER IS CACHED AND INSTANT
 
 The platform speaks `config.py`'s `OPENER` as the call's first words via the

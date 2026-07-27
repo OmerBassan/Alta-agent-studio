@@ -12,6 +12,14 @@ point at the same model; the ARCHITECTURE (separate roles) is the point.
 Any OpenAI-compatible endpoint works via OPENAI_BASE_URL (Mistral, OpenAI,
 Ollama, Groq...). With no key the client is in MOCK mode and the nodes use
 their own deterministic fallbacks so the agent runs with zero credentials.
+
+A stronger AGENT_ANSWER_MODEL increases FIDELITY to what prompts.py/config.py
+actually say — never what's true. It cannot pitch, ground an answer, or know
+the call is outbound if nothing tells it so; a bigger model just executes the
+same content gap more fluently and confidently (for a hallucination, that
+reads as MORE convincing, not less). Before escalating a model tier to fix a
+bad live call, confirm the desired behavior is scripted somewhere in
+prompts.py/config.py at all — see skill_steps/step4_build.md's triage rule.
 """
 
 import asyncio
@@ -74,6 +82,8 @@ class LLMClient:
         falls back to JSON-mode + local validation (needed for most Mistral models)."""
         if self.mock:
             raise RuntimeError("generate_structured called in MOCK mode — nodes must use their mock fallback")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.HARD_TIMEOUT_SECONDS
         try:
             completion = await asyncio.wait_for(
                 self.client.beta.chat.completions.parse(
@@ -83,10 +93,21 @@ class LLMClient:
                 timeout=self.HARD_TIMEOUT_SECONDS,
             )
             return completion.choices[0].message.parsed
+        except asyncio.TimeoutError:
+            # A slow/unresponsive endpoint already burned the whole budget —
+            # retrying against the same endpoint would just double the dead
+            # air the caller (runtime.py's turn ceiling) is sized against.
+            # Propagate immediately instead of stacking a second full timeout.
+            raise
         except Exception:
-            return await self._structured_via_json_mode(model, response_format, messages, temperature, max_tokens)
+            remaining = max(deadline - loop.time(), 0.0)
+            if remaining <= 0:
+                raise
+            return await self._structured_via_json_mode(
+                model, response_format, messages, temperature, max_tokens, timeout=remaining)
 
-    async def _structured_via_json_mode(self, model, response_format, messages, temperature, max_tokens):
+    async def _structured_via_json_mode(self, model, response_format, messages, temperature, max_tokens,
+                                        timeout: float | None = None):
         schema_hint = json.dumps(response_format.model_json_schema(), ensure_ascii=False)
         patched = list(messages) + [{
             "role": "system",
@@ -97,7 +118,7 @@ class LLMClient:
                 model=model, messages=patched, temperature=temperature,
                 max_tokens=max_tokens, response_format={"type": "json_object"},
             ),
-            timeout=self.HARD_TIMEOUT_SECONDS,
+            timeout=timeout if timeout is not None else self.HARD_TIMEOUT_SECONDS,
         )
         raw = completion.choices[0].message.content or "{}"
         match = re.search(r"\{.*\}", raw, re.DOTALL)

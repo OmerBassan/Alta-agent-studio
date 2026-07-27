@@ -29,7 +29,10 @@ import httpx
 
 PLATFORM_DIR = Path(__file__).resolve().parent
 RUNTIME_HOST = "127.0.0.1"  # child binds here; health check must match
-RUNTIME_PORT = int(os.environ.get("RUNTIME_PORT", "8100"))
+# 8000, NOT 8100: the platform app (uvicorn) owns 8100, so the voice runtime
+# MUST bind a different port or the two collide. This matches .env.example; the
+# old 8100 default only "worked" because .env happened to override it.
+RUNTIME_PORT = int(os.environ.get("RUNTIME_PORT", "8000"))
 _HEALTH_TIMEOUT_S = float(os.environ.get("RUNTIME_HEALTH_TIMEOUT_S", "90"))
 _POLL_INTERVAL_S = 0.5
 _STOP_GRACE_S = 10

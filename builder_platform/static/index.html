@@ -461,52 +461,10 @@
             min-height: 0;
         }
 
-        .summary-card {
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 16px;
-            display: none;
-        }
-
-        .summary-card h2 {
-            margin: 0 0 10px;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: .06em;
-            color: var(--muted);
-        }
-
-        .summary-item {
-            display: block;
-            width: 100%;
-            text-align: left;
-            background: none;
-            border: none;
-            border-radius: 8px;
-            padding: 6px 8px;
-            margin-bottom: 2px;
-            cursor: pointer;
-            font: inherit;
-            color: inherit;
-        }
-
-        .summary-item:hover {
-            background: var(--surface-3, rgba(127, 127, 127, .12));
-        }
-
-        .summary-item .summary-phase {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-            color: var(--muted);
-        }
-
-        .summary-item .summary-line {
-            font-size: 13px;
-            color: var(--ink);
-            white-space: pre-wrap;
-        }
+        /* Fixed sidebar order regardless of DOM order: the Call card is pinned
+           to the TOP so it's always reachable without scrolling. */
+        aside.inspector .call-hero { order: -2; }
+        aside.inspector .settings-card { order: -1; }
 
         /* Test call Orb */
         .call-hero {
@@ -518,6 +476,9 @@
             box-shadow: var(--shadow-md);
             position: relative;
             overflow: hidden;
+            /* Never shrink to fit: when the settings card (zip + knowledge base)
+               grows, the inspector must SCROLL, not squash-and-clip the orb. */
+            flex-shrink: 0;
         }
 
         .orb {
@@ -855,6 +816,22 @@
         .setup-card {
             max-width: 460px;
             margin: 16px;
+            /* Bound the card to the viewport so a tall setup (both key fields +
+               the Vapi note + the action buttons) never overflows off-screen on
+               a laptop — the buttons stay reachable via internal scroll instead
+               of being clipped below the fold. */
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+        }
+
+        /* Mask the credential inputs so a pasted key is never legible on
+           screen (screen-recording safety). The field still holds the real
+           value — only the on-screen glyphs are dots. Placeholders are
+           unaffected, so "sk-ant-…" still shows in an empty field. */
+        #setupKey,
+        #setupOpenaiKey {
+            -webkit-text-security: disc;
+            text-security: disc;
         }
 
         .auth-disconnect {
@@ -874,6 +851,7 @@
             border: 1px solid var(--border);
             border-radius: 14px;
             padding: 16px;
+            flex-shrink: 0;   /* grow the sidebar's scroll height, never steal the orb's */
         }
 
         .settings-card h2 {
@@ -988,6 +966,57 @@
             min-height: 20px;
             color: var(--ink);
         }
+
+        /* Knowledge-base upload card */
+        .kb-section {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+        }
+        .kb-head {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+        .kb-drop {
+            display: block;
+            text-align: center;
+            padding: 14px;
+            border: 1px dashed var(--border);
+            border-radius: 10px;
+            color: var(--ink-2);
+            font-size: 12.5px;
+            cursor: pointer;
+            transition: border-color .15s, background .15s;
+        }
+        .kb-drop:hover, .kb-drop.drag {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+        .kb-status { font-size: 11.5px; color: var(--muted); margin-top: 8px; min-height: 15px; }
+        .kb-status.err { color: var(--danger); }
+        .kb-list { list-style: none; margin: 8px 0 0; padding: 0; }
+        .kb-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--ink-2);
+            padding: 5px 0;
+        }
+        .kb-list .kb-del {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .kb-list .kb-del:hover { color: var(--danger); }
     </style>
 </head>
 
@@ -1080,17 +1109,24 @@
             <aside class="inspector">
 
 
-                <div class="summary-card" id="summaryCard">
-                    <h2>Design summary</h2>
-                    <div id="summaryList"></div>
-                </div>
-
                 <div class="settings-card" id="settingsCard" style="display:none">
                     <h2>Your agent</h2>
                     <div class="settings-sub">Take the generated agent with you — a complete,
                         standalone project.</div>
                     <div class="settings-actions">
                         <button class="btn sm" id="agentDownload">Download agent (.zip)</button>
+                    </div>
+
+                    <div class="kb-section">
+                        <div class="kb-head">Knowledge base</div>
+                        <div class="settings-sub">Drop a <strong>.txt</strong> or <strong>.md</strong>
+                            file to teach the agent — it answers from it on the next call.</div>
+                        <label class="kb-drop" id="kbDrop">
+                            <input type="file" id="kbInput" accept=".txt,.md,text/plain,text/markdown" hidden>
+                            <span id="kbDropLabel">Choose or drop a .txt / .md file</span>
+                        </label>
+                        <div class="kb-status" id="kbStatus"></div>
+                        <ul class="kb-list" id="kbList"></ul>
                     </div>
                 </div>
 
@@ -1160,6 +1196,12 @@
             })());
         const sidInput = document.getElementById("sidDisplay");
         sidInput.value = sessionId;
+
+        // Warm-call guard: fire /api/warm at most once per build so the poll
+        // doesn't re-warm every few seconds. Reset on each builder turn (which
+        // may rebuild the agent and tear the warm runtime down), so the next
+        // poll re-warms the freshly-proven agent.
+        let warmArmed = false;
         sidInput.addEventListener("keydown", (e) => {
             if (e.key !== "Enter") return;
             const next = sidInput.value.trim();
@@ -1204,15 +1246,21 @@
         // the running agent turn. Aborting the fetch alone left the turn (and
         // its token spend) running server-side — the interrupt is what stops it.
         async function stopTurn() {
-            if (activeAbort) activeAbort.abort();
+            // Interrupt the builder turn SERVER-SIDE, then let the SSE stream end
+            // on its own. Do NOT abort the browser fetch: cancelling the stream
+            // mid-turn tore down the backend's receive loop and left the Agent
+            // SDK client unusable, so the NEXT message hit a dead session (the
+            // "Stop killed the agent" bug). The interrupt ends the turn cleanly;
+            // the turn then emits [DONE] and the normal stream-end path resets
+            // the UI via setBusy(false). The typing indicator stays up until
+            // then, signalling the stop is in progress.
             try {
                 await fetch("/api/chat/stop", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ session_id: sessionId }),
                 });
-            } catch (e) { /* best-effort; UI still resets below */ }
-            setBusy(false);
+            } catch (e) { /* best-effort; the turn still ends and closes the stream */ }
         }
         stopBtn.addEventListener("click", stopTurn);
         const typingEl = document.getElementById("typing");
@@ -1301,44 +1349,6 @@
             } catch (e) { return null; }
         }
 
-        // ===== Design summary card (Fin: client-side only, zero backend) =====
-        // Keyed by phase so a later answer in the same phase replaces the
-        // earlier one instead of piling up duplicates.
-        const designSummary = {};       // phase -> {label, lines}
-
-        function recordSummary(block, lines) {
-            if (!block || !block.phase || block.kind === "approve") return;
-            designSummary[block.phase] = {
-                label: STEP_LABELS[block.phase] || block.phase,
-                lines,
-            };
-            renderSummary();
-        }
-
-        function renderSummary() {
-            const card = document.getElementById("summaryCard");
-            const list = document.getElementById("summaryList");
-            const phases = Object.keys(designSummary);
-            if (phases.length === 0) { card.style.display = "none"; return; }
-            card.style.display = "block";
-            list.innerHTML = "";
-            for (const phase of STEP_ORDER) {
-                const entry = designSummary[phase];
-                if (!entry) continue;
-                const btn = document.createElement("button");
-                btn.className = "summary-item";
-                btn.type = "button";
-                btn.innerHTML = `<div class="summary-phase">${escapeHtml(entry.label)}</div>` +
-                    `<div class="summary-line">${escapeHtml(entry.lines)}</div>`;
-                btn.addEventListener("click", () => {
-                    inputEl.value = `Change this: ${entry.lines}\n\n`;
-                    inputEl.focus();
-                    inputEl.style.height = "auto";
-                    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
-                });
-                list.appendChild(btn);
-            }
-        }
 
         function initStepper() {
             stepperEl = document.createElement("div");
@@ -1387,6 +1397,10 @@
                 const actions = card.querySelector(".ask-actions");
                 card.querySelector('[data-act="approve"]').addEventListener("click", () => {
                     card.classList.add("answered");
+                    // Mark the build phase so the build-wait game unlocks: the
+                    // build turn emits no ask-card, so currentPhase would
+                    // otherwise stay "review" and the game never shows.
+                    window.currentPhase = "build";
                     sendRequest(block.approve_label || "Approved — please build it.");
                 });
                 // Revise = edit the design text in place, then submit the
@@ -1410,6 +1424,7 @@
                         const edited = ta.value.trim();
                         if (!edited) { ta.focus(); return; }
                         card.classList.add("answered");
+                        window.currentPhase = "build";   // unlock the build-wait game
                         sendRequest(`Here is the corrected design — please use exactly this and build it:\n\n${edited}`);
                     });
                 });
@@ -1432,7 +1447,6 @@
                     });
                     const lines = pairs.map(p => `${p.label}\n${p.value}`).join("\n\n");
                     card.classList.add("answered");
-                    recordSummary(block, lines);
                     addAnswerCard(pairs);
                     sendRequest(lines, { skipUserMsg: true });
                 });
@@ -1476,6 +1490,10 @@
 
         async function sendRequest(text, opts = {}) {
             if (!text || sendBtn.disabled) return;
+
+            // A new builder turn may rebuild the agent and stop the warm
+            // runtime; re-arm so the next successful poll pre-warms again.
+            warmArmed = false;
 
             inputEl.value = "";
             inputEl.style.height = "auto";
@@ -1619,9 +1637,26 @@
                 // Agent takeaway card: visible once the project exists.
                 document.getElementById("settingsCard").style.display =
                     a.exists ? "block" : "none";
+                // Load the knowledge-base list once, the first time the card shows.
+                if (a.exists && !window._kbShown) { window._kbShown = true; refreshKnowledge(); }
+                if (!a.exists) window._kbShown = false;
 
                 if (a.exists && a.selftest_passed) {
                     if (stepperEl && stepperEl.style.display !== "none") renderStepper(STEP_ORDER.length);
+
+                    // Pre-warm the voice runtime the moment the button enables,
+                    // so "Start call" only does WebRTC setup — the ~90s spawn +
+                    // tunnel + assistant-wiring already ran in the background.
+                    // Fire-and-forget; the click's /api/call rides the same
+                    // per-project prepare lock server-side.
+                    if (!warmArmed && !callOwnsBtn) {
+                        warmArmed = true;
+                        fetch("/api/warm", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ session_id: sessionId }),
+                        }).catch(() => { warmArmed = false; });  // allow retry next poll
+                    }
 
                     // Ignite the Orb!
                     orb.classList.remove("idle");
@@ -1691,6 +1726,84 @@
         // ===== Agent takeaway: zip download =====
         document.getElementById("agentDownload").addEventListener("click", () => {
             window.location.href = "/api/agent/download?session_id=" + encodeURIComponent(sessionId);
+        });
+
+        // ===== Knowledge base: drop a .txt/.md file the agent answers from =====
+        const kbInput = document.getElementById("kbInput");
+        const kbDrop = document.getElementById("kbDrop");
+        const kbStatus = document.getElementById("kbStatus");
+        const kbList = document.getElementById("kbList");
+
+        function kbSetStatus(text, isErr) {
+            kbStatus.textContent = text || "";
+            kbStatus.classList.toggle("err", !!isErr);
+        }
+
+        async function refreshKnowledge() {
+            try {
+                const r = await fetch("/api/agent/knowledge?session_id=" + encodeURIComponent(sessionId));
+                if (!r.ok) return;
+                const data = await r.json();
+                kbList.innerHTML = (data.files || []).map(f =>
+                    `<li><span>📄 ${escapeHtml(f.name)}</span>` +
+                    `<button class="kb-del" title="Remove" data-name="${escapeHtml(f.name)}">✕</button></li>`
+                ).join("");
+                kbList.querySelectorAll(".kb-del").forEach(btn => {
+                    btn.addEventListener("click", () => deleteKnowledge(btn.dataset.name));
+                });
+            } catch (e) { /* silent */ }
+        }
+
+        async function uploadKnowledge(file) {
+            if (!file) return;
+            const name = file.name || "";
+            if (!/\.(txt|md)$/i.test(name)) {
+                kbSetStatus("Only .txt or .md files are supported (no PDFs).", true);
+                return;
+            }
+            if (file.size > 200000) {
+                kbSetStatus("That file is too large — keep it under ~200 KB.", true);
+                return;
+            }
+            kbSetStatus("Uploading " + name + "…");
+            try {
+                const content = await file.text();
+                const r = await fetch("/api/agent/knowledge", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId, filename: name, content }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) { kbSetStatus(data.detail || "Upload failed.", true); return; }
+                kbSetStatus("Added " + data.saved + " — it applies on the next call.");
+                refreshKnowledge();
+            } catch (e) {
+                kbSetStatus("Upload failed — please try again.", true);
+            }
+        }
+
+        async function deleteKnowledge(name) {
+            try {
+                await fetch("/api/agent/knowledge?session_id=" + encodeURIComponent(sessionId) +
+                    "&name=" + encodeURIComponent(name), { method: "DELETE" });
+                kbSetStatus("Removed " + name + ".");
+                refreshKnowledge();
+            } catch (e) { /* silent */ }
+        }
+
+        kbInput.addEventListener("change", () => {
+            uploadKnowledge(kbInput.files[0]);
+            kbInput.value = "";  // allow re-selecting the same file
+        });
+        ["dragover", "dragenter"].forEach(ev => kbDrop.addEventListener(ev, (e) => {
+            e.preventDefault(); kbDrop.classList.add("drag");
+        }));
+        ["dragleave", "drop"].forEach(ev => kbDrop.addEventListener(ev, (e) => {
+            e.preventDefault(); kbDrop.classList.remove("drag");
+        }));
+        kbDrop.addEventListener("drop", (e) => {
+            const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (f) uploadKnowledge(f);
         });
 
         // Initialize

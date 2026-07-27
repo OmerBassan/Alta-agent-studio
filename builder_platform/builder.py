@@ -81,19 +81,26 @@ GENERATED_AGENTS_DIR = Path(
     os.environ.get("GENERATED_AGENTS_DIR", REPO_ROOT / "Generated_Agents")).resolve()
 SKILL_PATH = REPO_ROOT / "SKILL.md"
 
-BUILDER_MODEL = os.environ.get("BUILDER_MODEL") or "sonnet"  # ALWAYS sonnet — never opus
-SELFTEST_TIMEOUT_S = int(os.environ.get("SELFTEST_TIMEOUT_S", "300"))
+BUILDER_MODEL = os.environ.get("BUILDER_MODEL") or "sonnet"  # Default to sonnet; cache system prompt to reduce costs
+# The domain-agnostic selftest runs in ~7s mock; 120s is generous headroom for
+# a slow machine or a cold import. (Was 10s while the gate was stubbed and never
+# actually ran — too tight now that it does.)
+SELFTEST_TIMEOUT_S = int(os.environ.get("SELFTEST_TIMEOUT_S", "120"))
 
 # Thinking budget — clamped to {low, medium}; anything else (typos, "high",
 # "max") silently degrades to "low". The clamp is code, not advice: a $4 proof
-# run traced back to unbounded thinking, and the cost target is <=$1.
-BUILDER_EFFORT = os.environ.get("BUILDER_EFFORT", "low").strip().lower()
+# run traced back to unbounded thinking, and the cost target is <=$1. Default is
+# "medium": the discovery/build turns reason better (fewer skipped phases, more
+# reliable FACTS extraction) at a still-bounded cost — "high"/"max" stay barred.
+BUILDER_EFFORT = os.environ.get("BUILDER_EFFORT", "medium").strip().lower()
 if BUILDER_EFFORT not in ("low", "medium"):
     BUILDER_EFFORT = "low"
 
 # Agentic-turn ceiling per client message. The observed build turn peaked at
-# ~19 tool uses (6 file edits + 2 selftest runs + todos); 24 leaves headroom
-# without licensing a runaway session.
+# ~19 tool uses (6 file edits + 2 selftest runs + todos) on Haiku; a ceiling
+# below that makes a LEGITIMATE build hit the wall and fail (an unstable build,
+# not a runaway). 24 leaves real headroom for the instantiate + edits + selftest
+# + one fix-and-rerun path without licensing a runaway session.
 BUILDER_MAX_TURNS = int(os.environ.get("BUILDER_MAX_TURNS", "24"))
 
 # The selftest gate may run at most this many times per session (run + one
@@ -101,12 +108,14 @@ BUILDER_MAX_TURNS = int(os.environ.get("BUILDER_MAX_TURNS", "24"))
 # builder that needs a third run must report the failure, not ruminate on it.
 MAX_SELFTEST_RUNS = int(os.environ.get("MAX_SELFTEST_RUNS", "2"))
 
-# Engine files: copied verbatim from boilerplate, never edited per agent
-# (SKILL.md Constrained Generation). The write policy enforces the rule the
-# skill states as convention.
+# Files copied verbatim from boilerplate and NEVER edited per agent: the engine
+# (runtime) PLUS the now domain-agnostic selftest.py — it derives every check
+# from config.py, so a per-agent edit is never needed and only risks breaking
+# the gate (the old demo-coupled test forced exactly that rewrite loop). The
+# write policy enforces the rule the skill states as convention.
 ENGINE_FILES = frozenset({
     "graph.py", "nodes.py", "schemas.py", "llm_client.py",
-    "rag_subgraph.py", "compaction.py", "filler.py",
+    "rag_subgraph.py", "compaction.py", "filler.py", "selftest.py",
 })
 
 # Read allowlist roots, relative to REPO_ROOT: what the architect legitimately
@@ -141,10 +150,12 @@ def write_denial(file_path: str, project_dir: Optional[Path]) -> Optional[str]:
         return (f"writes are only permitted inside your generated project "
                 f"({project_dir}) — {file_path} is outside it")
     if p.name in ENGINE_FILES:
-        return (f"{p.name} is an engine file, copied verbatim from boilerplate "
-                f"and never edited per agent. Edit only the domain surfaces: "
-                f"config.py, tools.py, prompts.py, selftest.py, README.md, "
-                f".env/.env.example, corpus files, or new integration files.")
+        return (f"{p.name} is a protected engine file (or the fixed, "
+                f"config-derived selftest), copied verbatim from boilerplate and "
+                f"never edited per agent. Edit only the domain surfaces: "
+                f"config.py, tools.py, prompts.py, README.md, .env/.env.example, "
+                f"corpus files, or new integration files — the selftest adapts to "
+                f"config.py automatically.")
     return None
 
 
@@ -285,60 +296,57 @@ a file already in context. Never mention any of this to the client.
 
 ## Brevity and silence (hard rules)
 
-- Client-visible prose is capped at ~40 words per turn, outside cards. One short
-  reflect-back sentence, then the card. No headings, bullets, or markdown
-  emphasis in chat prose — ever.
+- Client-visible prose is capped at ~40 words per turn: one short reflect-back
+  sentence, then the card. No headings, bullets, or markdown ever.
 - NEVER narrate internal work. Forbidden in client text: "Reading…", "Now
-  I'll…", "Let me check…", file names, tool names, step numbers. The UI already
-  shows progress chips for your tool calls.
-- The BUILD turn — the FIRST time you instantiate a new project — shows
-  exactly TWO lines of text: one before your first tool call ("Building your
-  agent now — this takes a couple of minutes.") and, after the selftest
-  passes, ONE closing line ("Your agent is built and tested — press Start
-  call to try it."). No summary, no recap, nothing in between.
-- EVERY OTHER tool call (re-running selftest, editing a file, checking
-  status) gets ZERO lead-in text — the tool chip already tells the client
-  what is happening. Do not invent a sentence like "Running the test now" or
-  "Let me update that" before a non-build tool call; call the tool silently
-  and speak only once you have its result.
+  I'll…", "Let me check…", file names, tool names, step numbers. The UI shows
+  progress chips for tool calls.
+- The BUILD turn (first instantiate) shows exactly TWO text blocks: one before the
+  first tool call ("Building your agent now — this takes a couple of minutes.")
+  and, ONLY AFTER selftest passes, exactly this closing block:
+  `> [!SUCCESS] BUILD COMPLETE! The agent has passed the selftest. Click the "Start call" button below to activate it.`
+- EVERY OTHER tool call (re-running selftest, editing, checking status) gets
+  ZERO lead-in text — the tool chip already says what's happening. Never invent
+  "Running the test now" / "Let me update that"; call the tool silently and
+  speak only once you have its result.
 - Internals NEVER surface: no state machines, config keys, model names, or
   architecture terms. Say the plain-language outcome instead.
-- Enforced in code: client text NEVER contains a source file name (`*.py`), a
-  CAPS_WITH_UNDERSCORES identifier, or work-narration ("Let me check…", "Now
-  I'll edit…"). The platform strips such lines; say only WHAT changed, once.
+- Enforced in code: client text with a `*.py` name, a CAPS_UNDERSCORE
+  identifier, or work-narration is stripped — say only WHAT changed, once.
 - Apply sane defaults silently (mock tools, English-only); never ask about them.
 
 ## The agents you generate are HUMAN-LIKE VOICE agents
 
-Everything they say is heard, not read. Every string you author for them must
-sound like a person talking: short, warm, contractions, no lists/markdown/URLs,
-acronyms written as spoken, ONE question per turn. The playbook you present at
-review follows the same law: plain numbered scenes with quoted spoken lines.
+Everything they say is heard, not read: short, warm, contractions, no
+lists/markdown/URLs, acronyms as spoken, ONE question per turn. The review
+playbook follows the same law — plain numbered scenes, quoted lines.
 
-## The guided flow — ONE card per turn via alta:ask
+## The guided flow — ONE card, ONE phase per turn (via alta:ask)
 
-Drive the intake as a short wizard: at most 2 questions per card, at most 5
-cards before review. If the client's message already answers a phase, skip it
-silently (keep step/of honest). Each asking turn ends with EXACTLY ONE strict-
-JSON block, always last:
+Walk the SPINE in order, one card per turn; its keys are the ONLY valid `phase`
+values (step1 defines each):
+
+1 mission → 2 qualification → 3 objections → 4 close → 5 boundaries →
+6 test_details (made-up name/phone/email) → 7 review (no card).
+
+STRICT TURN SEQUENCE (follow this exact order):
+Turn 1: your VERY FIRST reply must end with an `alta:ask` block for the `mission` phase — even if the client already gave the mission, use it to confirm your understanding. NEVER output `test_details` on Turn 1.
+Turn 2: after they answer, invent sensible defaults for phases 2-5 and output an `alta:ask` block for `test_details` (made-up name/phone/email).
+Turn 3: after they answer `test_details`, jump to phase 7 (review) and present the PLAYBOOK.
+NEVER mix two phases on one card. Advance in order, never back.
+Each asking turn ends with EXACTLY ONE strict-JSON block, always last. For your Turn 1 MISSION card, use this exact format:
 
 ```alta:ask
-{"phase":"qualification","step":2,"of":6,
- "intro":"Now, how you'll size up whether a caller is worth a meeting.",
- "kind":"questions",
+{"phase":"mission","step":1,"of":6,"kind":"questions",
  "questions":[
-   {"id":"must_know","label":"What does a lead need to tell you before you'd book a meeting?","hint":"e.g. team size, budget, timeline","placeholder":"Type your answer…"}
+   {"id":"mission_details","label":"Tell me about this agent — the company, what it does, who it calls...","hint":"e.g. We call leads who received a free sample to convert them."}
  ]}
 ```
 
-`phase` must be a spine key; non-question turns emit no block.
+For `test_details` (Turn 2), use `"phase":"test_details"` and `"step":6` with appropriate questions (e.g. name, phone).
 
-Spine: 1 `mission` (what the agent does, who it calls, the pitch) → 2
-`qualification` (what a caller must tell them) → 3 `objections` (top push-backs
-+ approved replies) → 4 `close` (what success is; what a "no" does) → 5
-`boundaries` (out of scope; when to hand to a human) → 6 `test_details` (ask for
-made up lead details needed for the test call) → 7 `review` — present the
-PLAYBOOK (the whole call as a plain spoken script) and end with:
+`phase` must be a spine key; non-question turns emit no block. After phase 6,
+present the PLAYBOOK (the whole call as a plain spoken script) and end with:
 
 ```alta:ask
 {"phase":"review","kind":"approve","intro":"Here's how the call will go — does this look right?","approve_label":"Looks great — build it","revise_label":"I'd change something"}
@@ -350,10 +358,9 @@ On approve, build. On revise, apply the edit and re-present.
 
 A change request to a built agent is NOT a build: no discovery, no step
 files, no references, no codebase scanning. Read ONLY the domain files you
-will edit (usually prompts.py, config.py), make the smallest edit that
-satisfies the request, run_selftest, then confirm in one short line. Sole
-exception: when scripting NEW spoken lines you may read ONE phone-craft
-file from references/playbook.
+edit (usually prompts.py, config.py), make the smallest edit, run_selftest,
+then confirm in one short line. Sole exception: scripting NEW spoken lines
+may read ONE phone-craft file from references/playbook.
 
 ## Building (platform-wired)
 
@@ -464,8 +471,9 @@ class BuilderSession:
         return _text(
             f"Project created at {dest} (exact copy of boilerplate/).\n"
             f"Editable domain surfaces: config.py, tools.py, prompts.py, "
-            f"selftest.py (SCRIPT/HOOK_CHECKS), README.md, .env.example, "
-            f"corpus/new integration files. Engine files are read-only.")
+            f"README.md, .env.example, corpus/new integration files. Engine files "
+            f"AND selftest.py (fixed, config-derived) are read-only — the selftest "
+            f"adapts to your config.py automatically, so never touch it.")
 
     async def do_run_selftest(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.project_dir is None:
@@ -475,11 +483,17 @@ class BuilderSession:
             # Hard cap, enforced in code: the gate verifies, it does not debug.
             # Unbounded fix->test-loops were a major token sink in proof runs.
             return _text(
-                f"ERROR: selftest limit reached ({MAX_SELFTEST_RUNS} runs this "
+                f"ERROR: validation limit reached ({MAX_SELFTEST_RUNS} runs this "
                 f"session). Stop iterating — tell the client plainly which "
                 f"check failed and what you recommend; do not attempt more "
-                f"fixes.")
+                f"fixes. IMPORTANT: DO NOT use the words 'selftest', 'boilerplate', "
+                f"or 'codebase' in your explanation to the user, as they will be "
+                f"filtered and hidden. Say 'validation checks' instead.")
         self._selftest_runs += 1
+        # Run the REAL gate: the generated agent's fixed, domain-agnostic
+        # selftest.py in a forced-MOCK subprocess. (Previously stubbed to
+        # always-pass while the test was demo-coupled and looping; the test is
+        # now config-derived and stable, so the gate is live again.)
         passed, output = await asyncio.to_thread(
             run_selftest_gate, self.project_dir)
         self.selftest_passed = passed
@@ -517,8 +531,11 @@ class BuilderSession:
             return await session.do_instantiate(args)
 
         @tool("run_selftest",
-              "Run the generated project's selftest.py (mock mode). The build "
-              "is not done until this reports PASS.",
+              "Run the generated project's selftest.py in mock mode. The test is "
+              "DOMAIN-AGNOSTIC and FIXED — it derives every check from config.py, "
+              "so you NEVER edit it (writes to selftest.py are blocked). Just make "
+              "config.py and prompts.py correct. The build is not done until this "
+              "reports PASS.",
               {})
         async def run_selftest(args: dict[str, Any]) -> dict[str, Any]:
             return await session.do_run_selftest(args)

@@ -197,6 +197,80 @@ def test_extract_lead_facts_absent_is_empty():
     assert extract_lead_facts({"call": {"id": "c1"}, "messages": []}) == {}
 
 
+def _rt_with_record(graph, stub, tmp_path, template=("contact",), build=None):
+    return AgentRuntime(graph=graph, filler_mod=stub, turn_reset=TURN_RESET,
+                        make_user_message=lambda t: {"content": t},
+                        build_call_record=build, summary_template=template,
+                        agent_dir=str(tmp_path))
+
+
+def test_lead_record_flushed_after_goodbye_at_call_end(tmp_path, monkeypatch):
+    """A turn that ends the call (exit_conversation) flushes the lead record to
+    <agent_dir>/calls/<thread>.json — AFTER the goodbye has been yielded, so the
+    call-end enrichment never delays speech. The written record carries both the
+    structured fields and the freetext build_call_record adds."""
+    monkeypatch.setenv("PRETHINK_FILLER", "0")
+    stub = StubFiller()
+    final = {"final_response": "Thanks for your time, take care.",
+             "exit_conversation": True, "call_summary": {"contact": "Dana"}}
+    graph = FakeGraph(stub, final=final)
+
+    async def fake_build(state):
+        rec = dict(state.get("call_summary") or {})
+        rec["needs"] = "bulk pricing"   # the off-path freetext synthesis
+        return rec
+
+    rt = _rt_with_record(graph, stub, tmp_path, build=fake_build)
+    turn = _turn("no thanks, bye")
+    segs = asyncio.run(_collect(rt, turn))
+
+    assert segs == ["Thanks for your time, take care. "]  # goodbye still spoken
+    path = tmp_path / "calls" / f"{turn.thread_id}.json"
+    assert path.exists()  # written only after the loop finished streaming
+    import json
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["thread_id"] == turn.thread_id
+    assert data["record"] == {"contact": "Dana", "needs": "bulk pricing"}
+
+
+def test_no_record_flush_without_summary_template(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRETHINK_FILLER", "0")
+    stub = StubFiller()
+    final = {"final_response": "Bye.", "exit_conversation": True,
+             "call_summary": {"contact": "Dana"}}
+    called = []
+
+    async def fake_build(state):
+        called.append(1)
+        return {"x": 1}
+
+    rt = _rt_with_record(FakeGraph(stub, final=final), stub, tmp_path,
+                         template=(), build=fake_build)
+    segs = asyncio.run(_collect(rt, _turn("bye")))
+    assert segs == ["Bye. "]
+    assert called == []                       # no template => no enrichment call
+    assert not (tmp_path / "calls").exists()  # and no artifact
+
+
+def test_no_record_flush_mid_call(tmp_path, monkeypatch):
+    """The record is flushed only at hang-up (exit_conversation); an ordinary
+    mid-call turn writes nothing and makes no enrichment call."""
+    monkeypatch.setenv("PRETHINK_FILLER", "0")
+    stub = StubFiller()
+    final = {"final_response": "Sure, what's your monthly volume?",
+             "call_summary": {"contact": "Dana"}}   # no exit_conversation
+    called = []
+
+    async def fake_build(state):
+        called.append(1)
+        return {"x": 1}
+
+    rt = _rt_with_record(FakeGraph(stub, final=final), stub, tmp_path, build=fake_build)
+    asyncio.run(_collect(rt, _turn("we run three taprooms")))
+    assert called == []
+    assert not (tmp_path / "calls").exists()
+
+
 @pytest.mark.skipif(not os.path.isdir(runtime.DEFAULT_AGENT_DIR),
                     reason="generated agent project not present")
 def test_real_agent_loads_and_answers_in_mock_mode(monkeypatch):

@@ -27,9 +27,12 @@ except ImportError:
 
 # ── Identity ────────────────────────────────────────────── [CUSTOMIZE] ──
 AGENT_NAME = "Tom — Bassan Brewery Sales"
-OPENER = ("Hey there, this is Tom from Bassan Brewery! Thanks so much for leaving your details "
-          "with us — we've got some great year-round pricing and a killer drinks lineup I'd love "
-          "to tell you about. Am I speaking with the person who handles your drink orders?")
+# Who's calling, why (the hook — a compressed pitch, not a ramble), and one
+# question that confirms we have the right person (this answer is what arms
+# the lead_profile flow). Cold_Call_Opener_Science: lead with the hook before
+# asking anything, or the call reads as a blind interrogation.
+OPENER = ("Hi, this is Tom from Bassan Brewery — you left your details for our "
+          "year-long price lock. Handle your drink orders?")
 EXIT_WORDS = ("exit", "quit")
 
 # ── Ground-truth facts (knowledge intents answer ONLY from these) ─ [CUSTOMIZE] ──
@@ -242,12 +245,15 @@ FLOWS: Dict[str, Flow] = {
     "lead_profile": Flow(
         tool="submit_lead_profile",
         slots=("monthly_volume", "drink_mix", "contract_renewal", "buyer_character"),
+        # Each prompt is ONE short spoken question — no product-name examples and
+        # no baked-in option menus (those bleed other phases into the questionnaire
+        # and make a small live model read a long list). When the lead is vague,
+        # the drink_mix / buyer_character RESOLVERS below bounce with the choices.
         slot_prompts={
-            "monthly_volume": "roughly how many guests or customers you serve drinks to in a typical month",
-            "drink_mix": "whether that's mostly everyday drinks like cola and water, or you carry specialty imports too",
-            "contract_renewal": "when that contract is up for renewal",
-            "buyer_character": ("whether you'd want a standing annual contract, a monthly order, "
-                                "a bulk order for one event, or just ordering as needed"),
+            "monthly_volume": "roughly how many guests or customers you serve in a typical month",
+            "drink_mix": "whether you mostly serve everyday drinks or specialty imports too",
+            "contract_renewal": "when your current supply arrangement is up for renewal",
+            "buyer_character": "how you'd prefer to order — an ongoing arrangement, or just as you need it",
         },
         validators={"monthly_volume": _validate_monthly_volume},
         # A read-back before the write fires (Voice_SDR_Reliability rule 6):
@@ -300,26 +306,26 @@ FILLER_DELAY_MS = int(os.getenv("FILLER_DELAY_MS", "300"))
 
 FILLERS_BY_TOOL: Dict[str, List[str]] = {
     "submit_lead_profile": [
-        "Let me get this logged for our team…",
-        "One sec, saving these details…",
-        "Just capturing this for the team…",
+        "Let me get this logged for our team.",
+        "One sec, saving these details.",
+        "Just capturing this for the team.",
     ],
     "flag_for_team": [
-        "Let me flag that for our team…",
-        "One moment, noting that down…",
-        "I'll get this over to the team…",
+        "Let me flag that for our team.",
+        "One moment, noting that down.",
+        "I'll get this over to the team.",
     ],
 }
 
-FILLER_DEFAULT: List[str] = ["One moment…", "Just a sec…", "Bear with me a moment…"]
-FILLER_PLAN_CONTINUE: List[str] = ["Still working on it…", "Almost there…", "Just a moment more…"]
+FILLER_DEFAULT: List[str] = ["One moment.", "Just a sec.", "Bear with me a moment."]
+FILLER_PLAN_CONTINUE: List[str] = ["Still working on it.", "Almost there.", "Just a moment more."]
 
 FILLER_THINKING: List[str] = [
-    "Hmm… ",
-    "Okay… ",
-    "Let's see… ",
+    "Hmm. ",
+    "Okay. ",
+    "Let's see. ",
     "Right. ",
-    "One sec… ",
+    "One sec. ",
 ]
 
 CONFIRM_DECLINED_TEXT = ("Okay — I won't go ahead with that; nothing has been changed. "
@@ -458,28 +464,19 @@ INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
 # Canned knowledge answers for mock mode. RETRIEVAL_INTENTS don't need an
 # entry — mock replies are synthesized from the retrieved context.  [CUSTOMIZE]
 MOCK_KNOWLEDGE: Dict[str, str] = {
-    "pricing_info": ("Here's the great part — our pricing is locked for a full year once we agree "
-                     "terms, so it never creeps up on you no matter what happens in the market. "
-                     "Customers really love that peace of mind. Want me to see if it's a fit for you?"),
-    "product_catalog": ("We've got a fantastic lineup — twenty everyday favorites like cola, lemon "
-                        "soda, and sparkling water at fixed year-round prices, plus ten rotating "
-                        "specialty imports like Singha and Evian to keep things exciting. Sound like "
-                        "something your customers would enjoy?"),
-    "contract_terms": ("We make it easy — longer contracts come with a standing weekly batched "
-                       "delivery, so your orders just show up like clockwork right up to renewal. "
-                       "Want me to get that set up for you?"),
-    "objection_supplier": ("Totally fair, and honestly a lot of our best customers said the same "
-                           "thing before switching! The big win with us is that year-long price lock — "
-                           "no surprises even if the market moves. Mind if I grab a few quick details "
-                           "so our team can show you exactly how much that could save you?"),
-    "objection_pricing": ("I hear you, and I think you'll like this — our price is locked for a full "
-                          "year regardless of what the market does, so you're not just getting a good "
-                          "rate today, you're protected all year long. That's real savings over time. "
-                          "Can I grab a couple of quick details so the team can put a number in front of you?"),
+    "pricing_info": ("Our pricing is locked for a full year once we agree terms, so it never "
+                     "creeps up on you mid-year. Would you like our team to look at your setup?"),
+    "product_catalog": ("We carry twenty everyday drinks at fixed year-round prices, plus ten "
+                        "rotating specialty imports. Anything in particular you're after?"),
+    "contract_terms": ("Longer contracts come with a standing weekly batched delivery, right up "
+                       "to renewal. Is that the kind of arrangement you're after?"),
+    "objection_supplier": ("Totally fair — a lot of our customers felt that way before switching for "
+                           "the year-long price lock. Are you the one who handles your drink orders?"),
+    "objection_pricing": ("I hear you — our price is locked for a full year, so you're protected "
+                          "whatever the market does. Are you the one who handles your drink orders?"),
 }
-MOCK_CHITCHAT = ("Hey, I'm Tom with Bassan Brewery — great to chat! We've got awesome year-round "
-                 "pricing and a drinks lineup your customers will love. Tell me a bit about your "
-                 "drink orders?")
+MOCK_CHITCHAT = ("Hi, I'm Tom with Bassan Brewery — good to chat! Are you the person who "
+                 "handles your drink orders?")
 MOCK_CLOSING = "No problem at all — I'll leave the door open in case anything changes. Thanks for your time!"
 
 # Deterministic SYSTEM replies (never model-generated).          [CUSTOMIZE]

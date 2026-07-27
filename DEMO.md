@@ -12,13 +12,15 @@ call again.
 
 ## 0. Launch (once)
 
-1. Run `run.bat` (Windows) or `./run.sh` (macOS/Linux). It builds the venv,
-   installs deps, and starts the server on **http://localhost:8100**.
+1. **Start ngrok (Mandatory for Voice Calls)**
+   Run `ngrok http 8000` in a terminal and leave it running. The live call needs this to connect.
+2. **Start the Server**
+   Open a *second* terminal and run `run.bat` (Windows) or `./run.sh` (macOS/Linux). It builds the venv, installs deps, and starts the server on **http://localhost:8100**.
 2. Open that URL. A first-run setup overlay asks for two keys:
    - **Anthropic API key** — powers the AI *builder*.
    - **OpenAI API key** — powers the generated *agent's* brain on the call.
    Vapi (the voice transport) is pre-provisioned; no key needed from you.
-3. For a real phone/web call you also need ngrok running (see `README.md`). The
+3. For a real phone/web call you also need ngrok running (see step 1). The
    selftest and the whole build flow work without it — only the live call needs it.
 
 ---

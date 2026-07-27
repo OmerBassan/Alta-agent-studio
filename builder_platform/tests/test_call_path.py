@@ -46,6 +46,12 @@ def test_public_url_prefers_env_override(monkeypatch):
 
 def test_public_url_raises_when_no_tunnel(monkeypatch):
     monkeypatch.setattr(tunnel, "_ngrok_tunnels", _fake_tunnels())
+    # Hermetic: never touch the network or spawn a real ngrok during tests.
+    monkeypatch.setattr(tunnel, "_find_ngrok", lambda: None)
+
+    async def _no_agent():
+        return False
+    monkeypatch.setattr(tunnel, "_agent_reachable", _no_agent)
     with pytest.raises(tunnel.TunnelNotFound) as exc:
         asyncio.run(tunnel.resolve_public_url(8100))
     assert "ngrok http 8100" in str(exc.value)
@@ -144,6 +150,26 @@ def test_point_assistant_requires_https(monkeypatch):
     monkeypatch.setenv("VAPI_PRIVATE_KEY", "priv")
     with pytest.raises(vapi_control.VapiConfigError):
         asyncio.run(vapi_control.point_assistant_at("http://insecure.example", "aid1"))
+
+
+def test_patch_body_default_omits_unverified_endpointing(monkeypatch):
+    """Default payload is unchanged: endpointing stays in the dashboard until a
+    flight test verifies Vapi's field names (VAPI_CODIFY_ENDPOINTING off)."""
+    monkeypatch.delenv("VAPI_CODIFY_ENDPOINTING", raising=False)
+    body = vapi_control._patch_body({"provider": "custom-llm"}, "Hi there!")
+    assert body["backchannelingEnabled"] is False
+    assert body["startSpeakingPlan"] == {"waitSeconds": 0}
+    assert "stopSpeakingPlan" not in body   # not shipped un-probed
+
+
+def test_patch_body_codifies_endpointing_when_enabled(monkeypatch):
+    """With the flag on (post-flight-test), the turn-taking knobs are pinned
+    into the PATCH so they are version-controlled, not dashboard-only."""
+    monkeypatch.setenv("VAPI_CODIFY_ENDPOINTING", "1")
+    body = vapi_control._patch_body({"provider": "custom-llm"}, None)
+    assert body["startSpeakingPlan"]["smartEndpointingEnabled"] is True
+    assert body["startSpeakingPlan"]["waitSeconds"] == 0
+    assert body["stopSpeakingPlan"]["numWords"] == 1
 
 
 # --- runtime supervisor -----------------------------------------------------
@@ -308,3 +334,97 @@ def test_call_500_when_runtime_fails_to_start(client, tmp_path, monkeypatch):
     r = client.post("/api/call", json={"session_id": "s6"})
     assert r.status_code == 500
     assert "graph import blew up" in r.json()["detail"]
+
+
+# --- POST /api/warm ---------------------------------------------------------
+
+def test_warm_404_for_unknown_session(client):
+    """Warm gates identically to call: an unknown session is a fast 404, no
+    background spawn."""
+    assert client.post("/api/warm", json={"session_id": "nope"}).status_code == 404
+
+
+def test_warm_409_when_selftest_not_passed(client, tmp_path):
+    _register("w1", _FakeSession(project_dir=tmp_path, selftest_passed=False))
+    r = client.post("/api/warm", json={"session_id": "w1"})
+    assert r.status_code == 409
+    assert "selftest" in r.json()["detail"].lower()
+
+
+def test_warm_returns_immediately_and_registers_a_task(client, tmp_path,
+                                                       monkeypatch):
+    """Warm answers right away with {"warming": True} and schedules a background
+    prepare task for the project — the frontend never blocks on the spawn."""
+    monkeypatch.setenv("VAPI_ASSISTANT_ID", "aid1")
+    monkeypatch.setenv("VAPI_PUBLIC_KEY", "pub")
+    monkeypatch.setenv("VAPI_PRIVATE_KEY", "priv")
+
+    async def _url(runtime_port):
+        return "https://tunnel.example"
+    monkeypatch.setattr(tunnel, "resolve_public_url", _url)
+
+    async def _point(public_url, aid=None, first_message=None):
+        return {"assistant_id": aid, "model_url": public_url + "/v1",
+                "previous_model_url": None, "first_message": first_message}
+    monkeypatch.setattr(vapi_control, "point_assistant_at", _point)
+
+    async def _start(agent_dir, port=8100):
+        return runtime_supervisor.ActiveRuntime(agent_dir=tmp_path, port=8100,
+                                                proc=None)
+    monkeypatch.setattr(runtime_supervisor, "start", _start)
+
+    app_mod._warm_tasks.pop(str(tmp_path), None)
+    _register("w2", _FakeSession(project_dir=tmp_path, selftest_passed=True))
+
+    r = client.post("/api/warm", json={"session_id": "w2"})
+    assert r.status_code == 200
+    assert r.json()["warming"] is True
+    assert str(tmp_path) in app_mod._warm_tasks
+    app_mod._warm_tasks.pop(str(tmp_path), None)
+
+
+def test_warm_is_idempotent_within_one_loop(tmp_path, monkeypatch):
+    """Two warms for the same in-flight project ride ONE task — the guard must
+    not stack a second runtime spawn. Driven directly (not via TestClient) so
+    both calls share one event loop, as the real uvicorn process does; the
+    TestClient spins a fresh loop per request and would tear the task down."""
+    monkeypatch.setenv("VAPI_ASSISTANT_ID", "aid1")
+    monkeypatch.setenv("VAPI_PUBLIC_KEY", "pub")
+    monkeypatch.setenv("VAPI_PRIVATE_KEY", "priv")
+
+    async def _url(runtime_port):
+        return "https://tunnel.example"
+    monkeypatch.setattr(tunnel, "resolve_public_url", _url)
+
+    async def _point(public_url, aid=None, first_message=None):
+        return {"assistant_id": aid, "model_url": public_url + "/v1",
+                "previous_model_url": None, "first_message": first_message}
+    monkeypatch.setattr(vapi_control, "point_assistant_at", _point)
+
+    starts = []
+
+    async def _slow_start(agent_dir, port=8100):
+        starts.append(agent_dir)
+        await asyncio.sleep(0.2)            # keep the first task in-flight
+        return runtime_supervisor.ActiveRuntime(agent_dir=tmp_path, port=8100,
+                                                proc=None)
+    monkeypatch.setattr(runtime_supervisor, "start", _slow_start)
+
+    async def scenario():
+        app_mod._warm_tasks.pop(str(tmp_path), None)
+        app_mod._sessions["w3"] = (
+            _FakeSession(project_dir=tmp_path, selftest_passed=True),
+            0.0, asyncio.Lock())
+        req = app_mod.CallRequest(session_id="w3")
+        r1 = await app_mod.warm_call(req)
+        t1 = app_mod._warm_tasks[str(tmp_path)]
+        await asyncio.sleep(0)                      # let the first task reach start()
+        r2 = await app_mod.warm_call(req)          # rides the in-flight task
+        t2 = app_mod._warm_tasks[str(tmp_path)]
+        assert r1["warming"] is True and r2["warming"] is True
+        assert r2.get("already") is True           # second warm did not re-spawn
+        assert t1 is t2                            # same task, no second spawn
+        t1.cancel()
+
+    asyncio.run(scenario())
+    assert len(starts) == 1                        # start() invoked once, not twice

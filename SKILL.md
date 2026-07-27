@@ -50,11 +50,13 @@ Also: `integrations/README.md` when the client names a real external system.
 
 - **Voice-first:** every string is SPOKEN; latency is correctness; dead air is
   a failure. Text-only is an explicit recorded exception.
-- **Constrained generation:** edit ONLY domain surfaces (`config.py`,
-  `tools.py`, `prompts.py`, selftest `SCRIPT`/`HOOK_CHECKS`, `.env*`, corpus,
-  `README.md`). Engine files (`graph.py`, `nodes.py`, `schemas.py`,
-  `llm_client.py`, `rag_subgraph.py`, `compaction.py`, `filler.py`) are
-  write-blocked; fixes go upstream in `boilerplate/`, once.
+- **Constrained generation:** edit ONLY domain surfaces (`config.py` incl.
+  `CALL_ARC`, the outbound sales spine, `prompts.py`, `.env*`, corpus). Do NOT
+  edit `tools.py` (pre-built, edit-proof — wire via `config.py`, never rewrite)
+  and do NOT create `README.md`. Engine files (`graph.py`, `nodes.py`,
+  `schemas.py`, `llm_client.py`, `rag_subgraph.py`, `compaction.py`,
+  `filler.py`, `selftest.py`) are write-blocked; fixes go upstream in
+  `boilerplate/`, once.
 - **Provider-agnostic (STRICT):** the agent binds NO provider — OpenAI-
   compatible `/v1` by env only; blank key = MOCK mode; swap = `.env` edit.
 - **Mock-first** for bespoke tools; catalog `integrations/` recipes ship live

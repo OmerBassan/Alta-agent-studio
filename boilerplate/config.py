@@ -40,6 +40,80 @@ FACTS = """Acme Outdoors — authoritative facts (never invent beyond this):
 - Payments cannot be taken on this channel; a human agent verifies payment details.
 """
 
+# ── Drop-in knowledge base (uploaded corpus) ────────────────────────────────
+# Any .txt/.md file in this agent's `knowledge/` folder is CHUNKED into the DOCS
+# retrieval corpus at import (see the merge just below the DOCS definition), so
+# the RAG subgraph reaches it JUST-IN-TIME on a knowledge question — it is NOT
+# appended to FACTS. Appending to FACTS made the whole upload ride EVERY think-
+# tier call (latency + bloat); retrieval-gating keeps the think prompt lean and
+# only surfaces the relevant slice. This is what the platform's "drop a file"
+# upload card writes to. NOTE (skill): a knowledge/FAQ intent backed by uploaded
+# files must be a RETRIEVAL_INTENT, or the docs are indexed but never queried.
+# Bounded by KNOWLEDGE_MAX_CHARS so a large upload can't blow the corpus budget.
+_KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge")
+_KNOWLEDGE_MAX_CHARS = int(os.getenv("KNOWLEDGE_MAX_CHARS", "8000"))
+
+
+def _slugify(name: str) -> str:
+    base = os.path.splitext(name)[0].lower()
+    return re.sub(r"[^a-z0-9]+", "-", base).strip("-") or "doc"
+
+
+def _chunk_text_to_docs(name: str, text: str, max_words: int = 150) -> List[dict]:
+    """Split one uploaded file into retrieval-sized DOCS entries (~max_words each,
+    on paragraph boundaries) so RETRIEVER returns the relevant slice — not the
+    whole file — and the upload never rides the static FACTS/think prompt."""
+    slug = _slugify(name)
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    docs: List[dict] = []
+    buf: List[str] = []
+    count = 0
+
+    def _flush() -> None:
+        nonlocal buf, count
+        if buf:
+            docs.append({"id": f"{slug}-{len(docs)}", "title": name,
+                         "text": " ".join(buf), "aliases": ""})
+            buf, count = [], 0
+
+    for p in paras:
+        words = len(p.split())
+        if count and count + words > max_words:
+            _flush()
+        buf.append(p)
+        count += words
+    _flush()
+    return docs
+
+
+def _load_knowledge_docs() -> List[dict]:
+    if not os.path.isdir(_KNOWLEDGE_DIR):
+        return []
+    docs: List[dict] = []
+    budget = _KNOWLEDGE_MAX_CHARS
+    for name in sorted(os.listdir(_KNOWLEDGE_DIR)):
+        if not name.lower().endswith((".txt", ".md")):
+            continue
+        try:
+            with open(os.path.join(_KNOWLEDGE_DIR, name), encoding="utf-8",
+                      errors="replace") as fh:
+                text = fh.read().strip()
+        except OSError:
+            continue
+        if not text:
+            continue
+        text = text[:budget]
+        budget -= len(text)
+        docs.extend(_chunk_text_to_docs(name, text))
+        if budget <= 0:
+            break
+    return docs
+
+
+# Loaded at import; MERGED into DOCS just below the DOCS definition (DOCS is not
+# defined yet at this point). FACTS is deliberately left untouched.
+_UPLOADED_DOCS = _load_knowledge_docs()
+
 # ── Intents (hierarchical: ANSWER / FLOW / SYSTEM) ──────── [CUSTOMIZE] ──
 # Knowledge intents: answered directly from FACTS by the ANSWER tier (no tool).
 KNOWLEDGE_INTENTS: Tuple[str, ...] = ("faq_hours", "faq_returns", "faq_policy")
@@ -78,6 +152,15 @@ class Flow:
     """A tool-backed intent: which tool runs, which slots it needs, and how to
     ask for each missing slot. `slot_prompts` doubles as the slot description
     in the live intent-extraction prompt AND the mock clarifying question.
+
+    SLOT SOURCING (Think pre-fills deterministically before asking anyone):
+      - A slot whose name matches a `session_facts` key is filled from it —
+        outbound-call metadata (email/name/phone) or an earlier tool's cached
+        output — so a value the agent already holds is never asked for.
+      - A slot with NO `slot_prompts` entry is never asked aloud; it MUST be
+        auto-derivable and is filled from its `SLOT_EXTRACTORS` hook (which
+        must be live-safe, e.g. a fixed template body — never a mock
+        placeholder). Give a slot a prompt only if the lead should be asked.
 
     confirm: destructive/irreversible flows (checkout, cancel, book) ask a
       deterministic yes/no before Act; the payload is stashed until answered.
@@ -118,6 +201,119 @@ class Flow:
     enrich: bool = True
     hitl: bool = False
     cache_keys: Tuple[str, ...] = ()
+
+
+# ── Proactive sales arc (the SDR "spine") ───────────────────── [CUSTOMIZE] ──
+@dataclass(frozen=True)
+class Stage:
+    """One scene of the OUTBOUND sales arc, executed by the zero-model director
+    gate (nodes._director) so the agent LEADS the call instead of only reacting.
+    The ordered CALL_ARC below is the machine-readable form of the approved
+    playbook's proactive spine (opener -> discovery -> qualify -> close). The
+    director walks it between the reactive turns (lead questions, objections,
+    tools, RAG) — those keep working and stay subordinate to the agenda.
+
+    Author each Stage by EXTRACTING from the approved playbook, never inventing:
+
+      name        Cursor value stored in state.call_stage. Unique.
+      objective   One spoken-goal line, injected into the ANSWER/think system
+                  prompt for this stage (reframes the agent from help-desk to
+                  goal-aware SDR). Shapes tone; the director enforces the move.
+      flow        Optional FLOWS intent this stage DRIVES (e.g. the qualify
+                  stage points at a 'lead_profile' flow). The director enters it
+                  proactively and asks its slot_prompts — do NOT re-author the
+                  questions here; they live in the Flow.
+      line        Optional scripted spoken move for a FLOW-LESS stage the agent
+                  leads on an idle floor (e.g. a discovery statement, the close
+                  CTA). Spoken once (guarded), <=20 words, ends in one question.
+      nudge       Optional one-shot steer-back appended AFTER the lead took a
+                  reactive turn (asked a question / raised an objection) — this
+                  replaces hardcoded steer tails baked into MOCK_KNOWLEDGE.
+      advance_when Structured exit predicate (never prose parsing), one of:
+                    {"flow_complete": "<intent>"}  a clean run of that flow's
+                        tool happened (last_action) or its cache_keys landed in
+                        session_facts,
+                    {"session_fact": "<key>"}      key present in session_facts,
+                    {"agent_led_once": True}       this stage's line/nudge was
+                        spoken (use for a scripted discovery stage),
+                    {"intent_seen": ["goodbye"]}   this turn's intent is in the
+                        set,
+                    {}                             terminal (never auto-advances).
+
+    Example (a brewery SDR — keep in config, engine stays verbatim):
+        CALL_ARC = (
+            Stage(name="discovery",
+                  objective="confirm you've reached the person who handles orders and why the call matters",
+                  nudge="Are you the one who handles your drink orders?",
+                  advance_when={"agent_led_once": True}),
+            Stage(name="qualify", flow="lead_profile",
+                  objective="capture monthly volume, current supplier, and renewal timing",
+                  advance_when={"flow_complete": "lead_profile"}),
+            Stage(name="close",
+                  objective="hand off to the sales team as the concrete next step",
+                  line="I'd love to have our head brewer send you samples — can I set that up?",
+                  advance_when={"intent_seen": ["goodbye"]}),
+        )
+    """
+    name: str
+    objective: str = ""
+    flow: str = ""
+    line: str = ""
+    nudge: str = ""
+    advance_when: Dict[str, object] = field(default_factory=dict)
+
+
+# The ordered sales spine. EMPTY => the director is a no-op and the agent stays
+# purely reactive (correct for an INBOUND support agent like this Acme demo).
+# An OUTBOUND SDR MUST define this from the approved playbook's spine scenes.
+CALL_ARC: Tuple[Stage, ...] = ()
+
+
+# ── Lead record (conversation memory + the SDR deliverable) ── [CUSTOMIZE] ──
+@dataclass(frozen=True)
+class SummaryField:
+    """One field of the call's structured lead record (state.call_summary),
+    built by the zero-model aggregator nodes._update_summary. The record doubles
+    as durable memory (a compact view is injected into prompts so the short
+    HISTORY_TURNS window never loses what was qualified) AND as the qualified-
+    lead artifact the platform flushes to JSON at call-end.
+
+    Author each field by EXTRACTING its source from existing state — never a new
+    field with no writer:
+
+      key     Record key (also the JSON artifact key).
+      label   Human/prompt label; defaults to key.
+      source  WHERE the value comes from — one of:
+        "fact:<k>"           session_facts[<k>] (hard IDs / seeded lead metadata;
+                             NOT re-injected into prompts — already in KNOWN FACTS)
+        "slot:<intent>.<s>"  a captured flow slot value (qualification answers);
+                             "slot:<s>" also accepted
+        "followups"          accumulates distinct completed tool-action summaries
+                             (booked meeting, queued email) from last_action
+        "freetext"           prose synthesized ONCE at call-end by
+                             nodes.build_call_record (off the reply path) — the
+                             only model-filled source; _update_summary never
+                             writes it
+
+    Example (a brewery SDR — keep in config, engine stays verbatim):
+        SUMMARY_TEMPLATE = (
+            SummaryField(key="contact",   source="fact:name",  label="Contact"),
+            SummaryField(key="email",     source="fact:email", label="Email"),
+            SummaryField(key="volume",    source="slot:lead_profile.volume",
+                         label="Monthly volume"),
+            SummaryField(key="follow_ups", source="followups", label="Follow-ups"),
+            SummaryField(key="needs",     source="freetext",   label="What the lead needs"),
+            SummaryField(key="next_steps", source="freetext",  label="Agreed next steps"),
+        )
+    """
+    key: str
+    source: str
+    label: str = ""
+
+
+# EMPTY => no lead record is built or flushed (correct for a non-SDR / inbound
+# agent). An OUTBOUND SDR defines this from the playbook's qualification targets.
+SUMMARY_TEMPLATE: Tuple[SummaryField, ...] = ()
 
 
 # Slot-refusal sentinel (ENGINE constant — do not customize). When the lead
@@ -239,29 +435,37 @@ FILLER_DELAY_MS = int(os.getenv("FILLER_DELAY_MS", "250"))
 # it) — the whole ROI is tool-SPECIFIC acks, not the generic fallback.
 FILLERS_BY_TOOL: Dict[str, List[str]] = {
     "lookup_order": [
-        "Let me pull up that order…",
-        "One sec — checking on that order…",
-        "Looking that up for you now…",
+        "Let me pull up that order.",
+        "One sec — checking on that order.",
+        "Looking that up for you now.",
     ],
     "book_appointment": [
-        "Let me check the calendar…",
-        "Checking what's available…",
-        "One moment while I look at the openings…",
+        "Let me check the calendar.",
+        "Checking what's available.",
+        "One moment while I look at the openings.",
     ],
     "issue_refund": [
-        "Let me get that refund started…",
-        "Okay — putting that through for you…",
-        "One moment while I set that up…",
+        "Let me get that refund started.",
+        "Okay — putting that through for you.",
+        "One moment while I set that up.",
+    ],
+    # send_email is a permanently-registered tool (tools.send_email). It is not
+    # wired to a FLOW in this inbound demo, but an OUTBOUND agent that adds an
+    # email flow gets tool-aware filler cover for free from this bank.
+    "send_email": [
+        "Sure — let me get that email out to you.",
+        "One sec, sending that over now.",
+        "Okay, putting that email together.",
     ],
 }
 
 # Generic fallback for any tool without its own bank (keep it truly neutral).
-FILLER_DEFAULT: List[str] = ["One moment…", "Just a sec…", "Bear with me a moment…"]
+FILLER_DEFAULT: List[str] = ["One moment.", "Just a sec.", "Bear with me a moment."]
 
 # Natural continuation phrases for the gap BETWEEN plan steps of a compound
 # request (never "step 2 of 3" — that exposes internal mechanics and sounds
 # robotic aloud). Empty list disables plan fillers.
-FILLER_PLAN_CONTINUE: List[str] = ["Still working on it…", "Almost there…", "Just a moment more…"]
+FILLER_PLAN_CONTINUE: List[str] = ["Still working on it.", "Almost there.", "Just a moment more."]
 
 # Pre-think acknowledgment bank (voice): ultra-short spoken tokens the HOST
 # RUNTIME speaks the instant a turn arrives — BEFORE the graph runs — covering
@@ -272,11 +476,11 @@ FILLER_PLAN_CONTINUE: List[str] = ["Still working on it…", "Almost there…", 
 # question!" (the reply might be a refusal or a clarifying question).
 # The runtime falls back to its own generic bank if this is absent or empty.
 FILLER_THINKING: List[str] = [
-    "Hmm… ",
-    "Okay… ",
-    "Let's see… ",
+    "Hmm. ",
+    "Okay. ",
+    "Let's see. ",
     "Right. ",
-    "One sec… ",
+    "One sec. ",
 ]
 
 # ── Closing-question bank (replaces the hardcoded "Anything else?") ─ [CUSTOMIZE] ──
@@ -430,6 +634,13 @@ COMPACTION_ENABLED = os.getenv("COMPACTION_ENABLED", "1").strip().lower() not in
     "0", "false", "off", "no", "disabled")
 COMPACTION_MAX_ITEMS = int(os.getenv("COMPACTION_MAX_ITEMS", "12"))
 
+# Raw conversation turns kept in the prompt window (nodes._history). SHORT by
+# design: a voice payload must stay light for low TTFT, and durable detail
+# survives outside it (session_facts, last_action, pending_slots, call_summary).
+# Default 8 ~= 4 exchanges — enough for local coreference ("it", "that one").
+# Raise via env for an unusually reference-heavy domain; never a code edit.
+HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "8"))
+
 # Plan ceiling: max steps the planner may emit for a COMPOUND request; excess
 # steps are truncated deterministically at plan creation. Keep it <=
 # MAX_TOOL_CALLS_PER_TURN, or a same-turn plan trips the circuit breaker
@@ -465,6 +676,12 @@ DOCS: Tuple[Dict[str, str], ...] = (
              "Bring the ad or URL to any branch.",
      "aliases": "cheaper elsewhere found it cheaper competitor discount beat the price"},
 )
+
+# Merge any uploaded knowledge/*.txt|.md (chunked above) into the retrieval
+# corpus, so it is reachable JUST-IN-TIME via the RAG subgraph and never bloats
+# the static FACTS/think prompt. No-op when the knowledge/ folder is empty.
+if _UPLOADED_DOCS:
+    DOCS = DOCS + tuple(_UPLOADED_DOCS)
 
 _STOPWORDS = {"what", "whats", "what's", "is", "are", "the", "your", "you", "a", "an", "of",
               "do", "does", "how", "about", "tell", "me", "can", "i", "my", "policy", "on"}

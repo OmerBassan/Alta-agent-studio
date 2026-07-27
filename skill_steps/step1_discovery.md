@@ -1,16 +1,15 @@
 # Step 1 — Discovery (read before your first intake question)
 
-Extract, in the client's plain language, exactly what fills the five wizard
-phases. One card per turn, ≤2 questions per card, ≤5 cards before review. If the
-client's opening message already answers a phase, skip it silently.
+Extract the agent's MISSION from the client. 
+STRICT TURN SEQUENCE (You must follow this exact order):
+Turn 1: Your VERY FIRST reply must ALWAYS end with an `alta:ask` block for the `mission` phase. Even if the client gave the mission in their prompt, use this card to ask a clarifying question or simply ask them to confirm your understanding. NEVER output `test_details` on Turn 1.
+Turn 2: After they answer the mission, invent sensible defaults for phases 2-5, and output an `alta:ask` block for `test_details` (made-up name/phone/email).
+Turn 3: After they answer `test_details`, jump straight to phase 7 (review) and present the PLAYBOOK.
 
 **Card 1 is deliberately open-ended** — invite the whole picture in one breath
-("Tell me about this agent — the company, what it does, who it calls, and the
-objections you hear most") rather than asking a single narrow phase. A founder
-usually answers mission, objections, and boundaries at once; harvest every
-phase their answer covers and skip those cards silently, so the common case is
-2-3 cards, not 5. Only fall back to phase-by-phase cards for whatever the
-opening answer left genuinely blank.
+("Tell me about this agent — the company, what it does, who it calls...").
+
+Harvest whatever they provide in their first answer INTO YOUR NOTES. However, **you must STILL present the MISSION card** as your very first response. For anything else left blank, INVENT sensible defaults based on the mission. Once you have presented the MISSION card and the TEST_DETAILS card in the exact turn sequence described above, you can jump silently straight to phase 7 (review).
 
 ## How to talk (compressed conduct)
 
@@ -56,10 +55,13 @@ opening answer left genuinely blank.
    that goes nowhere is the worst failure; every "plausible but unsupported"
    ask (order history, account records) gets an explicit spoken decline, never
    a fall-through to chitchat.
-6. **test_details** — the lead details (like full name, phone number, email,
-   or any other data points) required to test the agent properly. The builder asks for
-   these values. During the build, these are written to `.test_variables.json`.
-   If user refuses to provide these values, don't push him — just move on.
+6. **test_details** — ONLY the fake lead's IDENTITY for the test call: full
+   name, phone number, email. Ask for exactly those and nothing else. NEVER add
+   a qualification, preference, or scenario question to this card (e.g. "whole
+   bean or ground?", "what's their budget?") — those are things the AGENT asks
+   the LEAD on the call, never things the builder asks the owner. During the
+   build, the identity values are written to `.test_variables.json`. If the user
+   refuses to provide them, don't push — just move on.
 
 ## Existing systems (fold into phases 2/4, don't add cards)
 

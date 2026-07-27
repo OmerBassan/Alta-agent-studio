@@ -20,8 +20,13 @@ optional and covered below.
 
 ### Run
 
-1. **Launch** — one command does venv + install + `.env` seed + start server:
+1. **Start ngrok (Mandatory for Voice Calls)** — The Vapi voice AI must be able to reach your machine. Open a terminal and run:
+   ```bash
+   ngrok http 8000
+   ```
+   Leave this terminal running in the background.
 
+2. **Launch Alta Server** — Open a *second* terminal and run:
    ```bash
    run.bat        # Windows
    ./run.sh       # macOS / Linux

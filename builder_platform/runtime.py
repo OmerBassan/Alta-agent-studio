@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib
+import json
 import os
 import random
 import sys
@@ -200,12 +201,12 @@ REASK = "Sorry, I didn't catch that. Could you say it again?"
 # voice pass); this platform bank is the fallback for agents without one.
 # Disable with PRETHINK_FILLER=0.
 FILLER_THINKING = [
-    "Hmm… ",
-    "Umm… ",
-    "Let's see… ",
+    "Hmm. ",
+    "Umm. ",
+    "Let's see. ",
     "Right. ",
-    "Okay… ",
-    "Mm-hmm… ",
+    "Okay. ",
+    "Mm-hmm. ",
 ]
 
 
@@ -224,7 +225,9 @@ class AgentRuntime:
 
     def __init__(self, graph, filler_mod, turn_reset: dict,
                  make_user_message, agent_name: str = "agent",
-                 filler_thinking: list | None = None) -> None:
+                 filler_thinking: list | None = None,
+                 build_call_record=None, summary_template=(),
+                 agent_dir: str = ".") -> None:
         self.graph = graph
         self.filler = filler_mod
         self.turn_reset = dict(turn_reset)
@@ -234,6 +237,12 @@ class AgentRuntime:
         # fallback when the agent doesn't declare one.
         self.filler_thinking = list(filler_thinking) if filler_thinking else FILLER_THINKING
         self._locks: dict[str, asyncio.Lock] = {}
+        # Lead-record persistence: the engine's call-end enrichment (brain) +
+        # where the platform writes the JSON artifact (persistence). Off when the
+        # agent declares no SUMMARY_TEMPLATE.
+        self._build_call_record = build_call_record
+        self._summary_template = tuple(summary_template or ())
+        self._agent_dir = agent_dir
 
     @classmethod
     def load(cls, agent_dir: str | None = None) -> "AgentRuntime":
@@ -253,6 +262,7 @@ class AgentRuntime:
         config = importlib.import_module("config")
         filler_mod = importlib.import_module("filler")
         graph_mod = importlib.import_module("graph")
+        nodes_mod = importlib.import_module("nodes")
         llm = importlib.import_module("llm_client")
         from langchain_core.messages import HumanMessage
         from langgraph.checkpoint.memory import MemorySaver
@@ -268,6 +278,9 @@ class AgentRuntime:
             make_user_message=lambda text: HumanMessage(content=text),
             agent_name=config.AGENT_NAME,
             filler_thinking=getattr(config, "FILLER_THINKING", None),
+            build_call_record=getattr(nodes_mod, "build_call_record", None),
+            summary_template=getattr(config, "SUMMARY_TEMPLATE", ()),
+            agent_dir=agent_dir,
         )
 
     async def stream_turn(self, turn: VapiTurn) -> AsyncIterator[str]:
@@ -315,6 +328,7 @@ class AgentRuntime:
 
             task = asyncio.create_task(_produce())
             ceiling = float(os.environ.get("RUNTIME_TURN_TIMEOUT_S", "45"))
+            final_state: dict | None = None
             try:
                 while True:
                     try:
@@ -325,10 +339,11 @@ class AgentRuntime:
                         yield APOLOGY
                         return
                     if item is _END:
-                        return
+                        break
                     kind = (item or {}).get("type", "")
                     if kind == "final":
-                        for seg in self._final_segments(item["state"]):
+                        final_state = item["state"]
+                        for seg in self._final_segments(final_state):
                             yield seg
                     elif kind == "error":
                         print(f"[runtime] graph error (call={turn.thread_id}): "
@@ -338,6 +353,11 @@ class AgentRuntime:
                         text = (item or {}).get("text", "")
                         if text:
                             yield text + " "
+                # Call ended: persist the lead record AFTER the goodbye has
+                # streamed above — off the reply path, so no live turn (including
+                # the goodbye) is delayed by the enrichment call.
+                if final_state and final_state.get("exit_conversation"):
+                    await self._flush_record(final_state, turn)
             finally:
                 task.cancel()
                 self.filler.reset_sink(token)
@@ -352,6 +372,29 @@ class AgentRuntime:
         # Trailing space per segment: chunk contents are concatenated verbatim
         # downstream, and "Enterprise.Business" reads wrong to a TTS voice.
         return [s + " " for s in sentence_chunks(text)] if text else [REASK]
+
+    async def _flush_record(self, state: dict, turn: VapiTurn) -> None:
+        """Persist the call's lead record at hang-up (config.SUMMARY_TEMPLATE).
+        Called PAST the streaming loop — the goodbye is already spoken — so the
+        one call-end enrichment call never delays speech. Best-effort: any
+        failure is logged, never raised into the turn. No-op when the agent
+        declares no template."""
+        try:
+            if not self._summary_template or self._build_call_record is None:
+                return
+            record = await self._build_call_record(state)
+            if not record:
+                return
+            out_dir = os.environ.get("CALL_RECORD_DIR") or os.path.join(self._agent_dir, "calls")
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(out_dir, f"{turn.thread_id}.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"thread_id": turn.thread_id, "record": record},
+                          fh, ensure_ascii=False, indent=2)
+            print(f"[runtime] lead record written: {path}", flush=True)
+        except Exception as exc:
+            print(f"[runtime] call-record flush failed (call={turn.thread_id}): {exc!r}",
+                  flush=True)
 
 
 # One runtime per process (plan: subprocess-per-agent, restart on regenerate).
