@@ -44,7 +44,14 @@ Roles (each a model tier via llm_client):
                                  final_response; carries the deterministic
                                  STALL gate (invariant 25): the N-th
                                  consecutive identical reply is swapped for
-                                 the clarify-then-escalate STALL_TEXT
+                                 the clarify-then-escalate STALL_TEXT.
+                                 Also hosts three zero-model sales gates, in
+                                 this ORDER (each is in-node, never a graph
+                                 node): objection A-I-P -> director agenda move
+                                 -> scrub -> stall fingerprint -> tie-down.
+                                 The tie-down is appended LAST, after the
+                                 fingerprint, so its rotating text can never
+                                 mask a repeated reply from the stall gate.
 
 Every node returns a state-update dict only; routing lives on edges (graph.py).
 In MOCK mode each model-backed node uses a deterministic fallback so the whole
@@ -80,8 +87,6 @@ logger = logging.getLogger(__name__)
 # router's HITL check on confirmed payloads).
 FLOW_BY_TOOL = {flow.tool: flow for flow in config.FLOWS.values()}
 
-_HISTORY_TURNS = 6
-
 # Yes/no resolution for the confirmation gate. Negation is checked FIRST so
 # "no, don't do it" never reads as an affirmative.
 _NEGATE_RE = re.compile(r"\b(no|nope|don'?t|cancel|stop|wait|not yet|hold on|"
@@ -92,6 +97,18 @@ _AFFIRM_RE = re.compile(r"\b(yes|yep|yeah|sure|confirm|confirmed|go ahead|do it|
 # Mock-mode heuristic for "explain yourself" questions grounded on last_action.
 _GROUNDING_Q_RE = re.compile(r"\b(how do you know|how would you know|are you sure|"
                              r"based on what|how come|why is that|says who)\b", re.IGNORECASE)
+
+# Slot REFUSAL (tier-0, deterministic): the lead declines to give the asked
+# value. Deliberately NARROW — refusal phrasing only, never a plain "no",
+# which keeps its existing abandonment/decline semantics (_NEGATE_RE). A
+# match mid slot-fill marks the asked slot config.SLOT_REFUSED so it is
+# never re-asked; re-asking a refused question loses the lead.
+_REFUSAL_RE = re.compile(
+    r"(rather not|prefer not to|won'?t (say|share|tell|give)|"
+    r"not (saying|sharing|telling|comfortable)|"
+    r"don'?t (want|wanna|feel like) (to )?(say|share|tell|give|answer)|"
+    r"none of your business|skip (that|this|it)|why do you need)",
+    re.IGNORECASE)
 
 
 def _fast_route(user_message: str, intent: str, collected: dict) -> dict | None:
@@ -144,9 +161,14 @@ def _fast_route(user_message: str, intent: str, collected: dict) -> dict | None:
 
 
 def _history(state) -> list:
+    # Raw window kept in the prompt is SHORT on purpose (config.HISTORY_TURNS,
+    # default 8 ~= 4 exchanges): a voice payload must stay light for low TTFT,
+    # and durable detail already survives outside it — session_facts (hard IDs),
+    # last_action (last tool result), pending_slots (in-flight flow), and the
+    # cross-turn call_summary lead record. Older raw turns are largely redundant.
     role_map = {"human": "user", "ai": "assistant"}
     out = []
-    for m in state.get("recent_messages", [])[-_HISTORY_TURNS:]:
+    for m in state.get("recent_messages", [])[-config.HISTORY_TURNS:]:
         out.append({"role": role_map.get(getattr(m, "type", ""), "user"), "content": str(m.content)})
     return out
 
@@ -197,6 +219,28 @@ async def intent_detect_node(state) -> dict:
                         pending, fast["slots"])
             return fast
 
+    # Slot refusal (tier-0, deterministic, NO model): mid slot-fill, a refusal
+    # aimed at the asked slot marks it SLOT_REFUSED and stays in the flow —
+    # Think then asks the NEXT missing slot (or acts) instead of re-asking a
+    # question the lead just declined. Guards mirror the fast router: no open
+    # confirmation (that gate is yes/no, not a slot), and no other intent's
+    # keyword (an interruption is not a refusal).
+    if pending and pending in config.FLOWS and not confirm \
+            and _REFUSAL_RE.search(user_message):
+        low = user_message.lower()
+        interrupting = any(
+            name != pending and any(k in low for k in keys)
+            for name, keys in config.INTENT_KEYWORDS.items())
+        refusable = [s for s in config.FLOWS[pending].slots
+                     if not pending_slots.get(s)]
+        if not interrupting and refusable:
+            asked = refusable[0]   # _ask_for always asks missing[0]
+            logger.info("slot refusal: %s.%s marked SLOT_REFUSED", pending, asked)
+            return {"intent": pending,
+                    "category": config.CATEGORY_OF.get(pending, "FLOW"),
+                    "slots": {**pending_slots, asked: config.SLOT_REFUSED},
+                    "fast_routed": True}
+
     # Paused-flow restore by slot answer: no flow is pending, but the archive
     # holds an interrupted one and this message deterministically fills its
     # missing slot — restore it through the same fast-router gate (matched
@@ -225,10 +269,14 @@ async def intent_detect_node(state) -> dict:
         if pending and pending in config.FLOWS:
             missing = [s for s in config.FLOWS[pending].slots if not pending_slots.get(s)]
             pending_ctx = (f"\n\nPENDING flow: '{pending}'. You previously asked the user for: "
-                           f"{', '.join(missing) or 'a detail'}. Treat their message as the answer.")
+                           f"{', '.join(missing) or 'a detail'}. If their message answers that, keep this "
+                           f"intent and fill the slot. But if they instead ask a question, raise an "
+                           f"objection, or change the subject, classify THAT accurately (the matching "
+                           f"knowledge/objection intent, or chitchat) — do NOT force an unrelated message "
+                           f"into the slot; the system re-anchors to the pending task on its own.")
         messages = ([{"role": "system",
                       "content": prompts.build_intent_system(pending_ctx, _last_action_intent_ctx(state),
-                                                             _session_facts_ctx(state))}]
+                                                             _session_facts_ctx(state), _summary_ctx(state))}]
                     + _history(state) + [{"role": "user", "content": user_message}])
         try:
             result = await llm_client.generate_structured(INTENT_MODEL, IntentResult, messages, temperature=0.1)
@@ -483,6 +531,38 @@ async def agentic_retrieval_node(state) -> dict:
     return {"retrieved_context": context}
 
 
+def _word_count(text: str) -> int:
+    """Spoken-word count for the reply budget. Punctuation-only tokens (a bare
+    em dash) are not words — matches selftest's voice-budget counter."""
+    return len([w for w in (text or "").split() if any(c.isalnum() for c in w)])
+
+
+def _is_objection(state) -> bool:
+    """An objection turn, decided from the STRUCTURED intent only (never prose,
+    never the raw message). False for every agent with no OBJECTION_INTENTS."""
+    intents = tuple(getattr(config, "OBJECTION_INTENTS", ()) or ())
+    return bool(intents) and state.get("intent", "") in intents
+
+
+def _objection_ctx(state) -> str:
+    """ACKNOWLEDGE (step 1 of A-I-P): prompt shaping for an objection turn, zero
+    extra model calls. Returned as the knowledge prompt's TAIL, replacing the
+    help-desk 'offer further help' line rather than stacking on it.
+
+    It forbids the model from asking a question, because the turn's ONE question
+    is owned by the deterministic layer that runs after it — the isolate question
+    (first objection) or the director's pivot (every later one). A model-authored
+    question here would collide with that and ship two questions in one breath.
+    Empty for non-objection turns, so ordinary knowledge prompts are unchanged."""
+    if not _is_objection(state):
+        return ""
+    return (f"The lead just pushed back — this is an OBJECTION, not a question. Validate it "
+            f"first in under six words ('Totally fair', 'I hear you'), then answer it in ONE "
+            f"short sentence using ONLY the facts above. Stay under {config.MAX_REPLY_WORDS} "
+            "words total and do NOT ask a question or add a next step — your next move is "
+            "appended for you. Never argue with the lead or repeat a rebuttal they already heard.")
+
+
 async def knowledge_node(state) -> dict:
     intent = state.get("intent", "")
     retrieval = intent in config.RETRIEVAL_INTENTS
@@ -505,12 +585,15 @@ async def knowledge_node(state) -> dict:
     if retrieval:
         # Deterministic mock synthesis from the retrieved context; live mode
         # gets the context injected into the knowledge prompt instead of FACTS.
-        mock = f"Here's what our policy says: {retrieved.splitlines()[0]} Anything else I can help with?"
+        mock = f"Here's what our policy says: {retrieved.splitlines()[0]} {config._pick_closing()}"
     else:
         mock = config.MOCK_KNOWLEDGE.get(intent,
                                          "I can help with that — could you tell me a bit more?")
     text = await _answer_or_mock(
-        state, prompts.build_knowledge_system(_grounding_ctx(state), retrieved), mock)
+        state,
+        prompts.build_knowledge_system(_grounding_ctx(state), retrieved, _objective_ctx(state),
+                                       _summary_ctx(state), _objection_ctx(state)),
+        mock, anchor=_recency_anchor(state))
     return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
 
 
@@ -527,7 +610,8 @@ async def system_node(state) -> dict:
         return _clear_plan(_clear_pending({"draft_response": config.RESTART_TEXT,
                                            "needs_enrichment": False, "last_action": {},
                                            "session_facts": {}, "paused_flow": {},
-                                           "stall_count": 0, "last_reply_fingerprint": ""}))
+                                           "stall_count": 0, "last_reply_fingerprint": "",
+                                           "objections_raised": [], "turns_since_tiedown": 0}))
     if intent == "human_handoff":
         logger.info("escalation: human handoff requested")
         return _clear_plan(_clear_pending({"draft_response": config.HANDOFF_TEXT,
@@ -547,8 +631,11 @@ async def chitchat_node(state) -> dict:
     if llm_client.mock and la and _GROUNDING_Q_RE.search(state.get("user_message", "")):
         text = f"That comes straight from our live system — {la.get('summary', '')}"
     else:
-        text = await _answer_or_mock(state, prompts.build_chitchat_system(_grounding_ctx(state)),
-                                     config.MOCK_CHITCHAT)
+        text = await _answer_or_mock(
+            state,
+            prompts.build_chitchat_system(_grounding_ctx(state), _objective_ctx(state),
+                                          _summary_ctx(state)),
+            config.MOCK_CHITCHAT, anchor=_recency_anchor(state))
     return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
 
 
@@ -558,11 +645,16 @@ async def closing_node(state) -> dict:
                                        "exit_conversation": True, "paused_flow": {}}))
 
 
-async def _answer_or_mock(state, system: str, mock_text: str) -> str:
+async def _answer_or_mock(state, system: str, mock_text: str, anchor: str = "") -> str:
     if llm_client.mock:
         return mock_text
     messages = ([{"role": "system", "content": system}] + _history(state)
                 + [{"role": "user", "content": state.get("user_message", "")}])
+    # Recency anchor: a compact goal/firm-no reminder placed LAST (after history +
+    # the latest user turn) so it stays salient as the window fills. Empty for
+    # inbound agents, so their message list is unchanged.
+    if anchor:
+        messages.append({"role": "system", "content": anchor})
     try:
         return await llm_client.generate_text(ANSWER_MODEL, messages, temperature=0.5)
     except Exception as e:
@@ -745,6 +837,32 @@ async def think_node(state) -> dict:
     flow = config.FLOWS[intent]
     slots = dict(state.get("slots") or {})
 
+    # Deterministic pre-fill BEFORE the model or the lead is ever asked: never
+    # interrogate the lead for a value the agent already holds or can derive.
+    #   (1) session_facts by slot-name — outbound-call metadata (email, name,
+    #       phone) the runtime seeded on turn 1, plus earlier tools' cached
+    #       outputs. This is the SAME variable-bus plan_step_node uses; here it
+    #       covers the single-flow path too, so a slot already known out-of-band
+    #       is filled, not asked ("what's your email?" when it's in the metadata).
+    #   (2) a slot with NO spoken slot_prompt is one the agent is never meant to
+    #       ask aloud (e.g. a fixed email body) — so it MUST be derivable; fill
+    #       it from its own SLOT_EXTRACTOR on this message. Such an extractor is
+    #       authoritative by contract (a no-prompt slot has no ask to fall back
+    #       on), so it must stay live-safe, never a mock placeholder.
+    # The lead's own spoken value still wins: decision.slots overrides these
+    # below, and the resolver/validator pass re-checks every filled value.
+    _facts = state.get("session_facts") or {}
+    for s in flow.slots:
+        if slots.get(s):
+            continue
+        if _facts.get(s):
+            slots[s] = _facts[s]
+        elif s not in flow.slot_prompts:
+            fn = config.SLOT_EXTRACTORS.get(s)
+            val = fn(state.get("user_message", "")) if fn else None
+            if val:
+                slots[s] = val
+
     if llm_client.mock:
         decision = _mock_think(flow, slots)
     else:
@@ -752,7 +870,8 @@ async def think_node(state) -> dict:
         known = {s: slots.get(s) for s in flow.slots}
         messages = ([{"role": "system",
                       "content": prompts.build_think_system(intent, known, now.isoformat(), f"{now:%A}",
-                                                            _session_facts_ctx(state))}]
+                                                            _session_facts_ctx(state),
+                                                            _objective_ctx(state), _summary_ctx(state))}]
                     + _history(state) + [{"role": "user", "content": state.get("user_message", "")}])
         try:
             decision = await llm_client.generate_structured(ANSWER_MODEL, ThinkDecision, messages, temperature=0.2)
@@ -773,7 +892,9 @@ async def think_node(state) -> dict:
         for s in flow.slots:
             val = slots.get(s)
             fn = hooks.get(s)
-            if not val or fn is None:
+            # SLOT_REFUSED is a terminal sentinel, not a value: validating it
+            # would bounce it back to None and resurrect the re-ask loop.
+            if not val or fn is None or val == config.SLOT_REFUSED:
                 continue
             ok, out = fn(str(val), slots)
             if ok:
@@ -902,23 +1023,32 @@ async def tool_exec_node(state) -> dict:
     else:
         # Filler channel: cover the tool's latency with a canned acknowledgment
         # over the display-only side sink (never enters model context). Debounced
-        # — the phrase is emitted ONLY if an async tool outlasts FILLER_DELAY_MS,
-        # so fast tools stay silent. A sync tool blocks the loop (no timer can
-        # race it), so it can only be covered when the debounce is disabled
-        # (FILLER_DELAY_MS<=0 — the voice/selftest forced path). Filler failures
-        # never affect the tool result.
+        # — the phrase is emitted ONLY if the tool outlasts FILLER_DELAY_MS, so
+        # fast tools stay silent (the voice runtime forces FILLER_DELAY_MS=0 so
+        # fillers ARE the latency cover). Filler failures never affect the result.
+        #
+        # A SYNC tool body (e.g. a blocking smtplib / requests call) is offloaded
+        # to a worker thread via asyncio.to_thread. Running it inline on the event
+        # loop would freeze the loop until it returns: no timer could race it, the
+        # filler queue would stall, AND the runtime's wall-clock dead-air ceiling
+        # (Rule 8) could never fire — a hung socket would become silence on the
+        # call. Offloading keeps the loop free to drain fillers and enforce the
+        # ceiling, and lets a slow sync tool be covered by a filler like an async
+        # one. Async (MCP-wrapped) tools are awaited directly.
         filler_text = filler.pick(name)
+        args = payload.get("args", {})
         try:
-            result = fn(**payload.get("args", {}))
-            if asyncio.iscoroutine(result):   # MCP-wrapped tools are async
-                task = asyncio.ensure_future(result)
-                if filler_text is not None:
-                    done, _ = await asyncio.wait({task}, timeout=max(config.FILLER_DELAY_MS, 0) / 1000)
-                    if not done:
-                        filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
-                result = await task
-            elif filler_text is not None and config.FILLER_DELAY_MS <= 0:
-                filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
+            if asyncio.iscoroutinefunction(fn):
+                task = asyncio.ensure_future(fn(**args))
+            else:
+                task = asyncio.ensure_future(asyncio.to_thread(fn, **args))
+            if filler_text is not None:
+                done, _ = await asyncio.wait({task}, timeout=max(config.FILLER_DELAY_MS, 0) / 1000)
+                if not done:
+                    filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
+            result = await task
+            if asyncio.iscoroutine(result):   # a sync factory that returns a coroutine
+                result = await result
         except Exception as e:
             logger.exception("tool %s crashed", name)
             result = {"tool": name, "error": str(e),
@@ -987,7 +1117,7 @@ def _phrase_result(result: dict) -> str:
     if hint:
         text = f"{text.rstrip()} {hint}"
     if not text.rstrip().endswith("?"):
-        text = f"{text.rstrip()} Anything else I can help with?"
+        text = f"{text.rstrip()} {config._pick_closing()}"
     return text
 
 
@@ -1066,12 +1196,18 @@ def _phrase_from_verdict(verdict: EnrichVerdict, result: dict) -> str | None:
     Independently re-verifies grounding (never trusts verdict.grounded alone):
     every key_fact must appear verbatim in the tool result. Returns None if the
     verdict is unusable (no grounded facts / unknown tone) so the caller falls
-    back to _phrase_result — never to model-authored prose."""
+    back to _phrase_result — never to model-authored prose.
+
+    Rotates through the tone's ENRICH_TEMPLATES variants via filler.pick_from so
+    consecutive tool results never use the same phrasing."""
     source = json.dumps(result, ensure_ascii=False)
     facts = [f.strip() for f in (verdict.key_facts or []) if f.strip() and f.strip() in source]
     if not facts:
         return None
-    template = getattr(config, "ENRICH_TEMPLATES", {}).get(verdict.tone)
+    variants = getattr(config, "ENRICH_TEMPLATES", {}).get(verdict.tone)
+    if not variants:
+        return None
+    template = filler.pick_from(variants, key=f"_enrich_{verdict.tone}")
     if not template:
         return None
     return template.format(facts=_join_facts(facts))
@@ -1092,8 +1228,364 @@ def _finish_enriched(text: str, result: dict) -> str:
     if hint:
         text = f"{text.rstrip()} {hint}"
     if not text.rstrip().endswith("?"):
-        text = f"{text.rstrip()} Anything else I can help with?"
+        text = f"{text.rstrip()} {config._pick_closing()}"
     return text
+
+
+# ======================================================================== #
+# 5b. PROACTIVE SDR DIRECTOR (no model) — the sales-agenda "spine" gate.     #
+#     An IN-NODE deterministic gate at the HEAD of validator_node (same      #
+#     precedent as the stall detector), NOT a graph node. Walks              #
+#     config.CALL_ARC so an OUTBOUND agent LEADS the call between reactive    #
+#     turns instead of only answering. No-op when the arc is empty (inbound  #
+#     agents) or the lead has the floor. Zero model calls, zero new edges —  #
+#     it adds 0 to every row of the tier budget.                            #
+# ======================================================================== #
+def _arc_stages() -> tuple:
+    return tuple(getattr(config, "CALL_ARC", ()) or ())
+
+
+def _objective_ctx(state) -> str:
+    """Inject the current stage's spoken goal into an ANSWER/think prompt so the
+    agent's REACTIVE answers sound like a goal-aware SDR, not a help desk. Pure
+    shaping — the director enforces the actual move. Empty when there is no arc
+    or objective, so an inbound agent's prompts are byte-for-byte unchanged."""
+    arc = _arc_stages()
+    if not arc:
+        return ""
+    stages = {s.name: s for s in arc}
+    stage = stages.get(state.get("call_stage") or arc[0].name)
+    if stage is None or not stage.objective:
+        return ""
+    return ("\n\nCALL CONTEXT: this is an OUTBOUND call you placed; you are leading it, not "
+            f"running a help desk. Your goal right now: {stage.objective}. Answer what the lead just "
+            "said in one or two short sentences, warm and purposeful. Do NOT tack on a generic "
+            "'anything else?' — the next step is steered for you. Never re-ask something they have "
+            "already answered.")
+
+
+def _lead_has_floor(state) -> bool:
+    """True when the LEAD (not the agent) owns this turn's direction — the
+    director must stand down so the reactive machinery (firm-no exit, HITL gate,
+    an in-progress flow/plan, escalation) is preserved untouched."""
+    return bool(
+        state.get("intent") in ("goodbye", "human_handoff", "restart")
+        or state.get("category") == "SYSTEM"
+        or state.get("pending_intent")
+        or _plan_active(state)
+        or state.get("awaiting_human")
+        or state.get("exit_conversation"))
+
+
+def _flow_complete(intent: str, state) -> bool:
+    """A flow has completed when its OWN tool ran cleanly this session
+    (last_action — the reliable signal) or its hard identifiers landed in
+    session_facts. Prefer the last_action signal so a slot seeded from lead
+    metadata can never mark a qualification stage 'done' before its tool runs."""
+    flow = config.FLOWS.get(intent)
+    if flow is None:
+        return False
+    la = state.get("last_action") or {}
+    if la.get("tool") == flow.tool and not (la.get("result") or {}).get("error"):
+        return True
+    facts = state.get("session_facts") or {}
+    return bool(flow.cache_keys) and all(k in facts for k in flow.cache_keys)
+
+
+def _stage_satisfied(stage, state) -> bool:
+    """Evaluate a Stage.advance_when predicate against STRUCTURED state only
+    (never prose). An empty predicate is terminal (never auto-advances)."""
+    cond = getattr(stage, "advance_when", {}) or {}
+    if "flow_complete" in cond:
+        return _flow_complete(str(cond["flow_complete"]), state)
+    if "session_fact" in cond:
+        return str(cond["session_fact"]) in (state.get("session_facts") or {})
+    if "agent_led_once" in cond:
+        return bool(cond["agent_led_once"]) and state.get("stage_nudged") == stage.name
+    if "intent_seen" in cond:
+        return state.get("intent", "") in set(cond["intent_seen"])
+    return False
+
+
+def _append_move(draft: str, move: str) -> str:
+    """Continue the reactive draft with the agenda move (ENGAGE-FIRST: answer
+    first, then lead) — never replace it."""
+    draft = (draft or "").rstrip()
+    move = (move or "").strip()
+    if not move:
+        return draft
+    return f"{draft} {move}" if draft else move
+
+
+def _objection_gate(state) -> dict:
+    """ISOLATE (step 2 of A-I-P), zero model. Records the objection in the
+    cross-turn ledger and, on the FIRST objection of the call only, emits the
+    isolate question under the "isolate" key (the caller pops it; it is not a
+    state field).
+
+    Two deliberately separate guards:
+      * the LEDGER is written on every objection turn — it is the SDR
+        deliverable, and an objection raised mid-flow still counts;
+      * the QUESTION additionally requires the lead NOT to hold the floor,
+        because mid slot-fill the reply already ends in the flow's own question
+        (_resume_suffix) and this engine ships ONE question per turn.
+    Returns {} for non-objection turns and for agents with no OBJECTION_INTENTS."""
+    if not _is_objection(state):
+        return {}
+    intent = state.get("intent", "")
+    raised = list(state.get("objections_raised") or [])
+    first = not raised
+    if intent not in raised:
+        raised.append(intent)
+    updates = {"objections_raised": raised}
+
+    template = getattr(config, "OBJECTION_ISOLATE_TEMPLATE", "") or ""
+    topic = (getattr(config, "OBJECTION_TOPICS", {}) or {}).get(intent, "")
+    if first and template and topic and not _lead_has_floor(state):
+        try:
+            updates["isolate"] = template.format(topic=topic)
+        except (KeyError, IndexError):
+            # A malformed template must never break a live call; the objection
+            # still acknowledges and pivots. selftest's objection_preflight
+            # fails the build on this so it is caught before shipping.
+            logger.warning("OBJECTION_ISOLATE_TEMPLATE is malformed (%r) — isolation skipped",
+                           template)
+    return updates
+
+
+def _director(state, objection: bool = False, suppress_move: bool = False) -> dict:
+    """Zero-model agenda gate. Advances call_stage when the current stage's
+    structured exit is met, then makes ONE proactive move for the (possibly new)
+    stage — enter its flow, speak its scripted line, or steer back with its
+    nudge — guarded one-shot per stage. Returns a state-update dict (may carry a
+    modified draft_response); {} when it stands down.
+
+    A-I-P integration (both flags default False, so non-objection turns behave
+    exactly as before):
+      objection=True     the lead pushed back. The one-shot guard is BYPASSED so
+                         the agent re-anchors on the arc EVERY time — the old
+                         behaviour let the second objection in a stage end on the
+                         lead's terms, handing back the floor mid-qualification.
+      suppress_move=True the isolate question already owns this turn's one
+                         question; advance the cursor but speak no agenda move.
+    """
+    arc = _arc_stages()
+    if not arc or _lead_has_floor(state):
+        return {}
+
+    order = [s.name for s in arc]
+    stages = {s.name: s for s in arc}
+    cur = state.get("call_stage") or arc[0].name
+    if cur not in stages:
+        cur = arc[0].name
+
+    updates: dict = {}
+    # 1) Advance the cursor while the stage's structured exit holds (monotonic,
+    #    bounded by the arc length).
+    idx = order.index(cur)
+    while idx < len(order) - 1 and _stage_satisfied(stages[order[idx]], state):
+        idx += 1
+    new_stage = order[idx]
+    if new_stage != cur:
+        updates["call_stage"] = new_stage
+        updates["stage_nudged"] = ""          # a fresh stage may make its own move
+    elif not state.get("call_stage"):
+        updates["call_stage"] = new_stage      # lazy-init on turn 1
+
+    stage = stages[new_stage]
+    already_led = updates.get("stage_nudged", state.get("stage_nudged", "")) == new_stage
+    if suppress_move:
+        return updates          # the isolate question owns this turn's one question
+    if already_led and not objection:
+        return updates                          # one move per stage — no broken record
+
+    draft = state.get("draft_response", "") or ""
+    reactive_answer = state.get("category") == "ANSWER"    # knowledge/chitchat replied
+
+    # 2a) Drive this stage's flow: pend it (next turn routes through the already-
+    #     budgeted think path) AND ask its first slot now, so the agent leads
+    #     THIS turn. Skipped when the flow has already completed.
+    #     On a REPEAT objection (already_led) this is the re-pivot: re-anchor on
+    #     the same flow WITHOUT clobbering what it already collected, and ask the
+    #     next slot still missing — a fresh question, so no broken record.
+    if stage.flow and stage.flow in config.FLOWS and not _flow_complete(stage.flow, state):
+        flow = config.FLOWS[stage.flow]
+        kept = dict(state.get("pending_slots") or {}) if already_led else {}
+        missing = [s for s in flow.slots if s in flow.slot_prompts and not kept.get(s)]
+        updates["pending_intent"] = stage.flow
+        updates["pending_slots"] = kept
+        updates["stage_nudged"] = new_stage
+        if missing:
+            updates["draft_response"] = _append_move(draft, _ask_for(flow, missing))
+        return updates
+
+    # 2b) A reactive turn (the lead asked / objected): steer back with the nudge.
+    #     A repeat objection on a stage that already spoke its nudge prefers the
+    #     scripted line below (different words) over repeating itself.
+    if reactive_answer and stage.nudge and not (already_led and stage.line):
+        updates["draft_response"] = _append_move(draft, stage.nudge)
+        updates["stage_nudged"] = new_stage
+        return updates
+
+    # 2c) Idle floor with a scripted line (e.g. the close CTA): speak it once.
+    if stage.line:
+        updates["draft_response"] = _append_move(draft, stage.line)
+        updates["stage_nudged"] = new_stage
+        return updates
+
+    return updates
+
+
+# ======================================================================== #
+# 5c. LEAD RECORD (no model) — config.SUMMARY_TEMPLATE. Conversation memory  #
+#     AND the SDR deliverable. Structured fields are aggregated every turn    #
+#     from state the INTENT/THINK calls already produced (zero extra calls);  #
+#     the 'freetext' fields are synthesized ONCE at call-end by               #
+#     build_call_record, OFF the reply path. No-op when the template is empty.#
+# ======================================================================== #
+def _summary_source_value(field, state):
+    """Resolve ONE structured SummaryField source against current state. Returns
+    None for 'freetext' (filled off-path at call-end) and for any source with no
+    value yet, so the aggregator only ever SETS fields, never clears them."""
+    src = field.source or ""
+    if src == "freetext":
+        return None
+    if src == "followups":
+        summ = ((state.get("last_action") or {}).get("summary") or "").strip()
+        return summ or None
+    if src == "objections":
+        # The ledger is already the distinct, ordered list the record wants —
+        # written zero-model by _objection_gate from structured intents.
+        return list(state.get("objections_raised") or []) or None
+    if src.startswith("fact:"):
+        return (state.get("session_facts") or {}).get(src.split(":", 1)[1]) or None
+    if src.startswith("slot:"):
+        spec = src.split(":", 1)[1]
+        name = spec.split(".", 1)[1] if "." in spec else spec
+        merged = {**(state.get("pending_slots") or {}), **(state.get("slots") or {})}
+        val = merged.get(name)
+        return val if val and val != config.SLOT_REFUSED else None
+    return None
+
+
+def _update_summary(state) -> dict:
+    """Zero-model lead-record aggregator (head of validator_node, every turn).
+    Maps existing STRUCTURED state — session_facts, captured slots, last_action —
+    into config.SUMMARY_TEMPLATE keys. The slots it reads are already the output
+    of the INTENT/THINK calls that ran this turn, so the record costs zero extra
+    tokens and zero extra calls. Monotonic (fields are set, never cleared);
+    'freetext' fields are left for build_call_record. {} (no write) when the
+    template is empty or nothing changed."""
+    template = tuple(getattr(config, "SUMMARY_TEMPLATE", ()) or ())
+    if not template:
+        return {}
+    record = dict(state.get("call_summary") or {})
+    changed = False
+    for f in template:
+        val = _summary_source_value(f, state)
+        if val is None:
+            continue
+        if f.source == "followups":
+            existing = list(record.get(f.key) or [])
+            if val not in existing:
+                existing.append(val)
+                record[f.key] = existing
+                changed = True
+        elif record.get(f.key) != val:
+            record[f.key] = val
+            changed = True
+    return {"call_summary": record} if changed else {}
+
+
+def _summary_ctx(state) -> str:
+    """Inject a COMPACT view of the lead record into a prompt so the short
+    HISTORY_TURNS window never loses what was already qualified. Omits 'fact:'
+    fields (already carried by _session_facts_ctx) and unfilled 'freetext' so we
+    don't re-bloat the payload we trimmed. Empty when nothing captured yet."""
+    template = tuple(getattr(config, "SUMMARY_TEMPLATE", ()) or ())
+    if not template:
+        return ""
+    record = state.get("call_summary") or {}
+    shown = {}
+    for f in template:
+        if f.source.startswith("fact:") or f.source == "freetext":
+            continue
+        val = record.get(f.key)
+        if val:
+            shown[f.label or f.key] = val
+    if not shown:
+        return ""
+    return ("\n\nLEAD RECORD (captured this call — reuse, do NOT re-ask): "
+            f"{json.dumps(shown, ensure_ascii=False)}")
+
+
+def _recency_anchor(state) -> str:
+    """A compact directive placed at the RECENCY edge (after history, by the
+    latest user turn) so the immediate goal + firm-no rule stay salient as the
+    window fills. Zero model, ~1 line. Empty when there is no arc/objective, so
+    inbound agents' payloads are byte-for-byte unchanged."""
+    arc = _arc_stages()
+    if not arc:
+        return ""
+    stages = {s.name: s for s in arc}
+    stage = stages.get(state.get("call_stage") or arc[0].name)
+    obj = (stage.objective if stage else "") or ""
+    if not obj:
+        return ""
+    return (f"Reminder — your immediate goal: {obj}. If the lead has firmly declined, "
+            "thank them in one sentence and end; otherwise take one step toward it.")
+
+
+def _full_transcript(state) -> str:
+    """The WHOLE conversation (untrimmed) for the call-end record synthesis —
+    unlike _history, this reads every persisted turn, since the record must
+    summarize the full call, not the short prompt window."""
+    role_map = {"human": "Lead", "ai": "Agent"}
+    return "\n".join(f"{role_map.get(getattr(m, 'type', ''), 'Lead')}: {str(m.content)}"
+                     for m in (state.get("recent_messages") or []))
+
+
+async def build_call_record(state) -> dict:
+    """Call-end enrichment (OFF the reply path — the platform calls this AFTER
+    the goodbye has streamed, never on a live turn). Fills the 'freetext'
+    SummaryField keys with ONE ANSWER-tier synthesis over the full transcript,
+    on top of the already-aggregated structured fields. Returns the full
+    call_summary dict. Mock mode / any failure -> structured record with empty
+    freetext keys (never invents). Not a graph node; not in closing_node."""
+    template = tuple(getattr(config, "SUMMARY_TEMPLATE", ()) or ())
+    record = dict(state.get("call_summary") or {})
+    freetext = [f for f in template if f.source == "freetext"]
+    if not freetext:
+        return record
+    if llm_client.mock:
+        for f in freetext:
+            record.setdefault(f.key, "")
+        return record
+    keys = [f.key for f in freetext]
+    labels = "; ".join(f"{f.key} = {f.label or f.key}" for f in freetext)
+    system = (
+        "You are a sales-call analyst. Read the transcript and return ONLY a JSON object "
+        f"with EXACTLY these keys: {keys}. Each value is a short plain-text summary "
+        f"({labels}). Base every value strictly on the transcript; use an empty string when "
+        "the transcript does not support it. No markdown, no extra keys.")
+    try:
+        raw = await llm_client.generate_text(
+            ANSWER_MODEL,
+            [{"role": "system", "content": system},
+             {"role": "user", "content": _full_transcript(state)}],
+            temperature=0.2, max_tokens=300)
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        data = json.loads(match.group(0)) if match else {}
+        if not isinstance(data, dict):
+            data = {}
+    except Exception as e:
+        logger.warning("call-record enrichment failed (%s); leaving freetext empty",
+                       type(e).__name__)
+        data = {}
+    for f in freetext:
+        v = data.get(f.key)
+        record[f.key] = v.strip() if isinstance(v, str) else ""
+    return record
 
 
 # ======================================================================== #
@@ -1103,7 +1595,58 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _MD_RE = re.compile(r"[*_`#>~]")
 
 
+def _tiedown(text: str, state, director_moved: bool) -> str | None:
+    """MICRO-COMMITMENT gate (zero model, zero prompt tokens). Returns the
+    tie-down to append, or None.
+
+    Fires ONLY on a statement-ending agent turn. That single condition is what
+    makes the gate safe: a tie-down is a question, this engine ships ONE question
+    per turn, so refusing to append after an existing "?" is what keeps it from
+    ever colliding with a slot ask, a confirm gate, the isolate question, a stage
+    nudge, or the close CTA. The other guards: never stack onto a director move,
+    never speak over a lead who holds the floor (a firm no, a handoff, an open
+    HITL gate), and never push the reply past config.MAX_REPLY_WORDS."""
+    every = int(getattr(config, "TIEDOWN_EVERY_N_TURNS", 0) or 0)
+    variants = list(getattr(config, "TIEDOWNS", None) or [])
+    if every <= 0 or not variants or not text:
+        return None
+    if text.rstrip().endswith("?") or director_moved or _lead_has_floor(state):
+        return None
+    if state.get("turns_since_tiedown", 0) < every:
+        return None
+    candidate = filler.pick_from(variants, key="_tiedown")
+    if not candidate:
+        return None
+    cap = int(getattr(config, "MAX_REPLY_WORDS", 0) or 0)
+    if cap and _word_count(text) + _word_count(candidate) > cap:
+        logger.info("tie-down suppressed: %d + %d words exceeds the %d-word reply budget",
+                    _word_count(text), _word_count(candidate), cap)
+        return None
+    return candidate
+
+
 def validator_node(state) -> dict:
+    # Objection gate (config.OBJECTION_INTENTS): record the push-back and, on the
+    # first one of the call, take this turn's question slot with the ISOLATE
+    # question. Runs BEFORE the director because its outcome decides whether the
+    # director may speak an agenda move at all. Zero model; {} for inbound agents.
+    objection = _objection_gate(state)
+    isolate = objection.pop("isolate", "")
+
+    # Proactive SDR director (config.CALL_ARC): advance the sales agenda and,
+    # if it's the agent's turn to lead, append the next proactive move BEFORE
+    # the exit filter scrubs the draft. Zero model; a no-op for inbound agents.
+    # Its call_stage / stage_nudged / pending_* updates ride out in this node's
+    # return so the cursor persists across turns.
+    director = _director(state, objection=bool(objection), suppress_move=bool(isolate))
+    if director.get("draft_response") is not None:
+        state = {**state, "draft_response": director["draft_response"]}
+
+    # PIVOT is the director's move above; ISOLATE lands here instead when it
+    # owns the turn (the two are mutually exclusive by construction).
+    if isolate:
+        state = {**state, "draft_response": _append_move(state.get("draft_response", ""), isolate)}
+
     text = state.get("draft_response", "") or ""
     text = _ANSI_RE.sub("", text)
     text = _MD_RE.sub("", text)
@@ -1119,7 +1662,18 @@ def validator_node(state) -> dict:
     # comparison is on the post-scrub text, so cosmetic differences don't
     # mask a stall. The stall reply then becomes the new fingerprint — if THE
     # LOOP persists, the gate fires again after another THRESHOLD repeats.
-    updates = {"final_response": text}
+    # Carry the director's persistent state changes (call_stage, stage_nudged,
+    # pending_*) out with the response; draft_response is per-turn (already
+    # folded into `text`) so it is deliberately dropped here.
+    updates = {k: v for k, v in director.items() if k != "draft_response"}
+    # The objection ledger rides out with the director's persistent updates.
+    updates.update(objection)
+    # Lead record (config.SUMMARY_TEMPLATE): aggregate this turn's structured
+    # state into the cross-turn record. Zero model — the slots/facts it reads
+    # were already produced by this turn's INTENT/THINK calls. No-op for agents
+    # without a template. Rides out with the director's persistent updates.
+    updates.update(_update_summary(state))
+    updates["final_response"] = text
     if text and config.STALL_THRESHOLD > 0:
         fingerprint = text.casefold()
         if fingerprint == state.get("last_reply_fingerprint", ""):
@@ -1134,8 +1688,28 @@ def validator_node(state) -> dict:
         updates["last_reply_fingerprint"] = fingerprint
         updates["stall_count"] = count
 
-    if text:
-        updates["recent_messages"] = [AIMessage(content=text)]
+    # Micro-commitment (tie-down) gate — DELIBERATELY the last mutation, AFTER
+    # the stall fingerprint above. The tie-down bank rotates, so appending it
+    # before the fingerprint would give a byte-identical repeated reply a
+    # different fingerprint every turn and silently disable the stall detector
+    # (invariant 25) — the escalation path of last resort. Fingerprint the reply
+    # BODY; append the tie-down to the outgoing text only.
+    if int(getattr(config, "TIEDOWN_EVERY_N_TURNS", 0) or 0) > 0:
+        tie = _tiedown(text, state, director_moved=bool(director.get("draft_response")))
+        if tie:
+            updates["final_response"] = f"{text.rstrip()} {tie}".strip()
+            updates["turns_since_tiedown"] = 0
+        elif (_AFFIRM_RE.search(state.get("user_message", "") or "")
+                and not (state.get("pending_confirmation") or {})):
+            # The lead just agreed on their own — a micro-commitment landed, so
+            # restart the cadence instead of nagging someone already saying yes.
+            updates["turns_since_tiedown"] = 0
+        else:
+            updates["turns_since_tiedown"] = state.get("turns_since_tiedown", 0) + 1
+
+    final = updates.get("final_response", "")
+    if final:
+        updates["recent_messages"] = [AIMessage(content=final)]
     return updates
 
 

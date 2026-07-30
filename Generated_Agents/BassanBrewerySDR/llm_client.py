@@ -12,6 +12,14 @@ point at the same model; the ARCHITECTURE (separate roles) is the point.
 Any OpenAI-compatible endpoint works via OPENAI_BASE_URL (Mistral, OpenAI,
 Ollama, Groq...). With no key the client is in MOCK mode and the nodes use
 their own deterministic fallbacks so the agent runs with zero credentials.
+
+A stronger AGENT_ANSWER_MODEL increases FIDELITY to what prompts.py/config.py
+actually say — never what's true. It cannot pitch, ground an answer, or know
+the call is outbound if nothing tells it so; a bigger model just executes the
+same content gap more fluently and confidently (for a hallucination, that
+reads as MORE convincing, not less). Before escalating a model tier to fix a
+bad live call, confirm the desired behavior is scripted somewhere in
+prompts.py/config.py at all — see skill_steps/step4_build.md's triage rule.
 """
 
 import asyncio

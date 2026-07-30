@@ -176,6 +176,69 @@ class AgentState(TypedDict, total=False):
     # capabilities pitch. Never reset per turn.
     last_action: dict
 
+    # Proactive SDR director (config.CALL_ARC): the cursor + one-shot guard that
+    # let an OUTBOUND agent LEAD the sales arc (opener -> discovery -> qualify ->
+    # close) instead of only reacting. Both are written ONLY by the director
+    # gate at the head of validator_node (nodes._director), a zero-model
+    # deterministic function; routing never reads them (routing stays intent-
+    # driven). Persisted by the checkpointer and NOT in TURN_RESET — the arc
+    # cursor is by definition cross-turn, like stall_count/plan_steps. No-op
+    # (both untouched) when config.CALL_ARC is empty, so inbound agents are
+    # unchanged.
+    #   call_stage    — name of the current Stage; lazy-init to CALL_ARC[0].name,
+    #                   advanced monotonically when a Stage's structured
+    #                   advance_when is met, reset on restart.
+    #   stage_nudged  — the stage whose one-shot proactive move (nudge/line/flow
+    #                   entry) has already been made; blocks broken-record
+    #                   re-nudging, cleared on every stage advance.
+    call_stage: str
+    stage_nudged: str
+
+    # Objection architecture (config.OBJECTION_INTENTS): the ordered ledger of
+    # distinct objections this lead raised. ONE field serves both jobs — the
+    # isolate one-shot guard AND the SDR deliverable — so the A-I-P layer costs
+    # a single state field (anti-sprawl).
+    #   WRITER    — nodes._objection_gate (zero-model, head of validator_node);
+    #               appends the STRUCTURED intent name, never parsed prose.
+    #   READER    — the gate itself (empty ⇒ this is the first objection ⇒ the
+    #               isolate question fires), _director (a repeat objection
+    #               bypasses the stage one-shot so the pivot always happens),
+    #               and the "objections" SUMMARY_TEMPLATE source.
+    #   LIFECYCLE — persisted by the checkpointer, NOT in TURN_RESET (an
+    #               objection ledger is by definition cross-turn, like
+    #               stall_count); append-only within a call; reset on restart.
+    #               Untouched when OBJECTION_INTENTS is empty.
+    objections_raised: list
+
+    # Micro-commitments (config.TIEDOWNS): consecutive agent turns that ended in
+    # a STATEMENT since the last landed agreement. The pacing counter behind the
+    # tie-down gate.
+    #   WRITER    — nodes.validator_node's tie-down block (zero-model): reset to
+    #               0 when a tie-down is emitted or when the lead's own message
+    #               matches _AFFIRM_RE outside a confirmation gate (a
+    #               micro-commitment landed on its own — never nag a lead who is
+    #               already agreeing); otherwise incremented.
+    #   READER    — nodes._tiedown (fires at >= config.TIEDOWN_EVERY_N_TURNS).
+    #   LIFECYCLE — persisted by the checkpointer, NOT in TURN_RESET (pacing is
+    #               cross-turn); reset on restart. NEVER written at all when
+    #               TIEDOWN_EVERY_N_TURNS is 0, so inbound agents are unchanged.
+    turns_since_tiedown: int
+
+    # Lead record (config.SUMMARY_TEMPLATE): the structured, cross-turn record of
+    # this call — both durable memory and the SDR's deliverable.
+    #   WRITER  — nodes._update_summary (zero-model, at the head of validator_node
+    #             every turn) aggregates the structured fields from session_facts /
+    #             captured slots / last_action; nodes.build_call_record fills the
+    #             'freetext' fields ONCE at call-end, off the reply path.
+    #   READER  — nodes._summary_ctx injects a compact view into prompts (so the
+    #             short HISTORY_TURNS window never loses what was qualified); the
+    #             platform runtime flushes it to a JSON artifact at call-end.
+    #   LIFECYCLE — persisted by the checkpointer, NOT in TURN_RESET (cross-turn,
+    #             like session_facts); monotonic (fields are set, never cleared);
+    #             reset on restart. No-op ({} untouched) when SUMMARY_TEMPLATE is
+    #             empty, so inbound/non-SDR agents are unchanged.
+    call_summary: dict
+
     # Agentic-RAG output: the finalized context payload the retrieval subgraph
     # hands back to the parent. The subgraph's internal state (documents,
     # grades, rewrite counters) lives in its OWN TypedDict and never appears

@@ -4,11 +4,7 @@ The architect skill's Step 4 edits (mostly) THIS file, prompts.py's FACTS-free
 sections, and tools.py. The graph, nodes, schemas, and shell are generic and
 should rarely need changes.
 
-Domain: Tom, an outbound sales agent for Bassan Brewery (a soft-drinks
-supplier for restaurants and event venues). Tom calls warm leads (people who
-already left their contact details), qualifies their drink-ordering needs, and
-routes qualified leads to the sales team — he never quotes a final price or
-discount on the call itself.
+Bassan Brewery — proactive outbound B2B keg-sales SDR.
 """
 
 from __future__ import annotations
@@ -26,53 +22,136 @@ except ImportError:
     pass
 
 # ── Identity ────────────────────────────────────────────── [CUSTOMIZE] ──
-AGENT_NAME = "Tom — Bassan Brewery Sales"
-# Who's calling, why (the hook — a compressed pitch, not a ramble), and one
-# question that confirms we have the right person (this answer is what arms
-# the lead_profile flow). Cold_Call_Opener_Science: lead with the hook before
-# asking anything, or the call reads as a blind interrogation.
-OPENER = ("Hi, this is Tom from Bassan Brewery — you left your details for our "
-          "year-long price lock. Handle your drink orders?")
+AGENT_NAME = "Bassan Brewery Sales"
+# OPENER is spoken as the call's FIRST words by the voice platform (Vapi
+# firstMessage), ~500ms after pickup, with zero model calls. Contract: a PLAIN
+# string literal on this line (the platform extracts it statically — no
+# f-string, no concatenation), <=20 words, human phone-pickup tone, ends with
+# ONE question, never empty or whitespace-only.
+OPENER = "Hi, this is Alex calling from Bassan Brewery — we supply kegs to bars and restaurants. Got a quick minute?"
 EXIT_WORDS = ("exit", "quit")
 
 # ── Ground-truth facts (knowledge intents answer ONLY from these) ─ [CUSTOMIZE] ──
 FACTS = """Bassan Brewery — authoritative facts (never invent beyond this):
-- Pricing: once agreed, pricing is locked for a full year and never changes mid-year, regardless of the market.
-- Contracts: longer-term contracts are available with a standing weekly batched delivery.
-- Core lineup: twenty everyday drinks (things like cola, lemon soda, sparkling water, and still water) at fixed year-round prices.
-- Rotating lineup: ten specialty and imported drinks (for example Singha, Evian, or San Pellegrino) that change over time. These are normally short-term-order only; a long-term contract on a rotating item is possible but must be flagged for the sales team to confirm.
-- Tom cannot quote a specific discount or a final price on this call — real offers come from the sales team after the call.
-- Tom cannot help with custom drink recipes, delivery complaints about a past order, or other technical questions — those get logged for the sales team.
+- We sell premium kegs directly to bars, restaurants, and hospitality venues.
+- We work with any drink mix — beer, cider, seltzer, wine — and can supply a
+  venue's full pour lineup or just fill gaps alongside an existing supplier.
+- Pricing is typically competitive with existing distributors once delivery
+  reliability and account service are factored in; exact pricing is confirmed
+  by our account manager on the follow-up call, never quoted on this call.
+- Venues do not need to drop their current supplier to try us — many keep
+  their existing supplier and compare us on a single trial order first.
+- Delivery is reliable and account managers proactively reach out ahead of
+  renewal dates so venues are never caught scrambling for stock.
+- This channel cannot take payment, sign contracts, or quote firm pricing —
+  the account manager handles those on the scheduled follow-up call.
 """
 
+# ── Drop-in knowledge base (uploaded corpus) ────────────────────────────────
+# Any .txt/.md file in this agent's `knowledge/` folder is CHUNKED into the DOCS
+# retrieval corpus at import (see the merge just below the DOCS definition), so
+# the RAG subgraph reaches it JUST-IN-TIME on a knowledge question — it is NOT
+# appended to FACTS. Appending to FACTS made the whole upload ride EVERY think-
+# tier call (latency + bloat); retrieval-gating keeps the think prompt lean and
+# only surfaces the relevant slice. This is what the platform's "drop a file"
+# upload card writes to. NOTE (skill): a knowledge/FAQ intent backed by uploaded
+# files must be a RETRIEVAL_INTENT, or the docs are indexed but never queried.
+# Bounded by KNOWLEDGE_MAX_CHARS so a large upload can't blow the corpus budget.
+_KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge")
+_KNOWLEDGE_MAX_CHARS = int(os.getenv("KNOWLEDGE_MAX_CHARS", "8000"))
+
+
+def _slugify(name: str) -> str:
+    base = os.path.splitext(name)[0].lower()
+    return re.sub(r"[^a-z0-9]+", "-", base).strip("-") or "doc"
+
+
+def _chunk_text_to_docs(name: str, text: str, max_words: int = 150) -> List[dict]:
+    """Split one uploaded file into retrieval-sized DOCS entries (~max_words each,
+    on paragraph boundaries) so RETRIEVER returns the relevant slice — not the
+    whole file — and the upload never rides the static FACTS/think prompt."""
+    slug = _slugify(name)
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    docs: List[dict] = []
+    buf: List[str] = []
+    count = 0
+
+    def _flush() -> None:
+        nonlocal buf, count
+        if buf:
+            docs.append({"id": f"{slug}-{len(docs)}", "title": name,
+                         "text": " ".join(buf), "aliases": ""})
+            buf, count = [], 0
+
+    for p in paras:
+        words = len(p.split())
+        if count and count + words > max_words:
+            _flush()
+        buf.append(p)
+        count += words
+    _flush()
+    return docs
+
+
+def _load_knowledge_docs() -> List[dict]:
+    if not os.path.isdir(_KNOWLEDGE_DIR):
+        return []
+    docs: List[dict] = []
+    budget = _KNOWLEDGE_MAX_CHARS
+    for name in sorted(os.listdir(_KNOWLEDGE_DIR)):
+        if not name.lower().endswith((".txt", ".md")):
+            continue
+        try:
+            with open(os.path.join(_KNOWLEDGE_DIR, name), encoding="utf-8",
+                      errors="replace") as fh:
+                text = fh.read().strip()
+        except OSError:
+            continue
+        if not text:
+            continue
+        text = text[:budget]
+        budget -= len(text)
+        docs.extend(_chunk_text_to_docs(name, text))
+        if budget <= 0:
+            break
+    return docs
+
+
+# Loaded at import; MERGED into DOCS just below the DOCS definition (DOCS is not
+# defined yet at this point). FACTS is deliberately left untouched.
+_UPLOADED_DOCS = _load_knowledge_docs()
+
 # ── Intents (hierarchical: ANSWER / FLOW / SYSTEM) ──────── [CUSTOMIZE] ──
-KNOWLEDGE_INTENTS: Tuple[str, ...] = (
-    "pricing_info", "product_catalog", "contract_terms",
-    "objection_supplier", "objection_pricing", "product_details",
-)
+# Knowledge intents: answered directly from FACTS by the ANSWER tier (no tool).
+# obj_price / obj_supplier double as OBJECTION_INTENTS below (A-I-P gate).
+KNOWLEDGE_INTENTS: Tuple[str, ...] = ("faq_company", "obj_price", "obj_supplier", "faq_boundaries")
 
-# product_details runs through the Agentic-RAG subgraph (ingredients/allergens,
-# delivery logistics, damaged-shipment handling — plausible adjacent questions
-# too detailed for the small, stable FACTS block above).
-RETRIEVAL_INTENTS: Tuple[str, ...] = ("product_details",)
+# No corpus was volunteered for this build — no RETRIEVAL_INTENTS.
+RETRIEVAL_INTENTS: Tuple[str, ...] = ()
 
+# SYSTEM intents: session-control requests handled DETERMINISTICALLY (no
+# model): help/capabilities, restart, and the human_handoff escalation path
+# (invariant 26 — the advertised handoff must be a reachable node, not
+# conversational copy). goodbye is SYSTEM too (routed to closing) — on this
+# outbound agent it also covers a firm decline ("not interested").
 SYSTEM_INTENTS: Tuple[str, ...] = ("help", "restart", "human_handoff")
 
+# One-line descriptions fed to the intent-detection prompt. Must cover every
+# knowledge intent, every flow, and every SYSTEM intent
+# (chitchat/goodbye are added automatically).
 INTENT_DESCRIPTIONS: Dict[str, str] = {
-    "pricing_info": "questions about pricing, price locks, or how costs are set",
-    "product_catalog": "what drinks or products Bassan Brewery carries",
-    "contract_terms": "questions about contract length, or the weekly batched delivery",
-    "objection_supplier": "the lead says they already have a supplier or aren't looking to switch",
-    "objection_pricing": "the lead pushes back on price or says they're happy with current costs",
-    "product_details": "ingredients, allergens, caffeine, calories/nutrition, delivery logistics, or damaged/short shipments",
-    "lead_profile": "gathering the lead's monthly drink volume, product mix, contract timing, and buying style for the sales team",
-    "flag_request": ("the lead asks for a specific discount, has a complaint about a past delivery, wants a "
-                     "custom drink recipe, or asks a technical question outside the basics — Tom logs it "
-                     "for the sales team rather than answering it himself"),
-    "help": "what can you do / list your capabilities",
+    "faq_company": "what Bassan Brewery does, what venues we work with, or general questions about the company",
+    "obj_price": "the lead pushes back on cost or says we're too expensive",
+    "obj_supplier": "the lead says they already have a supplier or are locked into a contract",
+    "faq_boundaries": ("billing disputes, technical delivery problems, or a request for a firm quote "
+                       "or signed contract on this call"),
+    "lead_profile": "gathering the venue's drink mix, who handles purchasing, renewal timing, and monthly keg volume",
+    "book_meeting": "scheduling a meeting with the account manager to go over pricing",
+    "send_followup": "the lead asks to be sent information by email instead of continuing the call",
+    "help": "what can you do / what is this call about",
     "restart": "start over / reset the conversation / forget that",
     "human_handoff": ("the user asks for a human, manager, supervisor, or live agent, "
-                      "or is clearly frustrated and wants a person instead of the agent"),
+                      "or is clearly frustrated and wants a person instead of the bot"),
 }
 
 
@@ -82,6 +161,15 @@ class Flow:
     """A tool-backed intent: which tool runs, which slots it needs, and how to
     ask for each missing slot. `slot_prompts` doubles as the slot description
     in the live intent-extraction prompt AND the mock clarifying question.
+
+    SLOT SOURCING (Think pre-fills deterministically before asking anyone):
+      - A slot whose name matches a `session_facts` key is filled from it —
+        outbound-call metadata (email/name/phone) or an earlier tool's cached
+        output — so a value the agent already holds is never asked for.
+      - A slot with NO `slot_prompts` entry is never asked aloud; it MUST be
+        auto-derivable and is filled from its `SLOT_EXTRACTORS` hook (which
+        must be live-safe, e.g. a fixed template body — never a mock
+        placeholder). Give a slot a prompt only if the lead should be asked.
 
     confirm: destructive/irreversible flows (checkout, cancel, book) ask a
       deterministic yes/no before Act; the payload is stashed until answered.
@@ -93,13 +181,6 @@ class Flow:
       already-canonical value passes and returns it unchanged) — the fast
       router pre-tests values with these hooks and hands them to Think RAW,
       so every value legitimately passes them twice.
-      This is where units, bounds,
-      and format rules live — a mismatched value never silently reaches a tool
-      (e.g. '1000 kg' when stock is 40 packs). Bounds MUST be derived from the
-      catalog entry of the already-RESOLVED entity; if that lookup fails,
-      validate format only (bounds re-check on the next Think pass) — NEVER
-      substitute a hardcoded default limit (a fallback stock of "200" is what
-      turned a wrong product key into a confidently wrong stock answer).
     enrich: route the tool result through the ENRICH (SLM) tier. Set False for
       tools whose "summary" is already perfectly formatted — the graph bypasses
       the SLM hop entirely (deterministic phrasing, one less network call).
@@ -124,200 +205,348 @@ class Flow:
     cache_keys: Tuple[str, ...] = ()
 
 
-# ── Slot semantics: units, bounds, catalog grounding ────────────────────
-_MAINSTREAM_WORDS = ("coke", "cola", "pepsi", "sprite", "fanta", "water", "soda", "lemonade")
-_NICHE_WORDS = ("singha", "evian", "san pellegrino", "pellegrino", "perrier", "premium", "imported")
-_ANNUAL_WORDS = ("annual", "yearly", "year-long", "year long")
-_MONTHLY_WORDS = ("monthly", "every month", "month to month", "month-to-month")
-_BULK_WORDS = ("bulk", "one event", "one-time", "one time", "single event")
-_OPPORTUNISTIC_WORDS = ("whenever", "as needed", "opportunist", "depends")
-_REFERENTIAL_MIX_WORDS = ("whatever", "usual", "anything", "don't know", "not sure")
-
-_RENEWAL_RE = re.compile(
-    r"(renews?[\w\s]{0,30}|in \d+ months?|next (?:month|quarter|year)|this (?:month|quarter|year)|"
-    r"january|february|march|april|may|june|july|august|september|october|november|december)",
-    re.IGNORECASE)
-_VOLUME_RE = re.compile(r"\d{1,7}")
-
-
-def _validate_monthly_volume(value: str, _slots: dict) -> Tuple[bool, str]:
-    """Normalize to a bare digit string; bounce non-numeric or unrealistic
-    values with a clarifying question — never a hardcoded default."""
-    digits = "".join(c for c in str(value) if c.isdigit())
-    if not digits or int(digits) <= 0:
-        return False, "Could you give me a rough number of guests or customers per month?"
-    if int(digits) > 200000:
-        return False, "That number seems quite high — roughly how many guests or customers do you serve monthly?"
-    return True, digits
+# ── Proactive sales arc (the SDR "spine") ───────────────────── [CUSTOMIZE] ──
+@dataclass(frozen=True)
+class Stage:
+    """One scene of the OUTBOUND sales arc, executed by the zero-model director
+    gate (nodes._director) so the agent LEADS the call instead of only reacting.
+    See the boilerplate docstring in the original template for the full field
+    contract; kept identical here."""
+    name: str
+    objective: str = ""
+    flow: str = ""
+    line: str = ""
+    nudge: str = ""
+    advance_when: Dict[str, object] = field(default_factory=dict)
 
 
-def _extract_drink_mix(text: str) -> Optional[str]:
-    low = text.lower()
-    has_main = any(w in low for w in _MAINSTREAM_WORDS)
-    has_niche = any(w in low for w in _NICHE_WORDS)
-    if (has_main and has_niche) or "both" in low or "mix" in low:
-        return "a mix of both"
-    if has_main:
-        return "everyday drinks"
-    if has_niche:
-        return "specialty imports"
-    if any(w in low for w in _REFERENTIAL_MIX_WORDS):
-        return "unspecified"   # referential placeholder — the resolver bounces this
-    return None
+# The ordered sales spine, extracted from the approved playbook:
+#   1. discovery — confirm we've reached the purchasing decision-maker.
+#   1. discovery — confirm you've reached the person who handles purchasing.
+#   2. qualify   — drink mix, renewal timing, monthly volume (lead_profile flow).
+#   3. close     — book fifteen minutes with the account manager (book_meeting flow).
+CALL_ARC: Tuple[Stage, ...] = (
+    Stage(name="discovery",
+          objective="confirm you've reached the person who handles beverage purchasing and why the call matters",
+          nudge="Are you the one who handles beverage purchasing here, or is that someone else on your team?",
+          advance_when={"agent_led_once": True}),
+    Stage(name="qualify", flow="lead_profile",
+          objective="capture their drink mix, current renewal timing, and monthly keg volume",
+          advance_when={"flow_complete": "lead_profile"}),
+    Stage(name="close", flow="book_meeting",
+          objective="book fifteen minutes with the account manager as the concrete next step",
+          advance_when={"flow_complete": "book_meeting"}),
+)
+
+
+# ── Objection architecture: Acknowledge → Isolate → Pivot ──── [CUSTOMIZE] ──
+# Objections are ALREADY ordinary KNOWLEDGE_INTENTS (they route to knowledge_node
+# and stay grounded in FACTS/RAG). The tuple below is a MARKER over that set —
+# it tells the engine "this intent is a push-back, not a question", which is
+# what the A-I-P gate conditions on.
+OBJECTION_INTENTS: Tuple[str, ...] = ("obj_price", "obj_supplier")
+
+# Objection intent -> the spoken noun phrase for {topic} in the isolate question.
+OBJECTION_TOPICS: Dict[str, str] = {
+    "obj_price": "the price",
+    "obj_supplier": "switching suppliers",
+}
+
+# The one-per-call isolate question. MUST contain {topic}, MUST end in a question
+# mark, and MUST stay short.
+OBJECTION_ISOLATE_TEMPLATE: str = "Besides {topic}, anything else holding you back?"
+
+
+# ── Micro-commitments (tie-downs) ───────────────────────────── [CUSTOMIZE] ──
+# Short agreement checks appended DETERMINISTICALLY by nodes._tiedown at the
+# exit filter — zero model calls, zero prompt tokens. Rotated non-repeating
+# through filler.pick_from.
+TIEDOWNS: List[str] = [
+    "Does that make sense?",
+    "Sound fair?",
+    "That work for you?",
+    "Make sense so far?",
+]
+
+# Emit a tie-down after this many consecutive statement-ending agent turns.
+TIEDOWN_EVERY_N_TURNS = int(os.getenv("TIEDOWN_EVERY_N_TURNS", "2"))
+
+# Hard spoken-reply word budget (TTS airtime).
+MAX_REPLY_WORDS = int(os.getenv("MAX_REPLY_WORDS", "20"))
+
+
+# ── Lead record (conversation memory + the SDR deliverable) ── [CUSTOMIZE] ──
+@dataclass(frozen=True)
+class SummaryField:
+    """One field of the call's structured lead record (state.call_summary),
+    built by the zero-model aggregator nodes._update_summary."""
+    key: str
+    source: str
+    label: str = ""
+
+
+SUMMARY_TEMPLATE: Tuple[SummaryField, ...] = (
+    SummaryField(key="contact", source="fact:name", label="Contact"),
+    SummaryField(key="phone", source="fact:phone", label="Phone"),
+    SummaryField(key="email", source="fact:email", label="Email"),
+    SummaryField(key="buyer_character", source="slot:lead_profile.buyer_character", label="Buyer role"),
+    SummaryField(key="drink_mix", source="slot:lead_profile.drink_mix", label="Drink mix"),
+    SummaryField(key="renewal", source="slot:lead_profile.renewal", label="Renewal timing"),
+    SummaryField(key="monthly_volume", source="slot:lead_profile.monthly_volume", label="Monthly volume"),
+    SummaryField(key="meeting_time", source="slot:book_meeting.slot_iso", label="Meeting time"),
+    SummaryField(key="objections", source="objections", label="Objections raised"),
+    SummaryField(key="follow_ups", source="followups", label="Follow-ups"),
+    SummaryField(key="needs", source="freetext", label="What the venue needs"),
+    SummaryField(key="next_steps", source="freetext", label="Agreed next steps"),
+)
+
+
+# Slot-refusal sentinel (ENGINE constant — do not customize). When the lead
+# declines to give an asked slot value ("I'd rather not say"), the engine
+# stores this sentinel in the slot so the derived missing-slot computation
+# stops re-asking it — a refused question asked twice loses the lead. The
+# sentinel is truthy by design. Tools receive it verbatim and should branch
+# on it ("caller declined to share"); validators/resolvers skip it.
+SLOT_REFUSED = "<declined>"
+
+# ── Qualification slot catalogs, resolvers, and validators ─── [CUSTOMIZE] ──
+_DRINK_MIX_CATALOG = ("beer", "cider", "seltzer", "wine", "mixed")
+_DRINK_MIX_WORDS = {
+    "beer": "beer", "lager": "beer", "ale": "beer", "draft": "beer", "draught": "beer",
+    "cider": "cider", "hard cider": "cider",
+    "seltzer": "seltzer", "hard seltzer": "seltzer",
+    "wine": "wine",
+    "mixed": "mixed", "variety": "mixed", "everything": "mixed", "full lineup": "mixed",
+}
 
 
 def _resolve_drink_mix(value: str, _slots: dict) -> Tuple[bool, str]:
+    """Referential grounding for the venue's pour lineup: maps raw speech
+    ('mostly beer, some cider') onto the catalog, collapsing multiple distinct
+    hits to 'mixed' rather than guessing one. Unmatched text asks, never guesses."""
+    if value == SLOT_REFUSED:
+        return True, value
     low = value.strip().lower()
-    if low in ("everyday drinks", "specialty imports", "a mix of both"):
-        return True, low
-    has_main = any(w in low for w in _MAINSTREAM_WORDS)
-    has_niche = any(w in low for w in _NICHE_WORDS)
-    if has_main and has_niche:
-        return True, "a mix of both"
-    if has_main:
-        return True, "everyday drinks"
-    if has_niche:
-        return True, "specialty imports"
-    if "both" in low or "mix" in low:
-        return True, "a mix of both"
-    return False, ("Just so I log this right — is that mostly everyday drinks like cola and water, "
-                  "specialty imports like Singha or Evian, or a mix of both?")
+    hits = {canon for word, canon in _DRINK_MIX_WORDS.items() if word in low}
+    if not hits:
+        return False, "What's your drink mix — mostly beer, or cider and seltzer too?"
+    return True, ("mixed" if len(hits) > 1 else next(iter(hits)))
 
 
-def _extract_buyer_character(text: str) -> Optional[str]:
-    low = text.lower()
-    if any(w in low for w in _ANNUAL_WORDS):
-        return "a standing annual contract"
-    if any(w in low for w in _BULK_WORDS):
-        return "a bulk order for one event"
-    if any(w in low for w in _MONTHLY_WORDS):
-        return "a monthly order"
-    if any(w in low for w in _OPPORTUNISTIC_WORDS):
-        return "ordering as needed"
-    return None
+def _validate_drink_mix(value: str, _slots: dict) -> Tuple[bool, str]:
+    """Idempotent format check AFTER resolution — the resolver already
+    canonicalizes, so this only guards a value that reached here unresolved."""
+    if value == SLOT_REFUSED or value in _DRINK_MIX_CATALOG:
+        return True, value
+    return False, "What's your drink mix — mostly beer, or cider and seltzer too?"
+
+
+_BUYER_ROLE_CATALOG = ("purchasing_manager", "beverage_director", "owner", "gm", "other")
+_BUYER_ROLE_WORDS = {
+    "purchasing manager": "purchasing_manager", "purchasing": "purchasing_manager",
+    "beverage director": "beverage_director", "beverage": "beverage_director",
+    "owner": "owner",
+    "general manager": "gm", "gm": "gm", "manager": "gm",
+}
 
 
 def _resolve_buyer_character(value: str, _slots: dict) -> Tuple[bool, str]:
+    """Grounds the caller's role against the catalog of titles that actually
+    buy kegs; an unrecognized title (a real person's name, an unlisted role)
+    is accepted as 'other' rather than stalling the call on a job title."""
+    if value == SLOT_REFUSED:
+        return True, value
     low = value.strip().lower()
-    canonical = ("a standing annual contract", "a monthly order",
-                "a bulk order for one event", "ordering as needed")
-    if low in canonical:
-        return True, low
-    if any(w in low for w in _ANNUAL_WORDS):
-        return True, "a standing annual contract"
-    if any(w in low for w in _BULK_WORDS):
-        return True, "a bulk order for one event"
-    if any(w in low for w in _MONTHLY_WORDS):
-        return True, "a monthly order"
-    if any(w in low for w in _OPPORTUNISTIC_WORDS):
-        return True, "ordering as needed"
-    return False, ("Would you say that's a standing annual contract, a monthly order, "
-                  "a bulk order for one event, or just ordering as needed?")
+    for phrase, canon in _BUYER_ROLE_WORDS.items():
+        if phrase in low:
+            return True, canon
+    return True, "other"
 
 
-def _extract_renewal(text: str) -> Optional[str]:
-    m = _RENEWAL_RE.search(text)
-    return m.group(0).strip() if m else None
+def _validate_buyer_character(value: str, _slots: dict) -> Tuple[bool, str]:
+    if value == SLOT_REFUSED or value in _BUYER_ROLE_CATALOG:
+        return True, value
+    return True, "other"
 
 
-def _extract_volume(text: str) -> Optional[str]:
-    m = _VOLUME_RE.search(text)
-    return m.group(0) if m else None
+_RENEWAL_BUCKETS = ("immediate", "near_term", "mid_term", "long_term", "unknown")
+_RENEWAL_IMMEDIATE_WORDS = ("now", "already up", "this month", "expired", "no contract")
+_RENEWAL_LONG_WORDS = ("locked in", "locked-in", "a year", "12 months", "under contract")
 
 
-# Shared with INTENT_KEYWORDS["flag_request"] below so the extractor never
-# fires more broadly than the intent it feeds — an unconditional extractor
-# here would force EVERY knowledge-question detour back into lead_profile via
-# the continuation guard, regardless of content (a Context-Blind-Fallback-
-# style bug, just on the extractor side instead of the fallback classifier).
-_FLAG_TRIGGER_WORDS = ("discount", "special price", "custom recipe", "recipe idea",
-                      "complaint", "unhappy with", "problem with my order", "technical question about")
-
-
-def _extract_request_details(text: str) -> Optional[str]:
+def _classify_renewal(text: str) -> str:
     low = text.lower()
-    if any(w in low for w in _FLAG_TRIGGER_WORDS):
-        return text.strip()
-    return None
+    if any(w in low for w in _RENEWAL_IMMEDIATE_WORDS):
+        return "immediate"
+    if any(w in low for w in _RENEWAL_LONG_WORDS):
+        return "long_term"
+    m = re.search(r"(\d+)\s*month", low)
+    if m:
+        months = int(m.group(1))
+        if months <= 3:
+            return "near_term"
+        if months <= 6:
+            return "mid_term"
+        return "long_term"
+    if "month" in low:
+        return "near_term"
+    if "year" in low:
+        return "long_term"
+    return "unknown"
 
 
-FLOWS: Dict[str, Flow] = {
-    "lead_profile": Flow(
-        tool="submit_lead_profile",
-        slots=("monthly_volume", "drink_mix", "contract_renewal", "buyer_character"),
-        # Each prompt is ONE short spoken question — no product-name examples and
-        # no baked-in option menus (those bleed other phases into the questionnaire
-        # and make a small live model read a long list). When the lead is vague,
-        # the drink_mix / buyer_character RESOLVERS below bounce with the choices.
-        slot_prompts={
-            "monthly_volume": "roughly how many guests or customers you serve in a typical month",
-            "drink_mix": "whether you mostly serve everyday drinks or specialty imports too",
-            "contract_renewal": "when your current supply arrangement is up for renewal",
-            "buyer_character": "how you'd prefer to order — an ongoing arrangement, or just as you need it",
-        },
-        validators={"monthly_volume": _validate_monthly_volume},
-        # A read-back before the write fires (Voice_SDR_Reliability rule 6):
-        # STT most often mishears the volume number and the drink-mix category.
-        confirm=True,
-        confirm_template=("Just to make sure I've got this right — that's about {monthly_volume} guests "
-                          "a month, mostly {drink_mix}. Did I get that right?"),
-        enrich=False,
-        cache_keys=("lead_reference",),
-    ),
-    "flag_request": Flow(
-        tool="flag_for_team",
-        slots=("request_details",),
-        slot_prompts={"request_details": "what you'd like the team to help with"},
-        enrich=False,
-    ),
-}
+def _validate_renewal(value: str, _slots: dict) -> Tuple[bool, str]:
+    """Buckets free-form renewal timing ('renews in two months') into a
+    sortable category. Never blocks the call on ambiguity — an unclassifiable
+    answer is stored as 'unknown' so the account manager still follows up."""
+    if value == SLOT_REFUSED:
+        return True, value
+    if value in _RENEWAL_BUCKETS:
+        return True, value
+    return True, _classify_renewal(value)
+
+
+_ONES = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+         "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+         "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+         "nineteen": 19}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+         "eighty": 80, "ninety": 90}
+
+
+def _words_to_number(text: str) -> Optional[int]:
+    tokens = re.findall(r"[a-z]+", text.lower())
+    total, current, found = 0, 0, False
+    for tok in tokens:
+        if tok in _ONES:
+            current += _ONES[tok]
+            found = True
+        elif tok in _TENS:
+            current += _TENS[tok]
+            found = True
+        elif tok == "hundred":
+            current = (current or 1) * 100
+            found = True
+        elif tok == "thousand":
+            total += (current or 1) * 1000
+            current = 0
+            found = True
+    total += current
+    return total if found else None
+
+
+def _validate_monthly_volume(value: str, _slots: dict) -> Tuple[bool, str]:
+    """Parses digits or spoken number words ('about thirty') into a bounded
+    integer keg count; bounds match a realistic single-venue monthly order —
+    never a hardcoded fallback that could silently misreport volume."""
+    if value == SLOT_REFUSED:
+        return True, value
+    digits = re.sub(r"[,\s]", "", value)
+    m = re.search(r"\d+", digits)
+    n = int(m.group(0)) if m else _words_to_number(value)
+    if n is None:
+        return False, "Roughly how many kegs do you move each month — just a ballpark?"
+    if n < 1 or n > 100000:
+        return False, "That number sounds off — roughly how many kegs a month, give or take?"
+    return True, str(n)
+
 
 ENTITY_RESOLVERS: Dict[str, Callable[[str, dict], Tuple[bool, str]]] = {
     "drink_mix": _resolve_drink_mix,
     "buyer_character": _resolve_buyer_character,
 }
 
-SLOT_EXTRACTORS: Dict[str, Callable[[str], Optional[str]]] = {
-    "monthly_volume": _extract_volume,
-    "drink_mix": _extract_drink_mix,
-    "contract_renewal": _extract_renewal,
-    "buyer_character": _extract_buyer_character,
-    "request_details": _extract_request_details,
+
+FLOWS: Dict[str, Flow] = {
+    "lead_profile": Flow(
+        tool="capture_lead_profile",
+        slots=("buyer_character", "drink_mix", "renewal", "monthly_volume"),
+        slot_prompts={
+            "buyer_character": "are you the one who handles beverage purchasing here, or is that someone else",
+            "drink_mix": "what's your current drink mix — mostly beer, or cider and seltzer too",
+            "renewal": "are you locked into a supplier contract, or is that coming up for renewal",
+            "monthly_volume": "roughly how many kegs are you moving a month these days",
+        },
+        validators={
+            "buyer_character": _validate_buyer_character,
+            "drink_mix": _validate_drink_mix,
+            "renewal": _validate_renewal,
+            "monthly_volume": _validate_monthly_volume,
+        },
+        cache_keys=("buyer_character", "drink_mix", "renewal", "monthly_volume"),
+    ),
+    "book_meeting": Flow(
+        tool="book_sales_call",
+        slots=("slot_iso", "email"),
+        slot_prompts={
+            "slot_iso": "can I set up fifteen minutes with our account manager this week — what day and time works",
+        },
+        confirm=True,
+        confirm_template="Just to confirm — fifteen minutes with our account manager for {slot_iso}, and I'll send details to {email}. Sound good?",
+        cache_keys=("confirmation",),
+    ),
+    "send_followup": Flow(
+        tool="send_email",
+        slots=("email", "body"),
+        cache_keys=("sent",),
+    ),
 }
 
 # The ONLY follow-up the agent may offer after each tool, appended
 # deterministically by the enrichment node.                     [CUSTOMIZE]
 NEXT_STEP_HINTS: Dict[str, str] = {
-    "submit_lead_profile": "Someone from Bassan Brewery's sales team will follow up with a real offer soon.",
-    "flag_for_team": "Our sales team will reach out about that directly.",
+    "capture_lead_profile": "",
+    "book_sales_call": "Our account manager will call at that time to go over pricing.",
+    "send_email": "",
 }
 
 # ── ENRICH templates (SLM verdict -> deterministic prose) ── [CUSTOMIZE] ──
-ENRICH_TEMPLATES: Dict[str, str] = {
-    "confirm": "Done — {facts}.",
-    "regret":  "Sorry — {facts}.",
-    "neutral": "{facts}.",
+ENRICH_TEMPLATES: Dict[str, List[str]] = {
+    "confirm": [
+        "Done — {facts}.",
+        "All set — {facts}.",
+        "Got it taken care of — {facts}.",
+        "That's sorted — {facts}.",
+    ],
+    "regret": [
+        "Sorry — {facts}.",
+        "Unfortunately, {facts}.",
+        "Ah, no luck — {facts}.",
+        "Hmm — {facts}.",
+    ],
+    "neutral": [
+        "{facts}.",
+        "Here's what I've got — {facts}.",
+        "So, {facts}.",
+        "Looks like {facts}.",
+    ],
 }
 
 # ── Filler channel (references/Filler_Channel.txt) ──────── [CUSTOMIZE] ──
 FILLER_ENABLED = os.getenv("FILLER_ENABLED", "1").strip().lower() not in (
     "0", "false", "off", "no", "disabled")
-FILLER_DELAY_MS = int(os.getenv("FILLER_DELAY_MS", "300"))
+FILLER_DELAY_MS = int(os.getenv("FILLER_DELAY_MS", "250"))
 
 FILLERS_BY_TOOL: Dict[str, List[str]] = {
-    "submit_lead_profile": [
-        "Let me get this logged for our team.",
-        "One sec, saving these details.",
-        "Just capturing this for the team.",
+    "capture_lead_profile": [
+        "Got it, noting that down.",
+        "Okay, one sec.",
+        "Right, jotting that down.",
     ],
-    "flag_for_team": [
-        "Let me flag that for our team.",
-        "One moment, noting that down.",
-        "I'll get this over to the team.",
+    "book_sales_call": [
+        "Let me check the account manager's calendar.",
+        "One sec — grabbing an open slot.",
+        "Checking what's open this week.",
+    ],
+    "send_email": [
+        "Sure — sending that over now.",
+        "One sec, getting that email out.",
+        "Okay, putting that together.",
     ],
 }
 
 FILLER_DEFAULT: List[str] = ["One moment.", "Just a sec.", "Bear with me a moment."]
+
 FILLER_PLAN_CONTINUE: List[str] = ["Still working on it.", "Almost there.", "Just a moment more."]
 
 FILLER_THINKING: List[str] = [
@@ -328,30 +557,54 @@ FILLER_THINKING: List[str] = [
     "One sec. ",
 ]
 
-CONFIRM_DECLINED_TEXT = ("Okay — I won't go ahead with that; nothing has been changed. "
-                         "Anything else I can help with?")
+# ── Closing-question bank ─ [CUSTOMIZE] ──
+CLOSING_QUESTIONS: List[str] = [
+    "Anything else before I let you go?",
+    "Anything else you'd like to ask?",
+    "Anything else on your mind?",
+    "Was there anything else?",
+]
 
-PAUSED_RESUME_TEXT = ("By the way, we didn't finish your {flow} — "
+_closing_q_index = 0
+
+
+def _pick_closing() -> str:
+    global _closing_q_index
+    q = CLOSING_QUESTIONS[_closing_q_index % len(CLOSING_QUESTIONS)]
+    _closing_q_index += 1
+    return q
+
+
+CONFIRM_DECLINED_VARIANTS: List[str] = [
+    "Okay — I won't go ahead with that; nothing has been changed.",
+    "No problem — I've left everything as it was.",
+    "Got it — nothing was changed on my end.",
+]
+CONFIRM_DECLINED_TEXT = CONFIRM_DECLINED_VARIANTS[0]  # selftest compat
+
+PAUSED_RESUME_TEXT = ("By the way, we didn't finish something — "
                       "could you tell me {slot_hint}?")
 
 HITL_DENIED_TEXT = ("I'm sorry — that request couldn't be approved on this channel. "
-                    "A human agent will follow up with you. Anything else I can help with?")
+                    "A human agent will follow up with you.")
 
-HANDOFF_TEXT = ("Of course — I'm passing this conversation to a person from our team right now; "
-                "they'll see everything so far, so you won't have to repeat yourself. "
-                "If there's anything you'd like me to note for them, tell me and I'll pass it along.")
+# Deterministic escalation reply (invariant 26): the human_handoff SYSTEM
+# intent. Recaps what's already been captured so the human starts warm.
+HANDOFF_TEXT = ("Of course — I'm connecting you with our sales lead right now; "
+               "I'll let them know what you handle and where you're at on renewal, "
+               "so you won't have to repeat yourself. Anything else to pass along?")
 
 STALL_THRESHOLD = int(os.getenv("STALL_THRESHOLD", "3"))
 STALL_TEXT = ("I'm sorry — we seem to be going in circles, and I clearly haven't "
-              "resolved what you need. Could you rephrase it in one short sentence? "
-              "Or just say 'talk to a human' and I'll hand this conversation to a person.")
+              "gotten this across. Could you say that in one short sentence? "
+              "Or just say 'talk to a human' and I'll hand this call to a person.")
 
-FAILURE_TEXT = ("I hit a snag saving that on our end — nothing was lost. "
-               "You can ask me to try again, or I can help with something else.")
+FAILURE_TEXT = ("I hit a snag on our side there — nothing was lost. "
+                "Want me to try that again, or should we keep going?")
 
-PLAN_UNSUPPORTED_TEXT = ("I can only chain the actions I actually support — gathering your order "
-                         "details or flagging something for our team. Which of those would you "
-                         "like to start with?")
+PLAN_UNSUPPORTED_TEXT = ("I can only chain the actions I actually support — capturing your "
+                         "order details, booking time with our account manager, or sending "
+                         "a follow-up email. Which of those first?")
 
 VALID_INTENTS: Tuple[str, ...] = (KNOWLEDGE_INTENTS + tuple(FLOWS) + SYSTEM_INTENTS
                                   + ("chitchat", "goodbye", "compound_request"))
@@ -374,6 +627,7 @@ RAG_MAX_ITERATIONS = int(os.getenv("RAG_MAX_ITERATIONS", "1"))
 _LIVE_LLM = bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL"))
 RAG_TIMEOUT_SECONDS = float(os.getenv("RAG_TIMEOUT_SECONDS",
                                       "8.0" if _LIVE_LLM else "2.0"))
+
 RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0"))
 RAG_CACHE_TTL_SECONDS = float(os.getenv("RAG_CACHE_TTL_SECONDS", "300"))
 
@@ -381,27 +635,16 @@ COMPACTION_ENABLED = os.getenv("COMPACTION_ENABLED", "1").strip().lower() not in
     "0", "false", "off", "no", "disabled")
 COMPACTION_MAX_ITEMS = int(os.getenv("COMPACTION_MAX_ITEMS", "12"))
 
+HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "8"))
+
 MAX_PLAN_STEPS = int(os.getenv("MAX_PLAN_STEPS", "3"))
 
 # ── Semantic memory (Agentic-RAG corpus + retriever) ────── [CUSTOMIZE] ──
-# Small corpus for product_details: plausible adjacent questions (ingredients/
-# allergens, delivery logistics, damaged shipments) that are too detailed for
-# the stable FACTS block but real enough that a lead might ask mid-call.
-DOCS: Tuple[Dict[str, str], ...] = (
-    {"id": "ingredients", "title": "Ingredients & allergens",
-     "text": "Our mainstream drinks are made from carbonated water, cane sugar, and natural flavoring; "
-             "colas and several sodas contain caffeine. Full allergen lists are available on request "
-             "for any product in our lineup.",
-     "aliases": "ingredient ingredients allergen allergens allergy caffeine sugar"},
-    {"id": "delivery", "title": "Delivery logistics",
-     "text": "Standing weekly delivery batches are scheduled on a fixed day agreed at contract signing; "
-             "single events can request a one-off delivery window instead.",
-     "aliases": "delivery truck schedule route batch logistics weekly"},
-    {"id": "damages", "title": "Damaged or short shipments",
-     "text": "Any bottles arriving broken or a shipment arriving short is replaced on the next scheduled "
-             "delivery at no extra charge; report it within 48 hours.",
-     "aliases": "broken damaged short missing bottles replace"},
-)
+# No corpus volunteered for this build — DOCS/RETRIEVAL_PROBES stay empty.
+DOCS: Tuple[Dict[str, str], ...] = ()
+
+if _UPLOADED_DOCS:
+    DOCS = DOCS + tuple(_UPLOADED_DOCS)
 
 _STOPWORDS = {"what", "whats", "what's", "is", "are", "the", "your", "you", "a", "an", "of",
               "do", "does", "how", "about", "tell", "me", "can", "i", "my", "policy", "on"}
@@ -410,8 +653,7 @@ _STOPWORDS = {"what", "whats", "what's", "is", "are", "the", "your", "you", "a",
 def RETRIEVER(query: str, top_k: int = 2) -> list:
     """Keyword-overlap retriever over DOCS (mock semantic memory). Returns
     [{"id","title","text","score"}] sorted by score desc; empty when nothing
-    overlaps. Swap the body for a vector-store query in production.
-    Matching is WORD-PREFIX, not raw substring."""
+    overlaps. Swap the body for a vector-store query in production."""
     terms = {w for w in re.findall(r"[a-z']+", query.lower()) if w not in _STOPWORDS}
     scored = []
     for doc in DOCS:
@@ -424,71 +666,100 @@ def RETRIEVER(query: str, top_k: int = 2) -> list:
     return scored[:top_k]
 
 
-# ── Retrieval probes (selftest recall gate) ─────────────── [CUSTOMIZE] ──
-RETRIEVAL_PROBES: Dict[str, Tuple[str, ...]] = {
-    "product_details": (
-        "does the cola have caffeine in it",
-        "what happens if a delivery shows up damaged",
-        "can we get drinks delivered just for one event instead of every week",
-    ),
-}
+RETRIEVAL_PROBES: Dict[str, Tuple[str, ...]] = {}
 
 # ── Shared deterministic heuristics (mock-mode fallbacks + fast-router) ──
-# Order matters: goodbye/restart/human_handoff rank above task intents so an
-# explicit escalation always wins; help stays last so "help with my order"
-# reaches the real intent first.                                [CUSTOMIZE]
+# Keyword → intent, checked in order. Goodbye MUST stay first and explicit;
+# anything unmatched falls to chitchat (never to goodbye).      [CUSTOMIZE]
 INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     "goodbye": ("bye", "goodbye", "that's all", "thats all", "nothing else",
-                "we're done", "no thanks", "done for today", "not interested"),
+                "we're done", "no thanks", "done for today", "not interested",
+                "stop calling", "take me off your list", "we're set", "we are set"),
     "restart": ("start over", "restart", "reset", "forget all that"),
+    # Escalation MUST rank above the task intents.
     "human_handoff": ("human", "manager", "supervisor", "real person", "live agent",
                       "speak to a person", "speak to someone", "talk to a person",
                       "representative", "operator"),
-    "flag_request": _FLAG_TRIGGER_WORDS,
-    "objection_supplier": ("already have a supplier", "already working with",
-                           "not looking to switch", "happy with our supplier"),
-    "objection_pricing": ("happy with our current price", "already get a good price",
-                          "your price is too high", "too expensive"),
-    "pricing_info": ("pricing", "price lock", "how much do you charge", "cost of"),
-    "product_catalog": ("what drinks", "what products", "your lineup", "what do you carry"),
-    "contract_terms": ("contract length", "how long is the contract", "weekly delivery",
-                       "batched delivery", "standing order"),
-    "product_details": ("ingredient", "allergen", "caffeine", "damaged shipment", "short shipment",
-                        "one-off delivery", "logistics", "calories", "nutrition facts"),
-    "lead_profile": ("handle our drink orders", "handle the drink orders", "handle drink orders",
-                     "i order the drinks", "i'm the one who orders", "yes that's me", "speaking here"),
-    # help LAST so "help with my order" reaches the real intent first.
+    "obj_price": ("too expensive", "too pricey", "can't afford", "cost too much", "price is"),
+    "obj_supplier": ("already have a supplier", "already got a supplier", "happy with our supplier",
+                     "locked into", "under contract"),
+    "send_followup": ("send me an email", "email me", "shoot me an email", "send info", "send information"),
+    "faq_boundaries": ("billing dispute", "delivery problem", "technical issue", "firm quote", "sign a contract"),
+    "faq_company": ("what do you do", "what is bassan", "who are you", "tell me about your company"),
+    "book_meeting": ("book", "schedule", "set up a call", "set up a meeting", "sounds good"),
+    "lead_profile": ("our drink mix", "monthly volume", "kegs a month"),
+    # help LAST so a more specific keyword wins first.
     "help": ("help", "what can you do", "what do you do", "capabilities"),
 }
 
-# Canned knowledge answers for mock mode. RETRIEVAL_INTENTS don't need an
-# entry — mock replies are synthesized from the retrieved context.  [CUSTOMIZE]
-MOCK_KNOWLEDGE: Dict[str, str] = {
-    "pricing_info": ("Our pricing is locked for a full year once we agree terms, so it never "
-                     "creeps up on you mid-year. Would you like our team to look at your setup?"),
-    "product_catalog": ("We carry twenty everyday drinks at fixed year-round prices, plus ten "
-                        "rotating specialty imports. Anything in particular you're after?"),
-    "contract_terms": ("Longer contracts come with a standing weekly batched delivery, right up "
-                       "to renewal. Is that the kind of arrangement you're after?"),
-    "objection_supplier": ("Totally fair — a lot of our customers felt that way before switching for "
-                           "the year-long price lock. Are you the one who handles your drink orders?"),
-    "objection_pricing": ("I hear you — our price is locked for a full year, so you're protected "
-                          "whatever the market does. Are you the one who handles your drink orders?"),
+# Slot extractors run on EVERY turn in mock mode (so a bare slot answer fills
+# a pending flow). The fast-router gate also runs them in LIVE mode mid
+# slot-fill.                                                    [CUSTOMIZE]
+_VOLUME_RE = re.compile(r"\b\d{1,6}\b")
+_TIME_RE = re.compile(r"(tomorrow|today|\d{1,2}\s*(am|pm)|\d{1,2}:\d{2}|monday|tuesday|"
+                      r"wednesday|thursday|friday|saturday|sunday)", re.IGNORECASE)
+
+
+def _extract_drink_mix(text: str) -> Optional[str]:
+    low = text.lower()
+    hits = {canon for word, canon in _DRINK_MIX_WORDS.items() if word in low}
+    if not hits:
+        return None
+    return "mixed" if len(hits) > 1 else next(iter(hits))
+
+
+def _extract_buyer_character(text: str) -> Optional[str]:
+    low = text.lower()
+    for phrase, canon in _BUYER_ROLE_WORDS.items():
+        if phrase in low:
+            return canon
+    return None
+
+
+def _extract_renewal(text: str) -> Optional[str]:
+    bucket = _classify_renewal(text)
+    return bucket if bucket != "unknown" else None
+
+
+def _extract_monthly_volume(text: str) -> Optional[str]:
+    m = _VOLUME_RE.search(text)
+    if m:
+        return m.group(0)
+    n = _words_to_number(text)
+    return str(n) if n is not None else None
+
+
+SLOT_EXTRACTORS: Dict[str, Callable[[str], Optional[str]]] = {
+    "drink_mix": _extract_drink_mix,
+    "buyer_character": _extract_buyer_character,
+    "renewal": _extract_renewal,
+    "monthly_volume": _extract_monthly_volume,
+    "slot_iso": lambda t: ("2026-01-01T15:00:00" if _TIME_RE.search(t) else None),
+    # body has no slot_prompts entry (never asked aloud) -> fixed live-safe
+    # template, per the Flow docstring's auto-derivable rule.
+    "body": lambda t: "Thanks for your time today — here's more on Bassan Brewery kegs and pricing for your team to review.",
 }
-MOCK_CHITCHAT = ("Hi, I'm Tom with Bassan Brewery — good to chat! Are you the person who "
-                 "handles your drink orders?")
-MOCK_CLOSING = "No problem at all — I'll leave the door open in case anything changes. Thanks for your time!"
+
+# Canned knowledge answers for mock mode. RETRIEVAL_INTENTS don't need an
+# entry.                                                          [CUSTOMIZE]
+MOCK_KNOWLEDGE: Dict[str, str] = {
+    "faq_company": "We supply premium kegs directly to bars and restaurants, working with any drink mix you pour.",
+    "obj_price": "We're usually competitive once delivery and service are factored in.",
+    "obj_supplier": "Plenty keep their supplier and just try us on one order.",
+    "faq_boundaries": "That's something our account manager handles directly on the follow-up call.",
+}
+MOCK_CHITCHAT = "Thanks for chatting! I'm calling about supplying kegs for your venue — is now still okay?"
+MOCK_CLOSING = "Thanks for your time today — talk soon!"
 
 # Deterministic SYSTEM replies (never model-generated).          [CUSTOMIZE]
-HELP_TEXT = ("Here's what I can do: answer questions about our pricing, product lineup, contract "
-            "terms, ingredients, or delivery logistics; gather details about your drink orders for "
-            "our sales team; or flag something like a discount request for the team to handle "
-            "directly. What would you like?")
-RESTART_TEXT = "Okay, clean slate — we can start over. What would you like to do?"
+HELP_TEXT = ("I'm calling to see if Bassan Brewery could supply kegs for your venue — I'd like to "
+            "ask a few quick questions and set up time with our account manager. Sound okay?")
+RESTART_TEXT = "Okay, clean slate — we can start over. Got a quick minute to chat about your kegs?"
 
 # ── Output guardrails (validator exit-filter) ───────────── [CUSTOMIZE] ──
-# Tom has no pricing authority on this channel — strip any invented currency amounts.
+# This channel has no pricing authority, so strip invented currency amounts —
+# exact pricing is confirmed by the account manager, never quoted here.
 BLOCKED_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"(\$\s*\d[\d,]*|\b\d[\d,]*\s*(USD|EUR|ILS|NIS)\b)", re.IGNORECASE),
-     "(pricing confirmed by our sales team)"),
+     "(pricing confirmed by our account manager)"),
 )

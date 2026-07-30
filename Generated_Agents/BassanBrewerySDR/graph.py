@@ -168,7 +168,9 @@ def route_to_exit(state: AgentState) -> Literal["plan_step", "validator"]:
 # gates, grounding on the last completed action, the functional session cache,
 # and plan pause/resume). last_reply_fingerprint / stall_count are NOT reset
 # either — the stall detector (invariant 25) is by definition a cross-turn
-# comparison.
+# comparison. Same reasoning for objections_raised (the objection ledger) and
+# turns_since_tiedown (the micro-commitment pacing counter): both measure across
+# turns, and both are reset on restart by system_node, not per turn.
 TURN_RESET = {
     "intent": "", "category": "", "slots": {},
     "cold_payload": {}, "tool_action_pending": False, "tool_result": {},

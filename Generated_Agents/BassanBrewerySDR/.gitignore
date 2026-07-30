@@ -25,3 +25,4 @@ secrets/
 sessions.db
 *.db
 _*.json
+.selftest_passed.json

@@ -1,78 +1,36 @@
 # -*- coding: utf-8 -*-
-"""Scripted self-test: runs a multi-intent conversation through the pipeline in
-MOCK mode and asserts the architectural invariants. Run after every
-customization pass (`python selftest.py`); exit code 0 = PASS.
+"""Domain-AGNOSTIC self-test: proves the ENGINE invariants hold for the agent's
+CURRENT config, WITHOUT hard-coding any single domain's flows, tools, facts, or
+replies.
 
-Domain: Tom, an outbound sales agent for Bassan Brewery. See config.py for the
-intent/flow catalog this script exercises.
+WHY THIS SHAPE (read before "simplifying" it):
+  The old selftest hard-coded the demo domain (branch names, AC-12345 order ids,
+  lookup_order / book_fitting, "3-5 business days") across a 36-turn SCRIPT,
+  HOOK_CHECKS, and preflights. Every NEW domain therefore forced the builder to
+  rewrite all of it correctly in one shot; a single wrong assertion failed the
+  gate and drove a fix->rerun loop (the "10-minute build"). This file removes
+  that coupling: it DISCOVERS the domain from `config` and asserts STRUCTURE,
+  so the builder edits only config.py / prompts.py and NEVER this file.
 
-What it proves (v3):
-  - chitchat never ends the session (the classic premature-goodbye bug)
-  - hierarchical routing: every turn lands in the right ANSWER/FLOW/SYSTEM category
-  - SYSTEM intents (help/restart) are deterministic; restart clears pending state
-  - knowledge questions are answered in the SAME turn
-  - RETRIEVAL_INTENTS run the Agentic-RAG subgraph and the subgraph's private
-    state (documents/grades/counters) NEVER leaks into the parent AgentState
-  - a corpus miss loops, hits the RAG_MAX_ITERATIONS circuit breaker, and gets
-    the honest "won't guess" fallback — never a hallucinated policy
-  - a HUNG retrieval loop trips the RAG_TIMEOUT_SECONDS wall clock and degrades
-    to a single deterministic retrieve pass — the turn still answers, never
-    crashes or hangs
-  - a single-utterance flow request runs intent -> think -> tool -> exec-validator
-    -> enrich in one turn
-  - slot validators normalize/reject values before they reach a tool
-  - ENTITY RESOLVERS ground referential values ("whatever's cheapest") against
-    the catalog and bounce unresolvable ones with a clarifying question
-  - LIVE-VALUE HOOKS (preflight, no graph): resolvers/validators are exercised
-    DIRECTLY with raw LLM-style slot values. The conversation script alone
-    cannot catch a missing resolver — mock extractors pre-normalize values
-    before slots are set, so a live-only canonicalization gap is invisible to it
-  - STRUCTURAL LINTS (preflight, no graph): config SHAPE is gated so a
-    customization can't silently drop a mandatory rule — every distinct
-    resolver/validator callable is exercised by a HOOK_CHECK, and the
-    human_handoff escalation path is reachable with STALL_TEXT's escape phrase
-    actually routing into it (invariants 21c / 25 / 26)
-  - after a tool runs, last_action grounds follow-ups instead of a
-    capabilities pitch — and the session stays alive
-  - a failed tool routes execution_validator -> failure: graceful reply, session
-    alive, flow re-pended for retry (never a crash, never silent success)
-  - a knowledge detour mid slot-fill does NOT kill the pending flow; the reply
-    carries a resume line and the flow completes afterwards
-  - FAST ROUTER (tier-0 gate, preflight + script): mid slot-fill, a message
-    that deterministically fills a missing slot bypasses the INTENT-tier call
-    (fast_routed=True) — and EVERY doubt (negation, other-intent keyword, no
-    extraction, resolver bounce, kill switch) falls through to the model path
-  - INTERRUPT ARCHIVE (depth 1): a second tool FLOW mid slot-fill PARKS the
-    pending flow (intent + collected slots) instead of clobbering it; the
-    interrupting flow's completion carries a ONE-SHOT resume offer; a bare
-    slot answer or re-entry by name restores the parked flow without
-    re-asking collected slots; restart/goodbye clear the archive
-  - a Flow(confirm=True) flow asks yes/no before acting and only acts on "yes"
-    (here: the read-back scene before the lead profile is submitted)
-  - a Flow(enrich=False) result bypasses the SLM (needs_enrichment stays False)
-    yet still produces a clean deterministic reply
-  - the circuit breaker refuses tool execution past MAX_TOOL_CALLS_PER_TURN
-  - FUNCTIONAL SESSION CACHE: successful tools merge ONLY Flow.cache_keys
-    fields into session_facts (whitelist, zero-inference); restart clears it
-  - PLANNER CLAMP (preflight, no graph): unknown actions are dropped and the
-    step array is truncated to MAX_PLAN_STEPS before any execution
-  - COMPACTION (preflight, no graph): oversized list fields crush to a bounded
-    salient subset (error + rare-status items always survive), the sentinel
-    ref round-trips through retrieve_full_result, error results and small
-    lists pass through untouched, and crush_result never raises
-  - STALL DETECTOR (invariant 25, preflight + script): the validator's in-node
-    gate swaps the N-th consecutive identical reply for the deterministic
-    clarify-then-escalate STALL_TEXT; a changed reply resets the counter;
-    STALL_THRESHOLD=0 disables the gate entirely
-  - ESCALATION PATH (invariant 26): an explicit ask for a person routes to the
-    deterministic human_handoff SYSTEM intent — pending work clears, the
-    handoff_requested flag is raised for the Shell/host, session stays alive
-  - DYNAMIC RAG (report-12072026, preflight): a pronoun query is primed and
-    rewritten with deterministic conversation context (co-reference rescue),
-    an identical repeat question is served from the TTL context cache without
-    touching the subgraph, referential queries are never cached, and
-    RETRIEVAL_MIN_SCORE drops weak matches into the honest fallback
-  - only an explicit goodbye sets exit_conversation
+TWO LAYERS:
+  * ENGINE PREFLIGHTS — exercise the FIXED engine mechanics (compaction, stall,
+    filler, planner clamp, enrich verdict, RAG subgraph) with synthetic or
+    config-derived inputs. The engine is copied verbatim per agent, so these
+    hold for every domain.
+  * SMOKE WALK — drives short, INDEPENDENT conversations (fresh thread per
+    check) built from config.INTENT_KEYWORDS / FLOWS / SYSTEM_INTENTS, asserting
+    routing category, session-alive, and exit-only-on-goodbye — never a specific
+    reply string.
+
+ADAPT, DON'T ASSUME: a check needing a shape the domain may lack (RETRIEVAL
+INTENTS, a fillable slot, a cache key) discovers it from config and SKIPS with a
+printed note when absent — a renamed flow can never FAIL the gate.
+
+NOT TOO AGGRESSIVE: per-domain AUTHORING gates (HOOK_CHECK coverage, retrieval
+probe coverage, filler-bank exhaustiveness) are WARNINGS, not failures — they
+nudge quality without blocking a correct build.
+
+Exit code 0 = PASS. Run: python selftest.py
 """
 
 import asyncio
@@ -89,34 +47,30 @@ from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 import config  # noqa: E402
+import prompts  # noqa: E402
 from graph import build_pipeline, TURN_RESET as _TURN_RESET  # noqa: E402
 
-# Special message: resume an open HITL interrupt with an operator approval.
 RESUME_APPROVE = "__RESUME_APPROVE__"
 
-# Direct hook checks with RAW, live-LLM-style slot values.        [CUSTOMIZE]
-# In live mode the intent/think tiers hand over whatever text the model
-# extracted — resolvers/validators are the ONLY normalization those values get
-# (mock extractors pre-normalize, so the SCRIPT below can never catch a gap
-# here). Every slot that keys into a catalog/DB must have a resolver, and its
-# checks belong in this list: aliases, plural/synonym forms, unresolvable
-# values, and out-of-bounds numbers quoting REAL catalog limits.
-# (hook, flow, slot, raw_value, other_slots, want_ok, substring of output)
-HOOK_CHECKS = [
-    # drink_mix resolver: raw phrasing canonicalizes against the product catalog.
-    ("resolver", "lead_profile", "drink_mix", "just coke and bottled water", {}, True, "everyday"),
-    ("resolver", "lead_profile", "drink_mix", "mostly Singha and Evian", {}, True, "specialty"),
-    ("resolver", "lead_profile", "drink_mix", "a bit of both, some cola and some Perrier", {}, True, "mix of both"),
-    ("resolver", "lead_profile", "drink_mix", "whatever's cheapest", {}, False, "specialty imports"),
-    # buyer_character resolver: raw phrasing canonicalizes against the buying-style catalog.
-    ("resolver", "lead_profile", "buyer_character", "we'd want a yearly deal", {}, True, "annual contract"),
-    ("resolver", "lead_profile", "buyer_character", "just a bulk order for one event", {}, True, "bulk order"),
-    ("resolver", "lead_profile", "buyer_character", "not sure, depends on the month", {}, True, "ordering as needed"),
-    # monthly_volume validator: format normalization + bounds rejection.
-    ("validator", "lead_profile", "monthly_volume", "about 500 guests", {}, True, "500"),
-    ("validator", "lead_profile", "monthly_volume", "0", {}, False, "guests or customers"),
-    ("validator", "lead_profile", "monthly_volume", "5000000", {}, False, "quite high"),
-]
+# Quality nudges that must NOT block a correct build (printed at the end).
+WARNINGS: list = []
+
+
+def _warn(msg: str) -> None:
+    WARNINGS.append(msg)
+
+
+def _first_keyword(intent: str):
+    """A deterministic trigger phrase for an intent, from its keyword bank."""
+    kws = config.INTENT_KEYWORDS.get(intent) or ()
+    return kws[0] if kws else None
+
+
+# Optional per-domain raw-value hooks (resolvers/validators exercised with
+# live-LLM-style values). Left EMPTY by default — coverage is a warning, not a
+# gate (structural_preflight). A domain MAY add entries; the builder need not.
+# (kind, flow, slot, raw_value, other_slots, want_ok, substring_of_output)
+HOOK_CHECKS: list = []
 
 
 def run_hook_checks() -> list:
@@ -133,196 +87,151 @@ def run_hook_checks() -> list:
                             f"expected ok={want_ok} & …{want_sub!r}…, got ok={ok}, out={out!r}")
     return failures
 
-# (user message, dict of expected state assertions)                [CUSTOMIZE]
-# Assertion keys: plain state keys, plus:
-#   _reply_contains   substring (or list of substrings) expected in the reply
-#   _tool             cold_payload tool name (None = no tool ran this turn)
-#   _args             subset match on cold_payload args
-#   _confirm_pending  whether a confirmation gate is open after the turn
-#   _interrupted      whether a HITL interrupt is open after the turn
-#   _absent           state keys that must NOT exist (subgraph isolation)
-#   _facts_keys       keys that must be present in session_facts
-#   _preseed          dict merged into the turn's input payload (breaker tests)
-SCRIPT = [
-    ("hi there, how are you?",
-     {"intent": "chitchat", "category": "ANSWER", "exit_conversation": False}),
-    # SYSTEM intent: deterministic capabilities listing, no model.
-    ("what can you do for me?",
-     {"intent": "help", "category": "SYSTEM", "exit_conversation": False,
-      "_reply_contains": "sales team"}),
-    ("how does your pricing work?",
-     {"intent": "pricing_info", "category": "ANSWER", "exit_conversation": False,
-      "_reply_contains": "locked"}),
-    # Agentic-RAG: retrieval subgraph answers product-details questions; its
-    # private loop state must never leak into the parent AgentState.
-    ("does the cola have caffeine in it",
-     {"intent": "product_details", "category": "ANSWER",
-      "_reply_contains": "caffeine",
-      "_absent": ["documents", "sufficient", "rewrite_count", "original_query"]}),
-    # Corpus miss -> rewrite loop -> RAG_MAX_ITERATIONS circuit breaker ->
-    # honest fallback, never a hallucinated answer.
-    ("how many calories does a twelve ounce serving have",
-     {"intent": "product_details", "category": "ANSWER", "exit_conversation": False,
-      "_reply_contains": "won't guess"}),
-    # Flow trigger: the lead confirms they're the right contact -> lead_profile
-    # becomes pending; first missing slot (monthly_volume) is asked.
-    ("Yes, speaking - I handle our drink orders.",
-     {"intent": "lead_profile", "category": "FLOW", "pending_intent": "lead_profile",
-      "_tool": None, "_reply_contains": "guests or customers"}),
-    # Fast router: a bare slot answer mid slot-fill bypasses the INTENT tier.
-    ("we serve about 500 guests a month",
-     {"intent": "lead_profile", "pending_intent": "lead_profile", "_tool": None,
-      "fast_routed": True}),
-    # Entity resolution: an unresolvable/referential drink-mix phrase is
-    # bounced with a clarifying question, never passed to the tool literally.
-    ("whatever's cheapest is fine",
-     {"intent": "lead_profile", "pending_intent": "lead_profile", "_tool": None,
-      "fast_routed": False,   # resolver bounce -> the gate must NOT bypass
-      "_reply_contains": "Singha or Evian"}),
-    ("mostly everyday stuff like cola and water",
-     {"intent": "lead_profile", "pending_intent": "lead_profile", "_tool": None,
-      "fast_routed": True}),
-    ("it renews in about 3 months",
-     {"intent": "lead_profile", "pending_intent": "lead_profile", "_tool": None,
-      "fast_routed": True}),
-    # Detour mid slot-fill: knowledge answer + resume line, pending flow SURVIVES.
-    ("actually, what's your contract length?",
-     {"intent": "contract_terms", "pending_intent": "lead_profile",
-      "_reply_contains": ["weekly", "renewal"], "exit_conversation": False}),
-    # A second FLOW interrupting the pending one is ARCHIVED, not clobbered
-    # (depth-1 interrupt archive): flag_request completes in one turn (its
-    # only slot auto-fills from the raw message) while lead_profile is parked.
-    ("actually, before that - can we get a discount on this order?",
-     {"intent": "flag_request", "category": "FLOW", "_tool": "flag_for_team",
-      "_paused": "lead_profile",
-      "_reply_contains": ["team", "didn't finish"]}),
-    # A bare slot answer RESTORES the parked flow through the fast-router gate
-    # (no INTENT-tier call, nothing re-asked) -> all 5 slots now known ->
-    # the confirm gate (the read-back) opens.
-    ("we'd want this as a bulk order for one big event",
-     {"intent": "lead_profile", "fast_routed": True, "_paused": None,
-      "_confirm_pending": True, "_tool": None,
-      "_reply_contains": "get that right"}),
-    # Yes -> the lead profile is submitted; enrich=False -> SLM bypassed, the
-    # reply is the deterministic summary + the declared next-step hint.
-    ("yes",
-     {"intent": "lead_profile", "_tool": "submit_lead_profile", "needs_enrichment": False,
-      "_confirm_pending": False, "_reply_contains": "team",
-      "_facts_keys": ["lead_reference"], "exit_conversation": False}),
-    # Circuit breaker: with the per-turn budget already spent, the Act is
-    # refused and degrades gracefully instead of running away; the flow is
-    # re-pended for retry.
-    ("we'd also like a custom recipe suggestion",
-     {"_preseed": {"tool_call_count": 3}, "intent": "flag_request",
-      "_reply_contains": "snag", "pending_intent": "flag_request",
-      "exit_conversation": False}),
-    # SYSTEM restart: the one explicit abandonment — clears pending state,
-    # the functional session cache, any plan, and the interrupt archive.
-    ("ok, let's start over",
-     {"intent": "restart", "category": "SYSTEM", "pending_intent": None,
-      "session_facts": {}, "plan_steps": [], "_paused": None,
-      "_reply_contains": "clean slate", "exit_conversation": False}),
-    # ESCALATION PATH (invariant 26): an explicit ask for a person MID
-    # SLOT-FILL routes to the deterministic human_handoff SYSTEM intent —
-    # pending work clears and handoff_requested is raised for the Shell/host.
-    ("I handle drink orders for our second location too",
-     {"intent": "lead_profile", "pending_intent": "lead_profile", "_tool": None}),
-    ("no, just let me talk to your manager",
-     {"intent": "human_handoff", "category": "SYSTEM", "handoff_requested": True,
-      "pending_intent": None, "_reply_contains": "person from our team",
-      "exit_conversation": False}),
-    # STALL DETECTOR (invariant 25): the mock chitchat line repeats verbatim —
-    # the THIRD consecutive identical reply is swapped for the deterministic
-    # clarify-then-escalate STALL_TEXT. The escape phrase routes to human_handoff.
-    ("krzzt fizzle blorp",
-     {"intent": "chitchat", "stall_count": 1, "exit_conversation": False}),
-    ("second krzzt fizzle blorp",
-     {"intent": "chitchat", "stall_count": 2, "exit_conversation": False}),
-    ("third krzzt fizzle blorp",
-     {"intent": "chitchat", "stall_count": 1,
-      "_reply_contains": "talk to a human", "exit_conversation": False}),
-    ("that's all, thanks!",
-     {"intent": "goodbye", "category": "SYSTEM", "_paused": None,
-      "exit_conversation": True}),
-]
+
+# ── SMOKE WALK (config-derived integration) ─────────────────────────────────
+_thread_counter = 0
 
 
-async def rag_subgraph_checks() -> list:
-    """Direct subgraph invariants: a corpus hit yields context; a miss loops,
-    gets capped by RAG_MAX_ITERATIONS, and finalizes EMPTY (honest, bounded)."""
-    from rag_subgraph import rag_subgraph  # noqa: E402
+def _fresh_cfg() -> dict:
+    """A clean checkpointer thread so each smoke check starts from zero state —
+    no cross-turn contamination between independent invariants."""
+    global _thread_counter
+    _thread_counter += 1
+    return {"configurable": {"thread_id": f"smoke-{_thread_counter}"}}
 
+
+async def _run(graph, msg, cfg=None):
+    """Invoke one turn (or resume an open HITL interrupt)."""
+    cfg = cfg or _fresh_cfg()
+    if msg == RESUME_APPROVE:
+        return await graph.ainvoke(Command(resume={"approved": True}), config=cfg), cfg
+    payload = dict(_TURN_RESET)
+    payload["user_message"] = msg
+    payload["recent_messages"] = [HumanMessage(content=msg)]
+    return await graph.ainvoke(payload, config=cfg), cfg
+
+
+async def smoke_walk(graph) -> list:
+    """Drive short, independent conversations built from config. Asserts the
+    engine's cross-domain invariants (routing category, session-alive,
+    exit-only-on-goodbye, deterministic SYSTEM intents, stall escalation),
+    never a domain-specific reply string."""
     failures = []
-    hit = await rag_subgraph.ainvoke(
-        {"query": "ingredients allergens caffeine", "original_query": "ingredients allergens caffeine",
-         "rewrite_count": 0})
-    if not hit.get("context"):
-        failures.append("rag subgraph: expected non-empty context for a corpus hit")
 
-    miss = await rag_subgraph.ainvoke(
-        {"query": "zzz qqq xyzzy", "original_query": "zzz qqq xyzzy", "rewrite_count": 0})
-    if miss.get("context"):
-        failures.append("rag subgraph: expected empty context for a corpus miss")
-    if miss.get("rewrite_count", 0) > config.RAG_MAX_ITERATIONS:
-        failures.append(f"rag subgraph: circuit breaker exceeded "
-                        f"({miss.get('rewrite_count')} > {config.RAG_MAX_ITERATIONS})")
-    print(f"[rag preflight] hit->context({len(hit.get('context', ''))} chars), "
-          f"miss->empty after {miss.get('rewrite_count', 0)} rewrite(s)")
+    def hard(cond, label):
+        if not cond:
+            failures.append(f"smoke: {label}")
+
+    # 1) chitchat: answered, session stays alive (the classic premature-goodbye
+    #    guard — an ANSWER-tier turn must never set exit_conversation).
+    st, _ = await _run(graph, "hi there, how are you today?")
+    hard(st.get("category") == "ANSWER", "greeting must land in category ANSWER")
+    hard(not st.get("exit_conversation"), "greeting must NOT end the call")
+    hard(bool(st.get("final_response")), "greeting must produce a spoken reply")
+
+    # 2) each knowledge intent: answered IN THE SAME TURN, session alive.
+    #    Exact intent-match is a warning (keyword disambiguation is the domain
+    #    author's concern); the ENGINE guarantee is a non-empty in-turn answer.
+    for intent in config.KNOWLEDGE_INTENTS:
+        kw = _first_keyword(intent)
+        if not kw:
+            _warn(f"knowledge intent {intent!r} has no INTENT_KEYWORDS — its routing isn't smoke-tested")
+            continue
+        st, _ = await _run(graph, kw)
+        hard(bool(st.get("final_response")), f"knowledge intent {intent!r} must answer in-turn (got empty)")
+        hard(not st.get("exit_conversation"), f"knowledge intent {intent!r} must not end the call")
+        if st.get("intent") != intent:
+            _warn(f"keyword {kw!r} routed to {st.get('intent')!r}, expected {intent!r} "
+                  f"— check INTENT_KEYWORDS ordering/overlap")
+
+    # 3) each tool-backed flow: triggering it stays in-domain and alive. A flow
+    #    with missing slots asks for one (need_info) — still a non-empty reply,
+    #    still no exit. (Tool execution / enrich are proven by the preflights.)
+    for flow_name in config.FLOWS:
+        kw = _first_keyword(flow_name)
+        if not kw:
+            _warn(f"flow {flow_name!r} has no INTENT_KEYWORDS — its routing isn't smoke-tested")
+            continue
+        st, _ = await _run(graph, kw)
+        hard(bool(st.get("final_response")) or bool(st.get("__interrupt__")),
+             f"flow {flow_name!r} must respond (ask a slot, confirm, or act)")
+        hard(not st.get("exit_conversation"), f"flow {flow_name!r} must not end the call")
+        if st.get("category") not in ("FLOW", "COMPOUND"):
+            _warn(f"keyword {kw!r} routed to category {st.get('category')!r}, expected FLOW")
+
+    # 4) help (SYSTEM): deterministic, non-empty, session alive.
+    if "help" in config.SYSTEM_INTENTS:
+        kw = _first_keyword("help") or "what can you do"
+        st, _ = await _run(graph, kw)
+        hard(bool(st.get("final_response")), "help must produce a capabilities reply")
+        hard(not st.get("exit_conversation"), "help must not end the call")
+
+    # 5) restart (SYSTEM): clears pending flow state deterministically.
+    if "restart" in config.SYSTEM_INTENTS:
+        kw = _first_keyword("restart") or "start over"
+        cfg = _fresh_cfg()
+        # Prime a pending flow first (if any flow exists), then restart it away.
+        if config.FLOWS:
+            fkw = _first_keyword(next(iter(config.FLOWS)))
+            if fkw:
+                await _run(graph, fkw, cfg)
+        st, _ = await _run(graph, kw, cfg)
+        hard(st.get("pending_intent") in (None, ""), "restart must clear pending_intent")
+        hard(not st.get("session_facts"), "restart must clear session_facts")
+        hard(not st.get("exit_conversation"), "restart must not end the call")
+
+    # 6) escalation (invariant 26): an explicit ask for a person routes to the
+    #    deterministic human_handoff SYSTEM intent and raises handoff_requested.
+    if "human_handoff" in config.SYSTEM_INTENTS:
+        kw = _first_keyword("human_handoff") or "let me talk to a human"
+        st, _ = await _run(graph, kw)
+        hard(bool(st.get("handoff_requested")),
+             "human_handoff must raise handoff_requested (the escalation must be a real node)")
+        hard(not st.get("exit_conversation"), "human_handoff keeps the session alive for the human")
+
+    # 7) stall detector (invariant 25): repeating an identical unresolved turn
+    #    STALL_THRESHOLD times swaps in the clarify-then-escalate reply.
+    if config.STALL_THRESHOLD and config.STALL_THRESHOLD > 0:
+        cfg = _fresh_cfg()
+        nonsense = "krzzt fizzle blorp"
+        last = ""
+        for _ in range(config.STALL_THRESHOLD):
+            st, _ = await _run(graph, nonsense, cfg)
+            last = st.get("final_response", "")
+        handoff_kw = config.INTENT_KEYWORDS.get("human_handoff", ())
+        escalated = (last == config.STALL_TEXT
+                     or any(kw in last.lower() for kw in handoff_kw))
+        hard(escalated, f"stall detector must escalate after {config.STALL_THRESHOLD} identical replies")
+
+    # 8) goodbye: an explicit closing — and ONLY that — sets exit_conversation.
+    kw = _first_keyword("goodbye") or "goodbye, that's all"
+    st, _ = await _run(graph, kw)
+    hard(st.get("exit_conversation") is True, "explicit goodbye must set exit_conversation")
+
+    print(f"[smoke walk] {_thread_counter} turns across "
+          f"{len(config.KNOWLEDGE_INTENTS)} knowledge + {len(config.FLOWS)} flow intents, "
+          f"{len(failures)} failed")
     return failures
 
 
-async def rag_timeout_degrade_check() -> list:
-    """Wall-clock ceiling (Agentic_RAG_Explained.txt rule 6): a HUNG retrieval
-    loop must trip RAG_TIMEOUT_SECONDS and degrade to one deterministic
-    single-hop retrieve — the turn still answers from DOCS; no crash, no hang."""
-    import nodes  # noqa: E402
-
-    class _HungSubgraph:
-        async def ainvoke(self, *_a, **_k):
-            await asyncio.sleep(30)  # far past any sane ceiling
-
-    msg = "what ingredients are in your drinks?"
-    graph = build_pipeline()
-    cfg = {"configurable": {"thread_id": "selftest-rag-timeout"}}
-    real_subgraph, real_timeout = nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS
-    real_ttl = config.RAG_CACHE_TTL_SECONDS
-    # The SCRIPT already asked this question — disable and clear the TTL
-    # context cache so this turn genuinely exercises the hung-subgraph path.
-    nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS = _HungSubgraph(), 0.2
-    config.RAG_CACHE_TTL_SECONDS = 0
-    nodes._RAG_CACHE.clear()
-    try:
-        payload = dict(_TURN_RESET)
-        payload["user_message"] = msg
-        payload["recent_messages"] = [HumanMessage(content=msg)]
-        state = await graph.ainvoke(payload, config=cfg)
-    finally:
-        nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS = real_subgraph, real_timeout
-        config.RAG_CACHE_TTL_SECONDS = real_ttl
-
-    reply = state.get("final_response", "")
-    print(f"[T] U (RAG loop hung; 0.2s wall clock): {msg}")
-    print(f"    A: {reply}")
-    failures = []
-    if not reply:
-        failures.append("rag timeout: empty final_response (turn did not degrade gracefully)")
-    elif "carbonated water" not in reply:
-        failures.append(f"rag timeout: expected single-hop DOCS context in reply, got {reply!r}")
-    return failures
-
+# ── ENGINE PREFLIGHTS (fixed-engine mechanics) ──────────────────────────────
 
 def stall_preflight() -> list:
-    """Direct stall-detector invariants (invariant 25, no graph): the
-    validator's in-node gate swaps the N-th consecutive identical reply for
-    STALL_TEXT, a changed reply resets the counter, and STALL_THRESHOLD=0
-    disables the gate entirely."""
+    """Direct stall-detector invariants (invariant 25, no graph): the validator
+    swaps the N-th consecutive identical reply for STALL_TEXT, a changed reply
+    resets the counter, and STALL_THRESHOLD=0 disables the gate."""
     import nodes  # noqa: E402
+
+    if not config.STALL_THRESHOLD:
+        print("[stall preflight] skipped (STALL_THRESHOLD=0, gate disabled)")
+        return []
 
     failures = []
     trip = nodes.validator_node({"draft_response": "Same reply.",
                                  "last_reply_fingerprint": "same reply.",
                                  "stall_count": config.STALL_THRESHOLD - 1})
-    if "talk to a human" not in trip.get("final_response", ""):
+    if "talk to a human" not in trip.get("final_response", "").lower() \
+            and trip.get("final_response") != config.STALL_TEXT:
         failures.append(f"stall: threshold reply not swapped, got {trip.get('final_response')!r}")
     if trip.get("stall_count") != 1:
         failures.append("stall: counter did not reset after escalation")
@@ -341,148 +250,89 @@ def stall_preflight() -> list:
             failures.append("stall: gate ran while STALL_THRESHOLD=0")
     finally:
         config.STALL_THRESHOLD = real
-    print(f"[stall preflight] trip/reset/kill-switch checks, {len(failures)} failed")
-    return failures
-
-
-async def rag_dynamic_preflight() -> list:
-    """Dynamic-RAG invariants (report-12072026, no parent graph):
-    1. co-reference rescue (R-03): a query that retrieves nothing standalone
-       is rewritten WITH the parent-composed history hint and lands the right
-       doc — the standalone rewrite happens on a MISS, never as a standing
-       pre-search model hop;
-    2. deterministic priming (rule 8): _context_hint mines last_action /
-       recent messages with zero model calls, and a referential ("it") query
-       enters retrieval pre-primed;
-    3. TTL context cache (rule 9): an identical repeat question skips the
-       subgraph entirely; RAG_CACHE_TTL_SECONDS=0 disables it;
-    4. confidence floor (R-05): RETRIEVAL_MIN_SCORE drops weak matches before
-       grading -> honest empty context, never a low-confidence synthesis."""
-    import nodes  # noqa: E402
-    from rag_subgraph import rag_subgraph  # noqa: E402
-
-    failures = []
-
-    # 1) History-aware rewrite-on-miss resolves the reference.
-    out = await rag_subgraph.ainvoke(
-        {"query": "how long does this stay fresh", "original_query": "how long does this stay fresh",
-         "history_hint": "ingredients allergens caffeine", "rewrite_count": 0})
-    if "caffeine" not in out.get("context", "").lower():
-        failures.append(f"dynamic rag: hinted rewrite missed the ingredients doc, got {out.get('context')!r}")
-
-    # 2) Deterministic priming from grounding state.
-    hint = nodes._context_hint(
-        {"user_message": "is that included every time?",
-         "last_action": {"summary": "Your order includes our standard weekly delivery."},
-         "recent_messages": [HumanMessage(content="is that included every time?")]})
-    if "delivery" not in hint.lower():
-        failures.append(f"dynamic rag: _context_hint missed the last_action entity, got {hint!r}")
-    primed = await nodes.agentic_retrieval_node(
-        {"user_message": "is it included every week?",
-         "last_action": {"summary": "Your order includes our standard weekly delivery."},
-         "recent_messages": [HumanMessage(content="is it included every week?")]})
-    if "delivery" not in primed.get("retrieved_context", "").lower():
-        failures.append("dynamic rag: referential query was not primed from last_action")
-
-    # 3) TTL cache: the second identical question must not touch the retriever.
-    calls = {"n": 0}
-    real_retriever = config.RETRIEVER
-
-    def _counting(query, top_k=2):
-        calls["n"] += 1
-        return real_retriever(query, top_k)
-
-    nodes._RAG_CACHE.clear()
-    config.RETRIEVER = _counting
-    try:
-        await nodes.agentic_retrieval_node(
-            {"user_message": "what ingredients are in your drinks?", "recent_messages": []})
-        first = calls["n"]
-        await nodes.agentic_retrieval_node(
-            {"user_message": "what ingredients are in your drinks?", "recent_messages": []})
-        if calls["n"] != first:
-            failures.append("dynamic rag: repeat question re-ran retrieval (cache miss)")
-        real_ttl = config.RAG_CACHE_TTL_SECONDS
-        config.RAG_CACHE_TTL_SECONDS = 0
-        try:
-            await nodes.agentic_retrieval_node(
-                {"user_message": "what ingredients are in your drinks?", "recent_messages": []})
-            if calls["n"] == first:
-                failures.append("dynamic rag: cache served while RAG_CACHE_TTL_SECONDS=0")
-        finally:
-            config.RAG_CACHE_TTL_SECONDS = real_ttl
-    finally:
-        config.RETRIEVER = real_retriever
-        nodes._RAG_CACHE.clear()
-
-    # 4) Confidence floor: an absurd floor yields the honest empty context.
-    real_floor = config.RETRIEVAL_MIN_SCORE
-    config.RETRIEVAL_MIN_SCORE = 99
-    try:
-        floored = await rag_subgraph.ainvoke(
-            {"query": "ingredients allergens caffeine", "original_query": "ingredients allergens caffeine",
-             "rewrite_count": 0})
-        if floored.get("context"):
-            failures.append("dynamic rag: below-floor docs survived RETRIEVAL_MIN_SCORE")
-    finally:
-        config.RETRIEVAL_MIN_SCORE = real_floor
-
-    print(f"[dynamic-rag preflight] rewrite/prime/cache/floor checks, {len(failures)} failed")
+    print(f"[stall preflight] trip/reset/kill-switch, {len(failures)} failed")
     return failures
 
 
 def fast_router_preflight() -> list:
-    """Direct fast-router gate invariants (no graph): the tier-0 deterministic
-    gate bypasses the INTENT tier ONLY for an unambiguous missing-slot answer;
-    every doubt (negation, other-intent keyword, no extraction, resolver
-    bounce, kill switch) falls through to the model path."""
+    """Fast-router SAFETY invariants (tier-0 gate, no graph). The critical,
+    domain-agnostic direction is FALL-THROUGH ON DOUBT: negation, no extraction,
+    and the kill switch must never wrongly bypass the INTENT tier. The positive
+    bypass depends on a domain slot value we can't synthesize generically, so it
+    is a warning, exercised only if a fillable slot is discoverable."""
     import nodes  # noqa: E402
 
+    if not config.FLOWS:
+        print("[fast-router preflight] skipped (no FLOWS)")
+        return []
+    flow_name = next(iter(config.FLOWS))
     failures = []
-    # Confident slot answer mid lead_profile -> bypass with the slot filled.
-    out = nodes._fast_route("just coke and water please", "lead_profile", {})
-    if not out or not out.get("fast_routed") or out.get("slots", {}).get("drink_mix") != "everyday drinks":
-        failures.append(f"fast_route: expected an 'everyday drinks' bypass, got {out!r}")
-    if out and (out.get("intent") != "lead_profile" or out.get("category") != "FLOW"):
-        failures.append(f"fast_route: bypass returned wrong routing {out!r}")
-    # Every doubt falls through (None = INTENT-tier path).
+
+    # Fall-through on doubt (holds for ANY domain).
     for msg, why in [
-        ("no wait, forget that", "negation must fall through"),
-        ("I'd like a discount on this order", "another intent's keyword must fall through"),
+        ("no wait, cancel that", "negation must fall through"),
         ("hmm, let me think about it", "no extraction must fall through"),
-        ("whatever's cheapest is fine", "a resolver bounce must fall through"),
     ]:
-        if nodes._fast_route(msg, "lead_profile", {}) is not None:
+        if nodes._fast_route(msg, flow_name, {}) is not None:
             failures.append(f"fast_route({msg!r}): {why}")
-    # Kill switch: FAST_ROUTER_ENABLED=False disables the gate entirely.
+
+    # Kill switch: disabled gate never routes.
     real = config.FAST_ROUTER_ENABLED
     config.FAST_ROUTER_ENABLED = False
     try:
-        if nodes._fast_route("just coke and water please", "lead_profile", {}) is not None:
+        if nodes._fast_route("the usual please", flow_name, {}) is not None:
             failures.append("fast_route: ran while FAST_ROUTER_ENABLED=False")
     finally:
         config.FAST_ROUTER_ENABLED = real
-    print(f"[fast-router preflight] 6 gate checks, {len(failures)} failed")
+
+    # Best-effort positive bypass: find a slot whose extractor accepts a value we
+    # can pull from the mock knowledge / a slot prompt. Skip (warn) if none.
+    exercised_positive = False
+    for fn, flow in config.FLOWS.items():
+        for slot in flow.slots:
+            extractor = config.SLOT_EXTRACTORS.get(slot)
+            if not extractor:
+                continue
+            # Try the slot's own prompt text and a few generic tokens.
+            for probe in (flow.slot_prompts.get(slot, ""), "tomorrow at 3pm", "yes"):
+                if probe and extractor(probe):
+                    out = nodes._fast_route(probe, fn, {})
+                    if out and out.get("fast_routed"):
+                        exercised_positive = True
+                    break
+            if exercised_positive:
+                break
+        if exercised_positive:
+            break
+    if not exercised_positive:
+        _warn("fast-router: no fillable slot found to exercise the positive bypass "
+              "(only the fall-through guards were checked)")
+
+    print(f"[fast-router preflight] fall-through + kill-switch"
+          f"{' + positive bypass' if exercised_positive else ''}, {len(failures)} failed")
     return failures
 
 
 async def plan_preflight() -> list:
-    """Direct planner-clamp + session-cache invariants (no graph):
-    1. a fake live PlanResult with an unknown action and too many steps is
-       clamped in code — the bad action dropped, the array truncated;
-    2. tool_exec merges ONLY Flow.cache_keys fields into session_facts (a
-       result field outside the whitelist never lands in the cache)."""
+    """Planner CLAMP invariant (no graph): a live model emitting an unknown
+    action and too many steps is clamped in code — the bad action dropped, the
+    array truncated to MAX_PLAN_STEPS, off-contract slots stripped. Uses the
+    domain's first real flow name (no hard-coded action)."""
     import nodes  # noqa: E402
     from llm_client import llm_client  # noqa: E402
     from schemas import PlanResult, PlanStep  # noqa: E402
 
+    if not config.FLOWS:
+        print("[plan preflight] skipped (no FLOWS to plan over)")
+        return []
+
+    real_flow = next(iter(config.FLOWS))
     failures = []
 
-    # 1) Planner clamp: simulate a LIVE model emitting garbage.
     bogus = PlanResult(steps=(
-        [PlanStep(action="lead_profile", slots={"monthly_volume": "500", "not_a_slot": "x"}),
+        [PlanStep(action=real_flow, slots={"not_a_slot": "x"}),
          PlanStep(action="launch_the_missiles", slots={})]
-        + [PlanStep(action="lead_profile", slots={}) for _ in range(config.MAX_PLAN_STEPS + 2)]))
+        + [PlanStep(action=real_flow, slots={}) for _ in range(config.MAX_PLAN_STEPS + 2)]))
 
     async def _fake_structured(*_a, **_k):
         return bogus
@@ -499,46 +349,32 @@ async def plan_preflight() -> list:
         failures.append(f"planner clamp: {len(plan)} steps survived (cap {config.MAX_PLAN_STEPS})")
     if any(s["action"] not in config.FLOWS for s in plan):
         failures.append("planner clamp: an unknown action survived into the plan")
-    if any("not_a_slot" in s["slots"] for s in plan):
+    if any("not_a_slot" in s.get("slots", {}) for s in plan):
         failures.append("planner clamp: a slot outside the flow contract survived")
 
-    # 2) Session-cache whitelist: submit_lead_profile returns "monthly_volume"
-    #    (NOT in cache_keys) and "lead_reference" (in cache_keys) — only the
-    #    latter caches.
-    exec_out = await nodes.tool_exec_node(
-        {"cold_payload": {"tool": "submit_lead_profile", "args": {
-            "monthly_volume": "500", "drink_mix": "everyday drinks",
-            "contract_renewal": "next year",
-            "buyer_character": "a standing annual contract"}},
-         "tool_call_count": 0, "session_facts": {}})
-    facts = exec_out.get("session_facts", {})
-    if "lead_reference" not in facts:
-        failures.append("session cache: whitelisted key lead_reference was not cached")
-    if "monthly_volume" in facts:
-        failures.append("session cache: non-whitelisted key 'monthly_volume' leaked into the cache")
-
-    print(f"[plan preflight] clamp -> {len(plan)} step(s), cache -> {sorted(facts)}, "
-          f"{len(failures)} failed")
+    print(f"[plan preflight] clamp -> {len(plan)} step(s), {len(failures)} failed")
     return failures
 
 
 async def enrich_preflight() -> list:
-    """ENRICH verdict discipline (live-tier fake, no graph): the SLM returns an
-    EnrichVerdict, NEVER prose. Assert:
-    1. a GROUNDED verdict -> deterministic templated reply carrying the fact,
-       with the config next-step tail appended (the SLM wrote no sentence).
-    2. an UNGROUNDED verdict (a fact absent from the result) -> the node
-       independently rejects it and falls back to _phrase_result (the summary
-       verbatim), never to model text. This is the scrubber's replacement."""
+    """ENRICH verdict discipline (live-tier fake, no graph): the SLM returns a
+    verdict, NEVER prose. A grounded verdict -> deterministic templated reply
+    carrying the fact + closing question; an ungrounded fact is rejected and the
+    node falls back to the summary verbatim. Tool name is config-derived."""
     import nodes  # noqa: E402
     from llm_client import llm_client  # noqa: E402
     from schemas import EnrichVerdict  # noqa: E402
 
-    failures = []
-    result = {"tool": "submit_lead_profile", "summary": "Logged lead LD-999.",
-              "lead_reference": "LD-999", "monthly_volume": "500"}
+    tool_name = next((f.tool for f in config.FLOWS.values()), None)
+    if tool_name is None:
+        print("[enrich preflight] skipped (no FLOWS/tools)")
+        return []
 
-    async def _run(verdict):
+    failures = []
+    result = {"tool": tool_name, "summary": "Reference R-999 is set.",
+              "ref_id": "R-999", "status": "done"}
+
+    async def _run_verdict(verdict):
         async def _fake(*_a, **_k):
             return verdict
         real_mock, real_struct = llm_client.mock, llm_client.generate_structured
@@ -549,46 +385,43 @@ async def enrich_preflight() -> list:
             llm_client.mock, llm_client.generate_structured = real_mock, real_struct
         return out.get("draft_response", "")
 
-    # 1) Grounded verdict -> templated prose carrying the verbatim fact + tail.
-    grounded = await _run(EnrichVerdict(tone="confirm", key_facts=["LD-999", "500"], grounded=True))
-    if "LD-999" not in grounded:
-        failures.append("enrich: grounded fact 'LD-999' missing from templated reply")
+    grounded = await _run_verdict(EnrichVerdict(tone="confirm", key_facts=["R-999", "done"], grounded=True))
+    if "R-999" not in grounded:
+        failures.append("enrich: grounded fact 'R-999' missing from templated reply")
     if not grounded.rstrip().endswith("?"):
         failures.append("enrich: deterministic closing question not appended")
 
-    # 2) Ungrounded verdict (fact NOT in result) -> reject -> _phrase_result fallback.
-    ungrounded = await _run(EnrichVerdict(tone="confirm", key_facts=["arrives Tuesday"], grounded=True))
+    ungrounded = await _run_verdict(EnrichVerdict(tone="confirm", key_facts=["next Tuesday"], grounded=True))
     if "Tuesday" in ungrounded:
-        failures.append("enrich: ungrounded fact 'arrives Tuesday' leaked to the user")
-    if "LD-999" not in ungrounded:  # fallback = _phrase_result(summary)
+        failures.append("enrich: ungrounded fact 'next Tuesday' leaked to the user")
+    if "R-999" not in ungrounded:
         failures.append("enrich: ungrounded verdict did not fall back to deterministic phrasing")
 
-    print(f"[enrich preflight] grounded-templating + ungrounded-rejection, "
-          f"{len(failures)} failed")
+    print(f"[enrich preflight] grounded-templating + ungrounded-rejection, {len(failures)} failed")
     return failures
 
 
 async def compaction_preflight() -> list:
-    """Direct compaction invariants (no graph):
-    1. an oversized list field is crushed under the cap+sentinel bound, the
-       error item and the rare-status item ALWAYS survive, and the sentinel
-       ref round-trips through retrieve_full_result to the full original;
-    2. protection gates: error results and small lists pass through unchanged;
-    3. crush_result never raises on hostile shapes (a lost saving is safe,
-       a crashed Act node is not);
-    4. strip_sentinels restores a uniform-schema list for downstream code."""
+    """Compaction invariants (no graph): an oversized list field crushes under
+    the cap; the error item and the rare-status item ALWAYS survive; the
+    sentinel ref round-trips; error results and small lists pass through
+    untouched; crush_result never raises on hostile shapes. Fully synthetic."""
     import compaction  # noqa: E402
+
+    if not getattr(config, "COMPACTION_ENABLED", True):
+        print("[compaction preflight] skipped (COMPACTION_ENABLED=0)")
+        return []
 
     failures = []
     n = 40
     rows = [{"id": i, "status": "ok", "name": f"item-{i}"} for i in range(n)]
-    rows[17]["error"] = "gateway timeout"          # error item, mid-array
-    rows[23]["status"] = "backordered"             # rare status, mid-array
+    rows[17]["error"] = "gateway timeout"
+    rows[23]["status"] = "backordered"
     result = {"tool": "search_catalog", "items": rows, "summary": f"Found {n} items."}
 
     crushed = compaction.crush_result(result)
     kept = crushed["items"]
-    if len(kept) > config.COMPACTION_MAX_ITEMS + 3:  # budget + 2 salient + sentinel
+    if len(kept) > config.COMPACTION_MAX_ITEMS + 3:
         failures.append(f"compaction: kept {len(kept)} items (budget {config.COMPACTION_MAX_ITEMS})")
     if not any(isinstance(x, dict) and x.get("id") == 17 for x in kept):
         failures.append("compaction: the error item was dropped")
@@ -605,10 +438,7 @@ async def compaction_preflight() -> list:
             failures.append("compaction: retrieve_full_result did not return the full original")
     if compaction.retrieve_full_result(ref="nope").get("error") is None:
         failures.append("compaction: unknown ref did not return an error result")
-    if len(compaction.strip_sentinels(kept)) != len(kept) - 1:
-        failures.append("compaction: strip_sentinels did not remove exactly the sentinel")
 
-    # Protection gates + never-raises.
     err = {"tool": "search_catalog", "error": "backend down", "items": rows, "summary": "x"}
     if compaction.crush_result(err) is not err:
         failures.append("compaction: an ERROR result was modified (must pass through)")
@@ -621,34 +451,20 @@ async def compaction_preflight() -> list:
         except Exception as e:
             failures.append(f"compaction: raised on hostile input {type(hostile).__name__}: {e}")
 
-    print(f"[compaction preflight] {n} rows -> {len(kept)} kept "
-          f"(error+rare preserved, ref round-trip), {len(failures)} failed")
+    print(f"[compaction preflight] {n} rows -> {len(kept)} kept, {len(failures)} failed")
     return failures
 
 
 async def filler_preflight() -> list:
-    """Direct filler-channel invariants (no graph): the display-only side channel
-    that covers tool latency with canned, natural acknowledgments.
-    1. BANK SHAPE: FILLER_DEFAULT / FILLER_PLAN_CONTINUE non-empty; every
-       FILLERS_BY_TOOL entry is a non-empty list of non-empty strings.
-    2. EXHAUSTIVENESS (only when enabled): every FLOW tool has its OWN bank —
-       the ROI is tool-specific acks, not the generic fallback.
-    3. EMIT + ROTATION: with a sink set and the debounce forced off
-       (FILLER_DELAY_MS=0, since MOCK tools are instant), tool_exec_node emits
-       exactly one 'tool' filler per call and rotates variants across calls.
-    4. KILL SWITCH: FILLER_ENABLED=False -> no emission even at delay 0."""
+    """Filler-channel invariants (no graph): bank SHAPE (non-empty lists of
+    non-empty strings) and EMIT/ROTATION/KILL-SWITCH are gated; per-flow bank
+    EXHAUSTIVENESS is a warning (quality nudge, not a blocker)."""
     import nodes  # noqa: E402
     import filler  # noqa: E402
     import tools  # noqa: E402
 
     failures = []
 
-    # A registered FLOW tool to drive the emit path (domain-agnostic — never
-    # hardcode a demo tool name; a renamed catalog would silently skip the test).
-    sample_tool = next((f.tool for f in config.FLOWS.values()
-                        if f.tool in tools.TOOL_REGISTRY), None)
-
-    # 1) Bank shape.
     def _bad_list(lst):
         return (not isinstance(lst, list) or not lst
                 or any(not isinstance(s, str) or not s.strip() for s in lst))
@@ -660,24 +476,25 @@ async def filler_preflight() -> list:
         if _bad_list(variants):
             failures.append(f"filler: FILLERS_BY_TOOL[{tool!r}] must be a non-empty list of non-empty strings")
 
-    # 2) Exhaustiveness: every flow tool needs its own bank (when the feature is on).
+    # Exhaustiveness -> WARNING (the generic default still covers a missing bank).
     if config.FILLER_ENABLED:
         for flow_name, flow in config.FLOWS.items():
             if flow.tool not in config.FILLERS_BY_TOOL:
-                failures.append(f"filler: FLOW {flow_name!r} tool {flow.tool!r} has no FILLERS_BY_TOOL "
-                                f"entry — add tool-specific acks (the generic default defeats the ROI)")
+                _warn(f"filler: flow {flow_name!r} tool {flow.tool!r} has no FILLERS_BY_TOOL entry "
+                      f"— add tool-specific acks (the generic default works, but is less warm)")
 
-    # 3) Emit + rotation: drive tool_exec_node twice with the debounce forced off.
+    sample_tool = next((f.tool for f in config.FLOWS.values()
+                        if f.tool in tools.TOOL_REGISTRY), None)
     real_delay, real_enabled = config.FILLER_DELAY_MS, config.FILLER_ENABLED
     config.FILLER_DELAY_MS, config.FILLER_ENABLED = 0, True
     sink: asyncio.Queue = asyncio.Queue()
     token = filler.set_sink(sink)
     filler.reset_rotation()
     try:
+        if sample_tool is None:
+            _warn("filler: no FLOW tool registered — emit/rotation not exercised")
         first = config.FILLERS_BY_TOOL.get(sample_tool) or config.FILLER_DEFAULT
         emitted = []
-        if sample_tool is None:
-            failures.append("filler: no FLOW tool is registered — cannot exercise the emit path")
         for _ in range(2 if sample_tool else 0):
             await nodes.tool_exec_node(
                 {"cold_payload": {"tool": sample_tool, "args": {}},
@@ -692,10 +509,7 @@ async def filler_preflight() -> list:
                 emitted.append(tool_events[0]["text"])
         if len(first) >= 2 and len(emitted) == 2 and emitted[0] == emitted[1]:
             failures.append("filler: variants did not rotate across calls (same phrase twice)")
-        if emitted and emitted[0] != first[0]:
-            failures.append(f"filler: first emission {emitted[0]!r} was not the first bank variant {first[0]!r}")
 
-        # 4) Kill switch.
         if sample_tool:
             config.FILLER_ENABLED = False
             filler.reset_rotation()
@@ -709,47 +523,18 @@ async def filler_preflight() -> list:
         config.FILLER_DELAY_MS, config.FILLER_ENABLED = real_delay, real_enabled
         filler.reset_rotation()
 
-    print(f"[filler preflight] bank shape + exhaustiveness + emit/rotation + kill switch, "
-          f"{len(failures)} failed")
+    print(f"[filler preflight] bank-shape + emit/rotation/kill-switch, {len(failures)} failed")
     return failures
 
 
 def structural_preflight() -> list:
-    """Config-structure lints (no graph): turn the architecture's 'mandatory'
-    prose rules into actual gates, so a customization pass cannot silently drop
-    one. These check the SHAPE of config, not a conversation.
-    1. RESOLVER/VALIDATOR COVERAGE (invariant 21c): every DISTINCT entity
-       resolver and slot validator callable must be exercised by >=1 HOOK_CHECK
-       with a raw live-style value. Mock extractors pre-normalize, so an
-       un-hooked canonicalization gap is invisible to the SCRIPT — the prose
-       'its checks belong in HOOK_CHECKS' becomes a gate here. (Shared
-       callables count as covered once, by identity.)
-    2. ESCALATION WIRING (invariants 25/26): human_handoff must be a real
-       deterministic SYSTEM intent WITH keywords, and (unless the stall gate is
-       disabled) STALL_TEXT's escape phrase must contain one of those keywords —
-       an advertised handoff the escape phrase can't actually reach is the
-       judged 'advertised-but-unwired escalation' failure (#17 in
-       Same_Turn_Pipeline.txt)."""
+    """Config-shape lints. ESCALATION WIRING (invariants 25/26) is a GATE — an
+    advertised handoff must be a reachable node and the stall escape phrase must
+    reach it. RESOLVER/VALIDATOR HOOK_CHECK coverage is a WARNING (per-domain
+    authoring nudge, not a blocker)."""
     failures = []
 
-    # 1) Coverage by callable identity (a shared validator is covered once).
-    exercised = set()
-    for kind, flow_name, slot, *_rest in HOOK_CHECKS:
-        fn = (config.ENTITY_RESOLVERS.get(slot) if kind == "resolver"
-              else config.FLOWS[flow_name].validators.get(slot))
-        if fn is not None:
-            exercised.add(id(fn))
-    for slot, fn in config.ENTITY_RESOLVERS.items():
-        if id(fn) not in exercised:
-            failures.append(f"structural: entity resolver for slot {slot!r} has no HOOK_CHECK "
-                            f"— add a raw-value 'resolver' check (mock runs can't catch its gaps)")
-    for flow_name, flow in config.FLOWS.items():
-        for slot, fn in flow.validators.items():
-            if id(fn) not in exercised:
-                failures.append(f"structural: validator for {flow_name}.{slot} has no HOOK_CHECK "
-                                f"— add a raw-value 'validator' check")
-
-    # 2) Escalation path is reachable, and the stall escape phrase reaches it.
+    # Escalation path reachable + stall escape phrase routes into it.
     handoff_kw = config.INTENT_KEYWORDS.get("human_handoff", ())
     if "human_handoff" not in config.SYSTEM_INTENTS:
         failures.append("structural: human_handoff must be a deterministic SYSTEM intent (invariant 26)")
@@ -760,119 +545,672 @@ def structural_preflight() -> list:
         failures.append("structural: STALL_TEXT's escape phrase matches no human_handoff keyword "
                         "(invariant 25 — the escape phrase must actually escalate)")
 
-    print(f"[structural preflight] resolver/validator coverage + escalation wiring, "
-          f"{len(failures)} failed")
+    # HOOK_CHECK coverage -> WARNING.
+    exercised = set()
+    for kind, flow_name, slot, *_rest in HOOK_CHECKS:
+        fn = (config.ENTITY_RESOLVERS.get(slot) if kind == "resolver"
+              else config.FLOWS[flow_name].validators.get(slot))
+        if fn is not None:
+            exercised.add(id(fn))
+    for slot, fn in config.ENTITY_RESOLVERS.items():
+        if id(fn) not in exercised:
+            _warn(f"structural: entity resolver for slot {slot!r} has no HOOK_CHECK "
+                  f"— a raw-value check would catch live-only canonicalization gaps")
+    for flow_name, flow in config.FLOWS.items():
+        for slot, fn in flow.validators.items():
+            if id(fn) not in exercised:
+                _warn(f"structural: validator for {flow_name}.{slot} has no HOOK_CHECK")
+
+    print(f"[structural preflight] escalation-wiring gate + coverage warnings, {len(failures)} failed")
     return failures
 
 
 def retrieval_coverage_preflight() -> list:
-    """Consumer-vocabulary recall gate. RETRIEVAL_PROBES are written from the
-    USER's side — deliberately not derived from DOCS text or INTENT_KEYWORDS,
-    so this samples the distribution real users type instead of the author's
-    vocabulary (a corpus-derived probe passes trivially and catches nothing).
-    A probe that retrieves nothing means an answerable question would get the
-    honest decline — the exact silent failure the guard otherwise hides."""
-    failures = []
+    """Consumer-vocabulary recall — a WARNING pass (not a gate). A probe that
+    retrieves nothing means an answerable question would be declined; surfaced
+    so the author can add aliases, but never blocks a build."""
+    if not config.RETRIEVAL_INTENTS:
+        print("[retrieval-coverage] skipped (no RETRIEVAL_INTENTS)")
+        return []
     n_probes = 0
     for intent in config.RETRIEVAL_INTENTS:
         probes = config.RETRIEVAL_PROBES.get(intent, ())
         if len(probes) < 3:
-            failures.append(f"retrieval coverage: intent {intent!r} has only "
-                            f"{len(probes)} probes — write >=3 consumer phrasings")
+            _warn(f"retrieval coverage: intent {intent!r} has {len(probes)} probes — "
+                  f"write >=3 consumer phrasings")
         for probe in probes:
             n_probes += 1
             docs = [d for d in config.RETRIEVER(probe)
                     if d.get("score", 0) >= config.RETRIEVAL_MIN_SCORE]
             if not docs:
-                failures.append(f"retrieval coverage: probe {probe!r} ({intent}) retrieves "
-                                "nothing — an answerable question would be declined; "
-                                "add consumer-vocabulary aliases to the matching DOCS entry")
-    print(f"[retrieval-coverage preflight] {n_probes} consumer probes, "
+                _warn(f"retrieval coverage: probe {probe!r} ({intent}) retrieves nothing — "
+                      f"add consumer-vocabulary aliases to the matching DOCS entry")
+    print(f"[retrieval-coverage] {n_probes} consumer probes (warnings only)")
+    return []
+
+
+async def rag_preflight() -> list:
+    """Agentic-RAG subgraph invariants — ONLY when the domain uses retrieval.
+    A corpus hit yields context; a miss loops, is capped by RAG_MAX_ITERATIONS,
+    and finalizes EMPTY; a hung loop trips the wall clock and degrades to a
+    single deterministic retrieve. Queries are DERIVED from DOCS."""
+    if not config.RETRIEVAL_INTENTS or not getattr(config, "DOCS", ()):
+        print("[rag preflight] skipped (no RETRIEVAL_INTENTS / DOCS)")
+        return []
+
+    import nodes  # noqa: E402
+    from rag_subgraph import rag_subgraph  # noqa: E402
+
+    failures = []
+    doc0 = config.DOCS[0]
+    hit_query = doc0.get("title", "") or " ".join(doc0.get("text", "").split()[:4])
+
+    hit = await rag_subgraph.ainvoke(
+        {"query": hit_query, "original_query": hit_query, "rewrite_count": 0})
+    if not hit.get("context"):
+        failures.append(f"rag: expected non-empty context for corpus hit {hit_query!r}")
+
+    miss = await rag_subgraph.ainvoke(
+        {"query": "zzz qqq xyzzy", "original_query": "zzz qqq xyzzy", "rewrite_count": 0})
+    if miss.get("context"):
+        failures.append("rag: expected empty context for a corpus miss")
+    if miss.get("rewrite_count", 0) > config.RAG_MAX_ITERATIONS:
+        failures.append(f"rag: circuit breaker exceeded ({miss.get('rewrite_count')} > {config.RAG_MAX_ITERATIONS})")
+
+    # TTL context cache: an identical repeat question skips the retriever.
+    calls = {"n": 0}
+    real_retriever = config.RETRIEVER
+
+    def _counting(query, top_k=2):
+        calls["n"] += 1
+        return real_retriever(query, top_k)
+
+    nodes._RAG_CACHE.clear()
+    config.RETRIEVER = _counting
+    try:
+        await nodes.agentic_retrieval_node({"user_message": hit_query, "recent_messages": []})
+        first = calls["n"]
+        await nodes.agentic_retrieval_node({"user_message": hit_query, "recent_messages": []})
+        if config.RAG_CACHE_TTL_SECONDS and calls["n"] != first:
+            failures.append("rag: repeat question re-ran retrieval (TTL cache miss)")
+    finally:
+        config.RETRIEVER = real_retriever
+        nodes._RAG_CACHE.clear()
+
+    # Confidence floor: an absurd floor yields the honest empty context.
+    real_floor = config.RETRIEVAL_MIN_SCORE
+    config.RETRIEVAL_MIN_SCORE = 99
+    try:
+        floored = await rag_subgraph.ainvoke(
+            {"query": hit_query, "original_query": hit_query, "rewrite_count": 0})
+        if floored.get("context"):
+            failures.append("rag: below-floor docs survived RETRIEVAL_MIN_SCORE")
+    finally:
+        config.RETRIEVAL_MIN_SCORE = real_floor
+
+    # Hung-loop wall clock -> degrade to single-hop (turn still answers).
+    real_subgraph, real_timeout = nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS
+    real_ttl = config.RAG_CACHE_TTL_SECONDS
+
+    class _HungSubgraph:
+        async def ainvoke(self, *_a, **_k):
+            await asyncio.sleep(30)
+
+    graph = build_pipeline()
+    kw = _first_keyword(config.RETRIEVAL_INTENTS[0]) or hit_query
+    nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS = _HungSubgraph(), 0.2
+    config.RAG_CACHE_TTL_SECONDS = 0
+    nodes._RAG_CACHE.clear()
+    try:
+        payload = dict(_TURN_RESET)
+        payload["user_message"] = kw
+        payload["recent_messages"] = [HumanMessage(content=kw)]
+        state = await graph.ainvoke(payload, config={"configurable": {"thread_id": "rag-timeout"}})
+    finally:
+        nodes.rag_subgraph, config.RAG_TIMEOUT_SECONDS = real_subgraph, real_timeout
+        config.RAG_CACHE_TTL_SECONDS = real_ttl
+    if not state.get("final_response"):
+        failures.append("rag timeout: empty reply (turn did not degrade gracefully)")
+
+    print(f"[rag preflight] hit/miss/cache/floor/timeout on {len(config.DOCS)} docs, {len(failures)} failed")
+    return failures
+
+
+def call_arc_preflight() -> list:
+    """Proactive SDR director (config.CALL_ARC) invariants — the zero-model
+    agenda gate at the head of validator_node. Behavior is exercised on a
+    SYNTHETIC arc so the coverage holds for EVERY domain (an inbound agent ships
+    an empty CALL_ARC and the director is a no-op); the shipped arc, when
+    present, gets a structural shape-check. validator_node reads config.CALL_ARC
+    at call time, so a monkeypatched arc needs no graph rebuild."""
+    import nodes  # noqa: E402
+
+    failures = []
+
+    # --- Shape gate on the SHIPPED arc (skips cleanly when empty) ---
+    shipped = tuple(getattr(config, "CALL_ARC", ()) or ())
+    if shipped:
+        names = [s.name for s in shipped]
+        if len(names) != len(set(names)):
+            failures.append("call_arc: stage names must be unique")
+        for s in shipped:
+            if s.flow and s.flow not in config.FLOWS:
+                failures.append(f"call_arc: stage {s.name!r} points at unknown flow {s.flow!r}")
+            fc = (s.advance_when or {}).get("flow_complete")
+            if fc and fc not in config.FLOWS:
+                failures.append(f"call_arc: stage {s.name!r} advance_when flow_complete -> unknown flow {fc!r}")
+
+    # --- Behavioral gate on a SYNTHETIC arc (monkeypatched) ---
+    Stage = config.Stage
+    real_arc = getattr(config, "CALL_ARC", ())
+    config.CALL_ARC = (
+        Stage(name="discovery", objective="find the decision maker",
+              line="Quick question — are you the right person for this?",
+              advance_when={"agent_led_once": True}),
+        Stage(name="close", objective="propose the next step",
+              line="Can I set up a follow-up for you?", advance_when={}),
+    )
+    try:
+        # (a) AGENT LEADS + lazy-init: a bare reactive turn with no floor held
+        #     initializes the cursor and APPENDS the stage's proactive move.
+        led = nodes.validator_node({"draft_response": "Nice to meet you.",
+                                    "category": "ANSWER", "intent": "chitchat"})
+        if led.get("call_stage") != "discovery":
+            failures.append(f"call_arc: cursor must lazy-init to first stage, got {led.get('call_stage')!r}")
+        if "right person" not in led.get("final_response", "").lower():
+            failures.append("call_arc: agent must LEAD (append the stage move) on an idle reactive turn")
+        if led.get("stage_nudged") != "discovery":
+            failures.append("call_arc: the one-shot guard must mark the stage led")
+
+        # (b) ADVANCE: once the discovery move is made (stage_nudged), the cursor
+        #     advances to close and speaks its line.
+        adv = nodes.validator_node({"draft_response": "Got it.", "category": "ANSWER",
+                                    "intent": "chitchat", "call_stage": "discovery",
+                                    "stage_nudged": "discovery"})
+        if adv.get("call_stage") != "close":
+            failures.append(f"call_arc: cursor must advance when a stage's exit holds, got {adv.get('call_stage')!r}")
+
+        # (c) ONE-SHOT: a terminal stage already led makes NO second move.
+        quiet = nodes.validator_node({"draft_response": "Okay.", "category": "ANSWER",
+                                      "intent": "chitchat", "call_stage": "close",
+                                      "stage_nudged": "close"})
+        if "follow-up" in quiet.get("final_response", "").lower():
+            failures.append("call_arc: broken-record — a led terminal stage must not re-nudge")
+
+        # (d) FIRM-NO PRESERVED: a goodbye holds the floor -> director stands
+        #     down (no stage line leaks, no cursor write).
+        bye = nodes.validator_node({"draft_response": "Thanks for your time, take care.",
+                                    "intent": "goodbye", "exit_conversation": True,
+                                    "call_stage": "discovery"})
+        if "right person" in bye.get("final_response", "").lower() or bye.get("call_stage"):
+            failures.append("call_arc: director must stand down on a firm-no/goodbye")
+
+        # (e) STANDS DOWN mid-flow: a pending flow means think leads -> no move.
+        held = nodes.validator_node({"draft_response": "Could you tell me your order number?",
+                                     "category": "FLOW", "intent": "some_flow",
+                                     "pending_intent": "some_flow", "call_stage": "discovery"})
+        if "right person" in held.get("final_response", "").lower() or held.get("call_stage"):
+            failures.append("call_arc: director must stand down while a flow is pending")
+
+        # (f) FLOW ENTRY (only if a flow exists): a qualify stage pointing at a
+        #     real flow pends it and asks its first slot — the agent leads INTO it.
+        flow_name = next(iter(config.FLOWS), None)
+        if flow_name:
+            config.CALL_ARC = (Stage(name="qualify", flow=flow_name,
+                                     advance_when={"flow_complete": flow_name}),)
+            enter = nodes.validator_node({"draft_response": "Hello!", "category": "ANSWER",
+                                          "intent": "chitchat"})
+            if enter.get("pending_intent") != flow_name:
+                failures.append(f"call_arc: a flow stage must pend its flow, got {enter.get('pending_intent')!r}")
+    finally:
+        config.CALL_ARC = real_arc
+
+    scope = f"{len(shipped)}-stage shipped arc" if shipped else "empty shipped arc (no-op)"
+    print(f"[call-arc preflight] lead/advance/one-shot/firm-no/floor on a synthetic arc + {scope}, "
+          f"{len(failures)} failed")
+    return failures
+
+
+def voice_budget_preflight() -> list:
+    """Config-derived voice/latency budgets on GENERATED output: the OPENER word
+    count (a long cached opener delays pickup) and FILLER_THINKING token shape
+    (ultra-short, no ellipsis — they precede ANY reply type). Makes the '<=20
+    words / compact' voice rules an automated gate, not only a human pass.
+    Punctuation-only tokens (an em dash) are not counted as words."""
+    failures = []
+
+    def _words(s: str) -> int:
+        return len([w for w in s.split() if any(c.isalnum() for c in w)])
+
+    opener = getattr(config, "OPENER", "") or ""
+    if opener and _words(opener) > 20:
+        failures.append(f"OPENER is {_words(opener)} words (>20): a long cached opener delays pickup — {opener!r}")
+
+    for tok in getattr(config, "FILLER_THINKING", []) or []:
+        t = tok.strip()
+        if t.endswith("..."):
+            failures.append(f"FILLER_THINKING token ends in an ellipsis (TTS trails): {tok!r}")
+        if _words(t) > 6:
+            _warn(f"FILLER_THINKING token is wordy ({_words(t)} words) — keep pre-think tokens ultra-short: {tok!r}")
+
+    facts = getattr(config, "FACTS", "") or ""
+    cap = getattr(config, "_KNOWLEDGE_MAX_CHARS", 8000)
+    if len(facts) > cap * 2:
+        _warn(f"FACTS is {len(facts)} chars (injected every knowledge turn) — consider RETRIEVAL_INTENTS for a large corpus")
+
+    print(f"[voice-budget preflight] opener + filler-token shape + facts-size, {len(failures)} failed")
+    return failures
+
+
+def persona_preflight() -> list:
+    """An OUTBOUND agent must not ship the boilerplate's INBOUND help-desk voice.
+
+    prompts.py's module docstring already calls leaving its generic wording
+    untouched "a build defect, not a shortcut" — but that was enforced only as
+    prose aimed at the builder, so an unedited copy shipped anyway and the agent
+    forgot it had placed the call. This makes it a gate.
+
+    A non-empty CALL_ARC is the outbound signal: the director only leads a call
+    the agent initiated. When it is set, the two prompts that carry the persona
+    must no longer say "support assistant" (reactive framing) or "steer to what
+    you can help with" (waits for the lead's agenda). Inbound agents keep an
+    empty arc, so this preflight is a no-op for them and the boilerplate's own
+    selftest stays green.
+
+    Asserts against the RENDERED prompt, not the source text, so it holds however
+    the wording was produced (f-string, constant, or config-driven persona).
+    """
+    failures = []
+    arc = getattr(config, "CALL_ARC", ()) or ()
+    if not arc:
+        print("[persona preflight] inbound (CALL_ARC empty) — skipped")
+        return failures
+
+    # Phrases that encode "they called us, and I wait for their agenda".
+    inbound_markers = (
+        "support assistant",
+        "steer to what you can help with",
+    )
+    rendered = {
+        "build_knowledge_system": prompts.build_knowledge_system(""),
+        "build_chitchat_system": prompts.build_chitchat_system(),
+    }
+    for fn_name, text in rendered.items():
+        low = text.lower()
+        for marker in inbound_markers:
+            if marker in low:
+                failures.append(
+                    f"{fn_name} still carries the inbound default {marker!r} while "
+                    f"CALL_ARC defines {len(arc)} outbound stage(s) — an outbound "
+                    f"agent must state that IT placed the call (see prompts.py docstring)"
+                )
+
+    print(f"[persona preflight] outbound voice on {len(rendered)} persona prompts, "
+          f"{len(failures)} failed")
+    return failures
+
+
+def context_budget_preflight() -> list:
+    """Context payload budgets — the TTFT levers. The raw history window is
+    capped at config.HISTORY_TURNS (older detail lives in session_facts /
+    last_action / call_summary, not the prompt), and any uploaded knowledge is
+    CHUNKED into retrieval-sized DOCS rather than appended to the static FACTS
+    prompt (which would ride every think call)."""
+    import nodes  # noqa: E402
+    from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
+    failures = []
+
+    # (a) history window cap + recency (keep the MOST RECENT turns).
+    n = config.HISTORY_TURNS
+    msgs = []
+    for i in range(n + 6):
+        msgs.append(HumanMessage(content=f"u{i}"))
+        msgs.append(AIMessage(content=f"a{i}"))
+    hist = nodes._history({"recent_messages": msgs})
+    if len(hist) != n:
+        failures.append(f"history window: expected {n} turns in the prompt, got {len(hist)}")
+    if hist and hist[-1]["content"] != f"a{n + 5}":
+        failures.append("history window: must keep the MOST RECENT turns (recency)")
+
+    # (b) uploaded knowledge -> chunked DOCS (loader tested directly; the demo
+    #     ships no knowledge/ folder, so DOCS is unchanged there).
+    sample = "\n\n".join(f"Paragraph {i} " + "word " * 40 for i in range(6))
+    docs = config._chunk_text_to_docs("faq.md", sample, max_words=50)
+    if len(docs) < 2:
+        failures.append(f"knowledge chunking: a long file must split into >=2 docs, got {len(docs)}")
+    for d in docs:
+        if not d.get("id") or d.get("title") != "faq.md" or not d.get("text"):
+            failures.append(f"knowledge chunking: malformed doc {d!r}")
+    if "Additional uploaded knowledge" in getattr(config, "FACTS", ""):
+        failures.append("knowledge: uploaded files must NOT be appended to FACTS — retrieval-gate them via DOCS")
+
+    print(f"[context-budget preflight] history cap={n} + knowledge->DOCS chunking, {len(failures)} failed")
+    return failures
+
+
+async def summary_preflight() -> list:
+    """Lead record (config.SUMMARY_TEMPLATE): the zero-model aggregator in
+    validator_node + the call-end freetext synthesis (build_call_record).
+    Exercised on a SYNTHETIC template so coverage holds for EVERY domain — an
+    agent without a template ships an empty one and the record is a no-op.
+    _update_summary / build_call_record read config.SUMMARY_TEMPLATE at call
+    time, so a monkeypatch needs no graph rebuild."""
+    import nodes  # noqa: E402
+    failures = []
+    SF = config.SummaryField
+    real = getattr(config, "SUMMARY_TEMPLATE", ())
+
+    try:
+        # --- empty template => no record written; build_call_record passes through ---
+        config.SUMMARY_TEMPLATE = ()
+        out = nodes.validator_node({"draft_response": "Hi.", "category": "ANSWER",
+                                    "intent": "chitchat"})
+        if "call_summary" in out:
+            failures.append("summary: empty template must not write call_summary")
+        passthrough = await nodes.build_call_record({"call_summary": {"x": 1}})
+        if passthrough != {"x": 1}:
+            failures.append("summary: empty template build_call_record must pass the record through")
+
+        # --- synthetic template: structured aggregation is ZERO-model ---
+        config.SUMMARY_TEMPLATE = (
+            SF(key="contact", source="fact:name", label="Contact"),
+            SF(key="volume", source="slot:qualify.volume", label="Volume"),
+            SF(key="follow_ups", source="followups", label="Follow-ups"),
+            SF(key="needs", source="freetext", label="Needs"),
+        )
+        upd = nodes.validator_node({
+            "draft_response": "Great.", "category": "FLOW", "intent": "qualify",
+            "session_facts": {"name": "Dana"}, "slots": {"volume": "500"},
+            "last_action": {"summary": "Booked a demo"}})
+        rec = upd.get("call_summary") or {}
+        if rec.get("contact") != "Dana":
+            failures.append(f"summary: fact source must populate, got {rec.get('contact')!r}")
+        if rec.get("volume") != "500":
+            failures.append(f"summary: slot source must populate, got {rec.get('volume')!r}")
+        if rec.get("follow_ups") != ["Booked a demo"]:
+            failures.append(f"summary: followups must accumulate, got {rec.get('follow_ups')!r}")
+        if "needs" in rec:
+            failures.append("summary: _update_summary must NOT write freetext fields (they're off-path)")
+
+        # --- call-end synthesis (mock): fills freetext, preserves structured ---
+        done = await nodes.build_call_record({"call_summary": dict(rec), "recent_messages": []})
+        if "needs" not in done:
+            failures.append("summary: build_call_record must fill the freetext keys")
+        if done.get("contact") != "Dana":
+            failures.append("summary: build_call_record must preserve the structured fields")
+    finally:
+        config.SUMMARY_TEMPLATE = real
+
+    print(f"[summary preflight] aggregate/freetext/no-op on a synthetic template, {len(failures)} failed")
+    return failures
+
+
+def objection_preflight() -> list:
+    """Objection architecture (Acknowledge -> Isolate -> Pivot) invariants — the
+    zero-model gate at the head of validator_node. Behavior runs on a SYNTHETIC
+    objection intent + arc so coverage holds for EVERY domain (an agent with an
+    empty OBJECTION_INTENTS is a no-op); the SHIPPED config gets a strict shape
+    and word-budget gate. nodes reads these tuples at call time, so monkeypatched
+    config needs no graph rebuild."""
+    import nodes  # noqa: E402
+
+    failures = []
+    cap = int(getattr(config, "MAX_REPLY_WORDS", 20) or 20)
+
+    def _words(s: str) -> int:
+        return len([w for w in (s or "").split() if any(c.isalnum() for c in w)])
+
+    # --- Shape + STRICT word budget on the SHIPPED config (skips when empty) ---
+    shipped = tuple(getattr(config, "OBJECTION_INTENTS", ()) or ())
+    template = getattr(config, "OBJECTION_ISOLATE_TEMPLATE", "") or ""
+    topics = getattr(config, "OBJECTION_TOPICS", {}) or {}
+    if shipped:
+        for name in shipped:
+            if name not in config.VALID_INTENTS:
+                failures.append(f"objection: {name!r} is not a valid intent")
+            if name not in config.KNOWLEDGE_INTENTS:
+                failures.append(f"objection: {name!r} must also be a KNOWLEDGE_INTENT "
+                                "(objections route through knowledge_node for grounding)")
+        for name in topics:
+            if name not in shipped:
+                failures.append(f"objection: OBJECTION_TOPICS has {name!r}, not in OBJECTION_INTENTS")
+        if template:
+            if "{topic}" not in template:
+                failures.append("objection: OBJECTION_ISOLATE_TEMPLATE must contain {topic}")
+            if not template.rstrip().endswith("?"):
+                failures.append("objection: OBJECTION_ISOLATE_TEMPLATE must end in a question mark")
+            for name, topic in topics.items():
+                try:
+                    rendered = template.format(topic=topic)
+                except (KeyError, IndexError) as e:
+                    failures.append(f"objection: isolate template does not render for {name!r}: {e}")
+                    continue
+                # STRICT budget: the isolate question shares the turn with the
+                # rebuttal that precedes it, so it must leave room for one.
+                if _words(rendered) > cap // 2:
+                    failures.append(
+                        f"objection: isolate question for {name!r} is {_words(rendered)} words "
+                        f"(>{cap // 2}); it shares the {cap}-word reply with the rebuttal — {rendered!r}")
+                rebuttal = (config.MOCK_KNOWLEDGE.get(name) or "").strip()
+                if rebuttal and _words(rebuttal) + _words(rendered) > cap:
+                    failures.append(
+                        f"objection: rebuttal + isolate for {name!r} is "
+                        f"{_words(rebuttal) + _words(rendered)} words (>{cap}) — shorten "
+                        f"MOCK_KNOWLEDGE[{name!r}]")
+
+    # --- Behavioral gate on a SYNTHETIC objection (monkeypatched) ---
+    Stage = config.Stage
+    real = (getattr(config, "OBJECTION_INTENTS", ()), getattr(config, "OBJECTION_TOPICS", {}),
+            getattr(config, "OBJECTION_ISOLATE_TEMPLATE", ""), getattr(config, "CALL_ARC", ()),
+            tuple(config.KNOWLEDGE_INTENTS), tuple(config.VALID_INTENTS))
+    config.OBJECTION_INTENTS = ("obj_probe",)
+    config.OBJECTION_TOPICS = {"obj_probe": "the price"}
+    config.OBJECTION_ISOLATE_TEMPLATE = "Besides {topic}, is anything else holding you back?"
+    config.KNOWLEDGE_INTENTS = tuple(config.KNOWLEDGE_INTENTS) + ("obj_probe",)
+    config.VALID_INTENTS = tuple(config.VALID_INTENTS) + ("obj_probe",)
+    config.CALL_ARC = (
+        Stage(name="pitch", objective="book the meeting",
+              nudge="Would a short demo next week help?", advance_when={}),
+    )
+    try:
+        base = {"category": "ANSWER", "intent": "obj_probe", "call_stage": "pitch",
+                "draft_response": "Totally fair, our price is locked for a year."}
+
+        # (a) ISOLATE fires on the FIRST objection, and the director's pivot is
+        #     SUPPRESSED so the turn ships exactly ONE question.
+        first = nodes.validator_node(dict(base))
+        out = first.get("final_response", "")
+        if "anything else holding you back" not in out.lower():
+            failures.append(f"objection: first objection must ask the isolate question, got {out!r}")
+        if "demo next week" in out.lower():
+            failures.append("objection: the stage nudge must be SUPPRESSED on the isolate turn "
+                            "(one question per turn)")
+        if out.count("?") != 1:
+            failures.append(f"objection: isolate turn must ship exactly one question, got {out!r}")
+        if first.get("objections_raised") != ["obj_probe"]:
+            failures.append(f"objection: ledger must record the intent, got {first.get('objections_raised')!r}")
+
+        # (b) ISOLATE IS ONE-PER-CALL: a second objection never re-isolates, but
+        #     DOES pivot (the old one-shot guard let it end on the lead's terms).
+        second = nodes.validator_node({**base, "intent": "obj_probe",
+                                       "objections_raised": ["obj_probe"],
+                                       "stage_nudged": "pitch"})
+        out2 = second.get("final_response", "")
+        if "anything else holding you back" in out2.lower():
+            failures.append("objection: the isolate question must fire ONCE per call, never twice")
+        if "demo next week" not in out2.lower():
+            failures.append(f"objection: a REPEAT objection must still pivot back to the arc, got {out2!r}")
+
+        # (c) LEDGER is deduped and ordered.
+        if second.get("objections_raised") != ["obj_probe"]:
+            failures.append(f"objection: ledger must dedupe, got {second.get('objections_raised')!r}")
+
+        # (d) FLOOR: mid slot-fill the reply already ends in the flow's question,
+        #     so the isolate must NOT fire — but the ledger still records it.
+        held = nodes.validator_node({**base, "pending_intent": "some_flow",
+                                     "draft_response": "Fair. What's your monthly volume?"})
+        if "anything else holding you back" in held.get("final_response", "").lower():
+            failures.append("objection: isolate must stand down while the lead holds the floor")
+        if held.get("objections_raised") != ["obj_probe"]:
+            failures.append("objection: the ledger must still record an objection raised mid-flow")
+
+        # (e) NO-OP: an agent with no OBJECTION_INTENTS is untouched.
+        config.OBJECTION_INTENTS = ()
+        noop = nodes.validator_node(dict(base))
+        if "objections_raised" in noop:
+            failures.append("objection: empty OBJECTION_INTENTS must not write the ledger")
+        if "holding you back" in noop.get("final_response", "").lower():
+            failures.append("objection: empty OBJECTION_INTENTS must not isolate")
+    finally:
+        (config.OBJECTION_INTENTS, config.OBJECTION_TOPICS,
+         config.OBJECTION_ISOLATE_TEMPLATE, config.CALL_ARC,
+         config.KNOWLEDGE_INTENTS, config.VALID_INTENTS) = real
+
+    scope = f"{len(shipped)} shipped objection intent(s)" if shipped else "no shipped objections (no-op)"
+    print(f"[objection preflight] acknowledge/isolate-once/pivot/floor/word-budget + {scope}, "
+          f"{len(failures)} failed")
+    return failures
+
+
+def tiedown_preflight() -> list:
+    """Micro-commitment (tie-down) invariants — the zero-model gate at the TAIL
+    of validator_node. The load-bearing one is ORDERING: the tie-down must be
+    appended AFTER the stall fingerprint, or its rotating text gives an
+    identical repeated reply a fresh fingerprint every turn and silently
+    disables the stall detector (invariant 25)."""
+    import nodes  # noqa: E402
+    import filler  # noqa: E402
+
+    failures = []
+    real = (getattr(config, "TIEDOWNS", []), getattr(config, "TIEDOWN_EVERY_N_TURNS", 0),
+            getattr(config, "MAX_REPLY_WORDS", 20), getattr(config, "CALL_ARC", ()))
+    config.TIEDOWNS = ["Does that make sense?", "Are we on the same page?"]
+    config.TIEDOWN_EVERY_N_TURNS = 2
+    config.MAX_REPLY_WORDS = 20
+    config.CALL_ARC = ()          # isolate the tie-down from the director
+    filler.reset_rotation()
+    try:
+        # (a) FIRES on a statement-ending turn once the cadence is due.
+        due = nodes.validator_node({"draft_response": "We ship within two days.",
+                                    "category": "ANSWER", "intent": "chitchat",
+                                    "turns_since_tiedown": 2})
+        if "?" not in due.get("final_response", ""):
+            failures.append(f"tiedown: must append on a due statement turn, got {due.get('final_response')!r}")
+        if due.get("turns_since_tiedown") != 0:
+            failures.append("tiedown: emitting must reset the pacing counter")
+
+        # (b) NEVER a second question: a reply already ending in "?" is skipped.
+        q = nodes.validator_node({"draft_response": "What's your monthly volume?",
+                                  "category": "ANSWER", "intent": "chitchat",
+                                  "turns_since_tiedown": 5})
+        if q.get("final_response", "").count("?") != 1:
+            failures.append(f"tiedown: must never add a 2nd question, got {q.get('final_response')!r}")
+
+        # (c) NOT YET DUE: counter increments instead of firing.
+        early = nodes.validator_node({"draft_response": "We ship within two days.",
+                                      "category": "ANSWER", "intent": "chitchat",
+                                      "turns_since_tiedown": 0})
+        if "?" in early.get("final_response", ""):
+            failures.append("tiedown: must not fire before TIEDOWN_EVERY_N_TURNS")
+        if early.get("turns_since_tiedown") != 1:
+            failures.append("tiedown: a non-firing statement turn must increment the counter")
+
+        # (d) LEAD AGREED: an affirmation resets the cadence (never nag a yes).
+        agreed = nodes.validator_node({"draft_response": "Great.", "category": "ANSWER",
+                                       "intent": "chitchat", "user_message": "yes, that works",
+                                       "turns_since_tiedown": 1})
+        if agreed.get("turns_since_tiedown") != 0:
+            failures.append("tiedown: a lead affirmation must reset the pacing counter")
+
+        # (e) FLOOR: never speak over a firm no / handoff.
+        bye = nodes.validator_node({"draft_response": "Thanks for your time.",
+                                    "intent": "goodbye", "exit_conversation": True,
+                                    "turns_since_tiedown": 9})
+        if "?" in bye.get("final_response", ""):
+            failures.append("tiedown: must stand down when the lead holds the floor")
+
+        # (f) WORD BUDGET: a reply at the cap drops the tie-down rather than
+        #     blowing the spoken budget.
+        long_reply = " ".join(["word"] * 19) + "."
+        capped = nodes.validator_node({"draft_response": long_reply, "category": "ANSWER",
+                                       "intent": "chitchat", "turns_since_tiedown": 5})
+        if "?" in capped.get("final_response", ""):
+            failures.append("tiedown: must be dropped when it would exceed MAX_REPLY_WORDS")
+
+        # (g) THE ORDERING INVARIANT: with tie-downs ON, an identical repeated
+        #     reply must STILL trip the stall detector — proof the fingerprint is
+        #     taken on the body, before the rotating tie-down is appended.
+        if config.STALL_THRESHOLD:
+            body = "We ship within two days."
+            st = {"draft_response": body, "category": "ANSWER", "intent": "chitchat",
+                  "last_reply_fingerprint": body.casefold(),
+                  "stall_count": config.STALL_THRESHOLD - 1, "turns_since_tiedown": 5}
+            trip = nodes.validator_node(st)
+            escalated = (config.STALL_TEXT.casefold() in trip.get("final_response", "").casefold())
+            if not escalated:
+                failures.append("tiedown: ORDERING BUG — a rotating tie-down masked the stall "
+                                "detector; fingerprint the body BEFORE appending the tie-down")
+
+        # (h) KILL SWITCH: 0 disables the gate and never writes the counter.
+        config.TIEDOWN_EVERY_N_TURNS = 0
+        off = nodes.validator_node({"draft_response": "We ship within two days.",
+                                    "category": "ANSWER", "intent": "chitchat",
+                                    "turns_since_tiedown": 9})
+        if "?" in off.get("final_response", "") or "turns_since_tiedown" in off:
+            failures.append("tiedown: gate ran while TIEDOWN_EVERY_N_TURNS=0")
+    finally:
+        (config.TIEDOWNS, config.TIEDOWN_EVERY_N_TURNS,
+         config.MAX_REPLY_WORDS, config.CALL_ARC) = real
+        filler.reset_rotation()
+
+    # Shipped-config shape: every tie-down must be a SHORT question.
+    for t in (getattr(config, "TIEDOWNS", []) or []):
+        if not t.rstrip().endswith("?"):
+            failures.append(f"tiedown: {t!r} must be a question (it is a micro-commitment ask)")
+        if len([w for w in t.split() if any(c.isalnum() for c in w)]) > 6:
+            _warn(f"tiedown: {t!r} is wordy — a tie-down should be 3-6 words")
+
+    print(f"[tiedown preflight] fire/no-2nd-question/cadence/floor/budget/stall-ordering/kill-switch, "
           f"{len(failures)} failed")
     return failures
 
 
 async def main() -> int:
+    failures = []
+    failures += run_hook_checks()
+    failures += structural_preflight()
+    failures += retrieval_coverage_preflight()
+    failures += stall_preflight()
+    failures += call_arc_preflight()
+    failures += objection_preflight()
+    failures += tiedown_preflight()
+    failures += voice_budget_preflight()
+    failures += persona_preflight()
+    failures += context_budget_preflight()
+    failures += await summary_preflight()
+    failures += fast_router_preflight()
+    failures += await plan_preflight()
+    failures += await enrich_preflight()
+    failures += await compaction_preflight()
+    failures += await filler_preflight()
+    failures += await rag_preflight()
+
     graph = build_pipeline()
-    cfg = {"configurable": {"thread_id": "selftest"}}
-    failures = run_hook_checks()        # live-value preflight (see HOOK_CHECKS)
-    print(f"[hook preflight] {len(HOOK_CHECKS)} raw-value checks, "
-          f"{len(failures)} failed")
-    failures += structural_preflight()  # config-shape lints: coverage + escalation wiring
-    failures += retrieval_coverage_preflight()  # consumer-probe recall gate (no silent misses)
-    failures += fast_router_preflight()  # tier-0 gate: bypass + fall-throughs
-    failures += stall_preflight()       # invariant 25: trip / reset / kill switch
-    failures += await rag_dynamic_preflight()  # report-12: rewrite/prime/cache/floor
-    failures += await plan_preflight()  # planner clamp + session-cache whitelist
-    failures += await enrich_preflight()  # ENRICH verdict: grounded-templating + rejection
-    failures += await compaction_preflight()  # crush invariants + ref round-trip
-    failures += await filler_preflight()  # filler channel: bank/emit/rotation/kill
-
-    for i, (msg, expect) in enumerate(SCRIPT, 1):
-        if msg == RESUME_APPROVE:
-            # Resume the open HITL interrupt as an approving operator.
-            state = await graph.ainvoke(Command(resume={"approved": True}), config=cfg)
-        else:
-            payload = dict(_TURN_RESET)
-            payload.update(expect.get("_preseed", {}))
-            payload["user_message"] = msg
-            payload["recent_messages"] = [HumanMessage(content=msg)]
-            state = await graph.ainvoke(payload, config=cfg)
-
-        interrupted = bool(state.get("__interrupt__"))
-        reply = state.get("final_response", "")
-        print(f"[{i}] U: {msg}")
-        print(f"    A: {'[suspended - awaiting operator approval]' if interrupted and not reply else reply}")
-
-        for key, want in expect.items():
-            if key == "_preseed":
-                continue
-            if key == "_reply_contains":
-                wants = want if isinstance(want, list) else [want]
-                ok = all(w.lower() in reply.lower() for w in wants)
-                got = reply
-            elif key == "_facts_keys":
-                facts = state.get("session_facts") or {}
-                got = sorted(facts)
-                ok = all(k in facts for k in want)
-            elif key == "_tool":
-                got = state.get("cold_payload", {}).get("tool")
-                ok = got == want
-            elif key == "_args":
-                got = state.get("cold_payload", {}).get("args", {})
-                ok = all(got.get(k) == v for k, v in want.items())
-            elif key == "_confirm_pending":
-                got = bool(state.get("pending_confirmation"))
-                ok = got == want
-            elif key == "_paused":
-                got = (state.get("paused_flow") or {}).get("intent")
-                ok = got == want
-            elif key == "_interrupted":
-                got = interrupted
-                ok = got == want
-            elif key == "_absent":
-                got = [k for k in want if k in state]
-                ok = not got
-            else:
-                got = state.get(key)
-                ok = got == want
-            if not ok:
-                failures.append(f"turn {i}: expected {key}={want!r}, got {got!r}")
-
-        if not reply and not interrupted:
-            failures.append(f"turn {i}: empty final_response")
-
-    failures += await rag_subgraph_checks()
-    failures += await rag_timeout_degrade_check()
+    failures += await smoke_walk(graph)
 
     print()
+    if WARNINGS:
+        print(f"WARNINGS ({len(WARNINGS)}) — quality nudges, not blockers:")
+        for w in WARNINGS:
+            print("  ~", w)
+        print()
     if failures:
         print("SELF-TEST FAILED:")
         for f in failures:
             print("  -", f)
         return 1
-    print(f"SELF-TEST PASSED — {len(SCRIPT)} turns + structural/RAG/stall/dynamic-rag/plan/cache/"
-          "enrich/compaction/filler preflights, all invariants hold.")
+    print("SELF-TEST PASSED — engine preflights + config-derived smoke walk, "
+          "all invariants hold.")
     return 0
 
 

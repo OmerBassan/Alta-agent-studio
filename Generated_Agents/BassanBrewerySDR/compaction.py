@@ -1,28 +1,18 @@
 """Deterministic tool-result compaction (crush + retrieve).       [ENGINE]
 
-Large tool results (a search returning 200 rows) cost tokens on EVERY hop
-that sees them: the ENRICH prompt, last_action grounding, and any future
-ANSWER-tier turn that replays them. This module inverts the cost: keep only
-the salient items in-context, offload the full list to an in-process store,
-and let the model (or a Flow) pull the original back ON DEMAND via the
-`retrieve_full_result` tool — you pay retrieval tokens only when they are
-actually needed.
+Large tool results cost tokens on every hop that sees them. This keeps only
+the salient items in-context, offloads the full list to an in-process store,
+and lets the model pull the original back on demand via `retrieve_full_result`.
 
-Patterns adapted from headroom (Apache-2.0, github.com/headroomlabs-ai/headroom)
-— see references/Context_Compression.txt for the full pattern catalog:
-  - CCR (Compress-Cache-Retrieve): salient subset + sentinel marker carrying
-    a retrieval ref + a registered retrieval tool.
-  - Hard preservation invariants: error items, rare status values, and
-    first/last anchors are NEVER dropped, whatever the budget says.
-  - Results that ARE errors are exempt from compaction entirely — the
-    execution validator and failure node need them intact.
-  - Compaction never raises: any internal error returns the input unchanged
-    (a lost saving is safe; a crashed Act node is not).
+CCR (Compress-Cache-Retrieve) patterns adapted from headroom (Apache-2.0,
+github.com/headroomlabs-ai/headroom); full catalog in
+references/Context_Compression.txt. Invariants:
+  - error items, rare status values, and first/last anchors are NEVER dropped;
+  - error results are exempt entirely (the validator/failure node need them);
+  - never raises — any internal error returns the input unchanged.
 
-Everything here is stdlib, deterministic, and zero-model. The store is
-module-level and process-local — the same lifetime as one CLI session, which
-is exactly the scope of the data it holds. It is a cache, not memory: nothing
-in it survives the process, and nothing in it is ever written to disk.
+Stdlib, deterministic, zero-model. The store is process-local (one session's
+lifetime): a cache, never persisted to disk.
 """
 
 from __future__ import annotations

@@ -16,50 +16,160 @@ Register each tool in TOOL_REGISTRY at the bottom.
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import re
+import smtplib
+from email.mime.text import MIMEText
 from typing import Callable, Dict
+
+logger = logging.getLogger(__name__)
+
+# SMTP config lives in the environment, NEVER in source (no hardcoded secrets).
+# A real deployment sets these in .env; with no credentials the tool runs in
+# MOCK mode (no network) so the agent and its selftest run credential-free —
+# mock-first, exactly like every other tool. The live send carries an explicit
+# timeout so a hung mail server returns a typed failure instead of hanging the
+# turn (a blocking socket with no timeout is the classic dead-air trap).
+_SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+_SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+_SMTP_USER = os.getenv("SMTP_USER", "")
+_SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+_SMTP_FROM = os.getenv("SMTP_FROM", "") or _SMTP_USER
+_SMTP_TIMEOUT_S = float(os.getenv("SMTP_TIMEOUT_S", "10"))
+
+# Canonical email pattern — used at the SMTP boundary to pull a clean address
+# out of a raw slot value. Voice STT frequently appends trailing punctuation
+# ("name@site.com?") or surrounding words; sending that verbatim makes Gmail
+# reject the recipient and the whole follow-up silently fails.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+_BRANCH_LABELS = {"downtown": "Downtown (12 River St)", "mall": "Mall (Westfield, level 2)",
+                  "airport": "Airport (Terminal B)"}
 
 
 def _stable_hash(*parts: str) -> int:
     return int(hashlib.md5(":".join(p or "" for p in parts).encode("utf-8")).hexdigest(), 16)
 
 
-def submit_lead_profile(monthly_volume: str = "", drink_mix: str = "", current_supplier: str = "",
-                        contract_renewal: str = "", buyer_character: str = "", **_) -> Dict[str, object]:
-    """Log the qualified lead profile and route it to the sales team (a single
-    write covers both — the CRM/inbox notification IS the write). Real impl ->
-    CRM write + sales-inbox email.
+def lookup_order(order_id: str = "", **_) -> Dict[str, object]:
+    """Mock order-tracking lookup. Deterministic per order_id so tests are
+    stable. Real impl -> orders API.
 
-    A monthly_volume whose digits are all 9s (4+ digits) simulates a BACKEND
-    OUTAGE: the tool returns an "error" result, which the execution validator
-    routes to the failure node (graceful degradation, testable without a live
-    CRM)."""
-    digits = "".join(c for c in (monthly_volume or "") if c.isdigit())
-    if digits and set(digits) == {"9"} and len(digits) >= 4:
-        return {"tool": "submit_lead_profile",
-                "error": "lead system timeout (simulated)",
-                "summary": "The lead system did not respond."}
-    ref = f"LD-{_stable_hash('lead', current_supplier, monthly_volume, drink_mix) % 100000:05d}"
-    summary = (f"Logged: about {monthly_volume} guests a month, mostly {drink_mix}, currently through "
-               f"{current_supplier or 'their current supplier'}, looking at {buyer_character}. "
-               f"Sent to our sales team (reference {ref}).")
-    return {"tool": "submit_lead_profile", "lead_reference": ref, "monthly_volume": monthly_volume,
-            "drink_mix": drink_mix, "buyer_character": buyer_character, "summary": summary}
+    Order ids whose digits are all 9s simulate a BACKEND OUTAGE: the tool
+    returns an "error" result, which the execution validator routes to the
+    failure node (graceful degradation is testable without a live API)."""
+    digits = "".join(c for c in (order_id or "") if c.isdigit())
+    if digits and set(digits) == {"9"}:
+        return {"tool": "lookup_order", "order_id": order_id,
+                "error": "orders backend timeout (simulated)",
+                "summary": "The order system did not respond."}
+    h = _stable_hash("order", (order_id or "").upper())
+    status = ("shipped", "processing", "ready for pickup")[h % 3]
+    eta_days = (h % 4) + 1
+    summary = (f"Order {order_id} is {status}"
+               + (f" and should arrive in about {eta_days} days" if status == "shipped" else "")
+               + ".")
+    return {"tool": "lookup_order", "order_id": order_id, "status": status,
+            "eta_days": eta_days if status == "shipped" else None, "summary": summary}
 
 
-def flag_for_team(request_details: str = "", **_) -> Dict[str, object]:
-    """Log a request the agent can't resolve itself (discount ask, delivery
-    complaint, custom recipe, technical question) for the sales team to follow
-    up on directly. Real impl -> CRM ticket + sales-inbox email."""
-    ref = f"FR-{_stable_hash('flag', request_details) % 100000:05d}"
-    summary = f"Got it — logged for our sales team to follow up on directly (reference {ref})."
-    return {"tool": "flag_for_team", "flag_reference": ref, "request_details": request_details,
-            "summary": summary}
+def book_appointment(branch: str = "", slot_iso: str = "", **_) -> Dict[str, object]:
+    """Mock appointment booking. Real impl -> calendar/CRM API."""
+    ok = bool(branch and slot_iso)
+    confirmation = f"FIT-{_stable_hash('fit', branch, slot_iso) % 100000:05d}" if ok else ""
+    label = _BRANCH_LABELS.get(branch, branch or "the branch")
+    summary = (f"Your fitting at {label} is booked for {slot_iso} (confirmation {confirmation})."
+               if ok else "The booking could not be completed.")
+    return {"tool": "book_appointment", "branch": branch, "slot_iso": slot_iso,
+            "booked": ok, "confirmation": confirmation, "summary": summary}
+
+
+def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
+    """Mock refund issuance. HIGH-STAKES: the flow is Flow(hitl=True), so this
+    only ever runs after an OPERATOR approved the payload at the interrupt
+    gate. Real impl -> payments API. Its summary is fully formatted, so the
+    flow sets enrich=False and the SLM hop is bypassed."""
+    ok = bool(order_id)
+    ref = f"RF-{_stable_hash('refund', order_id) % 100000:05d}" if ok else ""
+    summary = (f"Your refund for order {order_id} has been approved and submitted (reference {ref})."
+               if ok else "The refund could not be submitted.")
+    return {"tool": "issue_refund", "order_id": order_id, "refunded": ok,
+            "reference": ref, "summary": summary}
+
+
+def send_email(email: str = "", subject: str = "Follow-up from our call", body: str = "", **_) -> Dict[str, object]:
+    """Permanently available tool to send real emails to the lead.
+    DO NOT REMOVE OR RENAME THIS TOOL. IT IS EDIT-PROOF.
+
+    Boundary sanitation: the recipient is extracted with _EMAIL_RE, so a raw
+    slot value carrying trailing punctuation or stray words ("name@site.com?")
+    still yields a deliverable address. A value with no valid address fails
+    gracefully here instead of throwing at the SMTP layer.
+
+    Credentials come from the environment (SMTP_USER/SMTP_PASSWORD/…), never
+    from source. With no credentials set the tool runs in MOCK mode — it does
+    NOT touch the network and reports a mock send — so the agent and its
+    selftest run credential-free. The live SMTP call carries an explicit
+    timeout; a hung server returns a typed failure, never dead air."""
+    m = _EMAIL_RE.search(email or "")
+    clean = m.group(0) if m else ""
+    if not (clean and body):
+        return {"tool": "send_email", "email": clean or email, "sent": False,
+                "summary": "I could not send the email because the address or message was missing."}
+
+    if not (_SMTP_USER and _SMTP_PASSWORD):
+        # MOCK send: no credentials configured -> never touch the network.
+        return {"tool": "send_email", "email": clean, "sent": True, "mock": True,
+                "summary": f"I have sent an email with the details to {clean}."}
+
+    try:
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = _SMTP_FROM
+        msg['To'] = clean
+        with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT, timeout=_SMTP_TIMEOUT_S) as server:
+            server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.send_message(msg)
+        return {"tool": "send_email", "email": clean, "sent": True,
+                "summary": f"I have sent an email with the details to {clean}."}
+    except (smtplib.SMTPException, OSError) as exc:
+        logger.warning("send_email to %s failed: %s", clean, exc)
+        return {"tool": "send_email", "email": clean, "sent": False,
+                "summary": "I tried to send the email, but a system error occurred."}
+
+
+def capture_lead_profile(buyer_character: str = "", drink_mix: str = "", renewal: str = "",
+                         monthly_volume: str = "", **_) -> Dict[str, object]:
+    """Records the qualification slots gathered during the discovery/qualify
+    scenes. No external side effect (no CRM was volunteered for this build) —
+    this just marks the lead_profile flow complete so the director advances to
+    close, and the values land in state.call_summary via SUMMARY_TEMPLATE."""
+    summary = (f"Got it — noted as a {drink_mix} venue, moving about {monthly_volume} kegs "
+               f"a month, renewal timing {renewal}.")
+    return {"tool": "capture_lead_profile", "buyer_character": buyer_character,
+            "drink_mix": drink_mix, "renewal": renewal, "monthly_volume": monthly_volume,
+            "captured": True, "summary": summary}
+
+
+def book_sales_call(slot_iso: str = "", email: str = "", **_) -> Dict[str, object]:
+    """Mock account-manager scheduling. Real impl -> calendar/CRM API."""
+    ok = bool(slot_iso)
+    confirmation = f"BB-{_stable_hash('bb', slot_iso, email) % 100000:05d}" if ok else ""
+    summary = (f"Your call with our account manager is booked for {slot_iso} (confirmation {confirmation})."
+               if ok else "The booking could not be completed.")
+    return {"tool": "book_sales_call", "slot_iso": slot_iso, "email": email,
+            "booked": ok, "confirmation": confirmation, "summary": summary}
 
 
 # name -> callable; the Think step's cold payload references these names.
 TOOL_REGISTRY: Dict[str, Callable[..., Dict[str, object]]] = {
-    "submit_lead_profile": submit_lead_profile,
-    "flag_for_team": flag_for_team,
+    "lookup_order": lookup_order,
+    "book_appointment": book_appointment,
+    "issue_refund": issue_refund,
+    "send_email": send_email,
+    "capture_lead_profile": capture_lead_profile,
+    "book_sales_call": book_sales_call,
 }
 
 # Compaction retrieval (engine, not domain): pages back the full items behind

@@ -1,23 +1,16 @@
-# Tom — Bassan Brewery Sales Agent (same-turn multi-model brain, v3)
+# Same-Turn Multi-Model CLI Agent (boilerplate v3)
 
-Tom is an outbound sales agent for Bassan Brewery, a soft-drinks supplier for
-restaurants and event venues. He calls warm leads (people who already left
-their contact details), qualifies their monthly drink volume, product mix,
-current supplier, and buying style, and routes qualified leads to the sales
-team — he never quotes a final price or discount on the call itself.
+A config-driven English CLI agent skeleton. It answers **within the same turn**
+a question is asked, using a **multi-model chain**: hierarchical intent
+detection → LLM answer/reasoning (with an Agentic-RAG subgraph for retrieval
+questions) → HITL operator gate on high-stakes flows → deterministic tool →
+execution validator → SLM enrichment (or a deterministic bypass) → response
+validator. Runs with **zero API keys** in deterministic mock mode, or live
+against any OpenAI-compatible endpoint (Mistral, OpenAI, Ollama, …).
 
-The brain answers **within the same turn** a question is asked, using a
-**multi-model chain**: hierarchical intent detection → LLM answer/reasoning
-(with an Agentic-RAG subgraph for ingredients/delivery/damage questions) →
-deterministic tool → execution validator → SLM enrichment (or a deterministic
-bypass) → response validator. Runs with **zero API keys** in deterministic
-mock mode, or live against any OpenAI-compatible endpoint (Mistral, OpenAI,
-Ollama, …).
-
-This project was generated from the `voice-agent-architect` skill's boilerplate
-by customizing `config.py`, `tools.py`, and `selftest.py` — the generic engine
-files (`graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`, `rag_subgraph.py`,
-`compaction.py`, `filler.py`) are copied verbatim and untouched.
+Ships with a demo domain ("Acme Outdoors") so it runs out of the box; the
+`cli-agent-architect` skill customizes it per client by editing `config.py`,
+`tools.py`, and `selftest.py` — the generic engine files rarely change.
 
 ## Quick start
 
