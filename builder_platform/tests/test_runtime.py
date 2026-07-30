@@ -274,7 +274,7 @@ def test_no_record_flush_mid_call(tmp_path, monkeypatch):
 @pytest.mark.skipif(not os.path.isdir(runtime.DEFAULT_AGENT_DIR),
                     reason="generated agent project not present")
 def test_real_agent_loads_and_answers_in_mock_mode(monkeypatch):
-    """Integration: load the actual NorthwindSDR project (zero-key MOCK mode)
+    """Integration: load the real example agent project (zero-key MOCK mode)
     and run one real turn through the compiled graph."""
     monkeypatch.setenv("OPENAI_API_KEY", "")   # force MOCK before agent import
     monkeypatch.setenv("OPENAI_BASE_URL", "")

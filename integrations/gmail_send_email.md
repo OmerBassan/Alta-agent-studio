@@ -1,10 +1,10 @@
 # Integration: Gmail — Send Email to a Lead
 
 <!--
-  Lifted from the proven implementation in
-  Generated_CLI_Agents/NorthwindSDRConcierge_20260712_224830 (tools.py
-  send_followup + gmail_auth.py), which passed selftest and ran the live
-  Gmail path. Copy-adapt per client; never import across projects.
+  Lifted from a proven agent build (tools.py send_followup + gmail_auth.py)
+  that passed selftest and ran the live Gmail path. That build was a local
+  flight-test artifact and is no longer in the tree; the recipe below is the
+  surviving record of it. Copy-adapt per client; never import across projects.
 -->
 
 ## Metadata
@@ -14,8 +14,8 @@
 - **auth:** OAuth 2.0 user consent, scope `https://www.googleapis.com/auth/gmail.send` — **client owns this; recipe ships none**
 - **entity IDs:** Gmail message id (opaque string, returned as `message_id`)
 - **stakes:** `confirm=True` — an email leaves the building in the lead's name; read back the address before sending
-- **wiring last validated:** `2026-07-12` (selftest PASSED against the thin mock, NorthwindSDR build)
-- **live-validation:** validated against a real Gmail account `2026-07-12` (NorthwindSDR)
+- **wiring last validated:** `2026-07-12` (selftest PASSED against the thin mock)
+- **live-validation:** validated against a real Gmail account `2026-07-12`; the agent build used for that test is no longer in the tree, so re-validate before relying on it
 
 ## What it gives you
 One flow/tool: `send_email` — composes a domain-tailored email (subject + body

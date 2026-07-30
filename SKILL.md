@@ -85,5 +85,5 @@ never read at design time — the engine already enforces it.
 ## Output flow
 
 Step 1 discovery (short wizard) → Step 2 playbook → client approval → Step 3+4
-configure, instantiate into `Generated_Agents/[Name]_[Timestamp]/` (never into
-`Generated_CLI_Agents/` — frozen legacy), selftest PASS, hand over.
+configure, instantiate into `Generated_Agents/[Name]_[Timestamp]/`, selftest
+PASS, hand over.

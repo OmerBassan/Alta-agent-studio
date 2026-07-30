@@ -19,15 +19,13 @@ The deliverable is the **builder platform**, not any single agent. Never sink ti
 
 | Path | Role | Write policy |
 |---|---|---|
-| `SKILL.md` | The builder's brain, SLIM core: `voice-agent-architect` (indexes `skill_steps/`; read-schedule table inside). Full pre-split text preserved in `SKILL.md.orig` | Edit deliberately; it steers all generations |
+| `SKILL.md` | The builder's brain, SLIM core: `voice-agent-architect` (indexes `skill_steps/`; read-schedule table inside) | Edit deliberately; it steers all generations |
 | `skill_steps/` | Per-phase skill files (step1_discovery → step4_build), each read EXACTLY ONCE at its moment — the token-diet split of the old monolith | Edit deliberately; budgets are pytest-enforced |
 | `boilerplate/` | Tested engine + domain-surface template, copied wholesale per agent | Engine improvements ONLY here, never per agent |
 | `references/` | Architecture theory the skill consults | Read-only |
 | `integrations/` | Validated copy-adapt recipes (calendar, CRM…) | Read-write catalog; recipes copy-adapted, never imported |
 | `builder_platform/` | Vapi adapter (`vapi_adapter.py`, OpenAI-compatible SSE), agent runtime (`runtime.py`), sanitizer, tests; builder/app/UI land here | Product code |
-| `Generated_CLI_Agents/NorthwindSDRConcierge_*/` | **Frozen test artifact** from Day 1 flight tests. NOT the product — never optimize or regenerate into it | Frozen |
-| `Generated_Agents/` | Output directory for new skill generations | Created by the skill |
-| `TASKS.MD` | Current task order (Hebrew + English) | — |
+| `Generated_Agents/` | Output directory for skill generations; holds the checked-in example agent | Created by the skill |
 
 ## Architecture (proven on a real call, 2026-07-15)
 

@@ -73,9 +73,17 @@ def test_step_files_are_readable_by_the_builder(tmp_path):
 
 
 def test_platform_env_still_denied(tmp_path):
+    """The platform's own secrets stay outside the builder's read surface.
+
+    Names the real package directory: read_denial never touches the filesystem,
+    so pointing at a path that does not exist would pass for the wrong reason.
+    """
     ws = tmp_path / "ws"
     ws.mkdir()
-    assert read_denial(str(REPO_ROOT / "platform" / ".env"), ws) is not None
+    platform_dir = REPO_ROOT / "builder_platform"
+    assert platform_dir.is_dir(), "fixture drifted: builder_platform/ not found"
+    assert read_denial(str(platform_dir / ".env"), ws) is not None
+    assert read_denial(str(REPO_ROOT / ".env"), ws) is not None
 
 
 def test_platform_brief_is_small_and_bootstraps_the_split():

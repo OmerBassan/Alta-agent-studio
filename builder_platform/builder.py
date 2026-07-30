@@ -639,6 +639,18 @@ class BuilderSession:
                     elif isinstance(block, ToolUseBlock):
                         yield {"type": "tool", "name": block.name}
             elif isinstance(message, ResultMessage):
+                # max_turns is a PER-MESSAGE bound, so exhausting it ends the
+                # turn cleanly — no error, no text, the stream just closes and
+                # the UI's typing dots stop. A build that ran out mid-way then
+                # looks finished when it is not. Say so, and say the fix: the
+                # budget resets on the next message, so "continue" resumes with
+                # full context rather than restarting the build.
+                if getattr(message, "subtype", "") == "error_max_turns":
+                    yield {"type": "text", "text": (
+                        "\n\nI hit my per-message step limit before finishing this build "
+                        "-- the agent is only partly written and its selftest has not run "
+                        "yet. Send \"continue\" and I'll pick up exactly where I left off."
+                    )}
                 yield {
                     "type": "result",
                     "is_error": bool(getattr(message, "is_error", False)),

@@ -79,7 +79,7 @@ import prompts
 import tools
 from llm_client import llm_client, INTENT_MODEL, ANSWER_MODEL, ENRICH_MODEL
 from rag_subgraph import rag_subgraph
-from schemas import EnrichVerdict, IntentResult, PlanResult, PlanStep, ThinkDecision
+from schemas import AgentState, EnrichVerdict, IntentResult, PlanResult, PlanStep, ThinkDecision
 
 logger = logging.getLogger(__name__)
 
@@ -1625,7 +1625,29 @@ def _tiedown(text: str, state, director_moved: bool) -> str | None:
     return candidate
 
 
-def validator_node(state) -> dict:
+def validator_node(state: AgentState) -> dict:
+    """The only door to the user: every reply leaves the graph through here.
+
+    Five deterministic gates run in a load-bearing order, all zero-model:
+
+      1. objection gate  -- records push-back and, on the call's first one,
+                            claims this turn's question slot with the ISOLATE.
+                            FIRST because its outcome decides whether the
+                            director may speak an agenda move at all.
+      2. director        -- advances the CALL_ARC cursor and appends the next
+                            proactive move while the agent still has the floor.
+      3. summary         -- folds this turn's structured state into the lead
+                            record (config.SUMMARY_TEMPLATE).
+      4. stall detector  -- escalates to STALL_TEXT when a reply repeats
+                            STALL_THRESHOLD turns in a row.
+      5. tie-down        -- appends a rotating tie-down, dropped if it would
+                            push the reply past config.MAX_REPLY_WORDS.
+
+    Every gate is a no-op on an inbound agent (empty CALL_ARC / OBJECTION_INTENTS
+    / TIEDOWNS), so this node adds nothing to their latency or token budget.
+
+    Returns the partial state update -- never mutates ``state`` in place.
+    """
     # Objection gate (config.OBJECTION_INTENTS): record the push-back and, on the
     # first one of the call, take this turn's question slot with the ISOLATE
     # question. Runs BEFORE the director because its outcome decides whether the

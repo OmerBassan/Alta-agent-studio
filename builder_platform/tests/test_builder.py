@@ -61,14 +61,28 @@ def test_path_traversal_out_of_project_denied(tmp_path):
 def test_read_allowlist(tmp_path):
     ws = tmp_path / "session1"
     ws.mkdir()
-    assert read_denial(str(REPO_ROOT / "references" / "Same_Turn_Pipeline.txt"), ws) is None
-    assert read_denial(str(REPO_ROOT / "boilerplate" / "config.py"), ws) is None
-    assert read_denial(str(REPO_ROOT / "integrations" / "README.md"), ws) is None
-    assert read_denial(str(REPO_ROOT / "SKILL.md"), ws) is None
+    # read_denial is pure path arithmetic and never stats the filesystem, so an
+    # assertion against a path that does not exist passes for the wrong reason.
+    # Every ALLOW below therefore names a file that is really on disk (asserted
+    # first), and every DENY names a surface that really exists to be protected.
+    allowed = [
+        REPO_ROOT / "references" / "engine_theory" / "Same_Turn_Pipeline.txt",
+        REPO_ROOT / "boilerplate" / "config.py",
+        REPO_ROOT / "integrations" / "README.md",
+        REPO_ROOT / "SKILL.md",
+    ]
+    for real in allowed:
+        assert real.exists(), f"fixture drifted: {real} no longer exists"
+        assert read_denial(str(real), ws) is None
     assert read_denial(str(ws / "AgentX" / "config.py"), ws) is None
-    # secret-bearing / out-of-bounds areas
-    assert read_denial(str(REPO_ROOT / "platform" / ".env"), ws)
-    assert read_denial(str(REPO_ROOT / "Generated_CLI_Agents"), ws)
+
+    # secret-bearing / out-of-bounds areas. The platform package holds the Vapi
+    # and Anthropic credentials, so its .env is the one file the builder must
+    # never read -- name it by its real package directory, not a stale guess.
+    platform_env = REPO_ROOT / "builder_platform" / ".env"
+    assert read_denial(str(platform_env), ws)
+    assert read_denial(str(REPO_ROOT / "builder_platform" / "vapi_control.py"), ws)
+    assert read_denial(str(REPO_ROOT / ".env"), ws)
     assert read_denial(str(REPO_ROOT.parent), ws)
     assert read_denial("", ws)  # Glob/Grep without an explicit path
 

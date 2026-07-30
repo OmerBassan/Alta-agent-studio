@@ -1,7 +1,6 @@
 """
 Alta Builder Platform -- Storage Layer Tests
 Collected by the suite:  python -m pytest builder_platform/tests/
-(standalone runner also works:  python builder_platform/tests/test_storage.py)
 Uses :memory: SQLite -- no files created, no cleanup needed.
 """
 from __future__ import annotations
@@ -21,7 +20,6 @@ def _fresh_db() -> StorageManager:
 def test_init_db_idempotent():
     db = _fresh_db()
     db.init_db()
-    print("  [PASS] init_db idempotent")
 
 
 def test_create_session():
@@ -29,7 +27,6 @@ def test_create_session():
     s = db.create_session("web_abc123")
     assert s["session_id"] == "web_abc123"
     assert s["active"] == 1
-    print("  [PASS] create_session")
 
 
 def test_create_session_idempotent():
@@ -38,7 +35,6 @@ def test_create_session_idempotent():
     s2 = db.create_session("web_abc123")
     assert s1["session_id"] == s2["session_id"]
     assert s2["last_active"] >= s1["last_active"]
-    print("  [PASS] create_session idempotent")
 
 
 def test_get_session():
@@ -46,7 +42,6 @@ def test_get_session():
     assert db.get_session("nonexistent") is None
     db.create_session("web_xyz")
     assert db.get_session("web_xyz")["session_id"] == "web_xyz"
-    print("  [PASS] get_session")
 
 
 def test_close_session():
@@ -55,7 +50,6 @@ def test_close_session():
     assert db.get_session("web_close")["active"] == 1
     db.close_session("web_close")
     assert db.get_session("web_close")["active"] == 0
-    print("  [PASS] close_session")
 
 
 def test_register_and_get_agent():
@@ -66,7 +60,6 @@ def test_register_and_get_agent():
     agent = db.get_agent(aid)
     assert agent["agent_name"] == "TestBot"
     assert agent["selftest_status"] == "pending"
-    print("  [PASS] register_and_get_agent")
 
 
 def test_update_selftest():
@@ -80,7 +73,6 @@ def test_update_selftest():
         assert False, "Should have raised"
     except ValueError:
         pass
-    print("  [PASS] update_selftest")
 
 
 def test_latest_agent():
@@ -90,7 +82,6 @@ def test_latest_agent():
     db.register_agent("web_lat", "First", "/a", None)
     db.register_agent("web_lat", "Second", "/b", None)
     assert db.latest_agent("web_lat")["agent_name"] == "Second"
-    print("  [PASS] latest_agent")
 
 
 def test_list_agents_newest_first():
@@ -101,27 +92,3 @@ def test_list_agents_newest_first():
     agents = db.list_agents("web_list")
     assert len(agents) == 2
     assert agents[0]["agent_name"] == "B"
-    print("  [PASS] list_agents newest first")
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = failed = 0
-    print(f"\n{'='*50}")
-    print(f"  Alta Storage -- {len(tests)} tests")
-    print(f"{'='*50}\n")
-    for t in tests:
-        try:
-            t()
-            passed += 1
-        except Exception as exc:
-            failed += 1
-            print(f"  [FAIL] {t.__name__}: {exc}")
-    print(f"\n{'='*50}")
-    print(f"  {passed} passed, {failed} failed" if failed else f"  ALL {passed} PASSED")
-    print(f"{'='*50}\n")
-    return 0 if not failed else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

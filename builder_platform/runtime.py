@@ -1,10 +1,10 @@
-"""Runtime brain adapter — request parsing foundation (Day 1 PM, step 1).
+"""Runtime brain adapter — Vapi turn parsing and graph streaming.
 
 Turns a raw Vapi custom-LLM POST body into a normalized ``VapiTurn`` ready to
-inject into a LangGraph invocation. The graph wiring (loading the generated
-NorthwindSDR project + filler->SSE streaming) is the next step and lives below
-the parsing layer; this file currently establishes the confirmed-correct
-extraction that everything else builds on.
+inject into a LangGraph invocation. The parsing layer below establishes the
+confirmed-correct extraction that everything else builds on; the graph wiring
+(loading a generated agent project + filler->SSE streaming) sits on top of it
+in ``AgentRuntime``.
 
 Payload shape — CONFIRMED from real calls (builder_platform/vapi_raw_capture.jsonl and
 the adapter stdout), not from spec:
@@ -183,9 +183,12 @@ from sanitizer import sanitize_text, sentence_chunks
 
 _END = object()  # queue sentinel: the turn is over, nothing more will arrive
 
+# Fallback when AGENT_DIR is unset. Points at the checked-in example agent so a
+# fresh clone resolves to a project that actually exists; the platform normally
+# sets AGENT_DIR explicitly to the freshly built agent.
 DEFAULT_AGENT_DIR = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
-    "Generated_CLI_Agents", "NorthwindSDRConcierge_20260712_224830",
+    "Generated_Agents", "BassanBrewerySDR",
 ))
 
 APOLOGY = ("Sorry, I'm having a technical hiccup on my end. "

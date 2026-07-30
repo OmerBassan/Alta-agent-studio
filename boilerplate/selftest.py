@@ -47,6 +47,7 @@ from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 import config  # noqa: E402
+import prompts  # noqa: E402
 from graph import build_pipeline, TURN_RESET as _TURN_RESET  # noqa: E402
 
 RESUME_APPROVE = "__RESUME_APPROVE__"
@@ -801,6 +802,54 @@ def voice_budget_preflight() -> list:
     return failures
 
 
+def persona_preflight() -> list:
+    """An OUTBOUND agent must not ship the boilerplate's INBOUND help-desk voice.
+
+    prompts.py's module docstring already calls leaving its generic wording
+    untouched "a build defect, not a shortcut" — but that was enforced only as
+    prose aimed at the builder, so an unedited copy shipped anyway and the agent
+    forgot it had placed the call. This makes it a gate.
+
+    A non-empty CALL_ARC is the outbound signal: the director only leads a call
+    the agent initiated. When it is set, the two prompts that carry the persona
+    must no longer say "support assistant" (reactive framing) or "steer to what
+    you can help with" (waits for the lead's agenda). Inbound agents keep an
+    empty arc, so this preflight is a no-op for them and the boilerplate's own
+    selftest stays green.
+
+    Asserts against the RENDERED prompt, not the source text, so it holds however
+    the wording was produced (f-string, constant, or config-driven persona).
+    """
+    failures = []
+    arc = getattr(config, "CALL_ARC", ()) or ()
+    if not arc:
+        print("[persona preflight] inbound (CALL_ARC empty) — skipped")
+        return failures
+
+    # Phrases that encode "they called us, and I wait for their agenda".
+    inbound_markers = (
+        "support assistant",
+        "steer to what you can help with",
+    )
+    rendered = {
+        "build_knowledge_system": prompts.build_knowledge_system(""),
+        "build_chitchat_system": prompts.build_chitchat_system(),
+    }
+    for fn_name, text in rendered.items():
+        low = text.lower()
+        for marker in inbound_markers:
+            if marker in low:
+                failures.append(
+                    f"{fn_name} still carries the inbound default {marker!r} while "
+                    f"CALL_ARC defines {len(arc)} outbound stage(s) — an outbound "
+                    f"agent must state that IT placed the call (see prompts.py docstring)"
+                )
+
+    print(f"[persona preflight] outbound voice on {len(rendered)} persona prompts, "
+          f"{len(failures)} failed")
+    return failures
+
+
 def context_budget_preflight() -> list:
     """Context payload budgets — the TTFT levers. The raw history window is
     capped at config.HISTORY_TURNS (older detail lives in session_facts /
@@ -1136,6 +1185,7 @@ async def main() -> int:
     failures += objection_preflight()
     failures += tiedown_preflight()
     failures += voice_budget_preflight()
+    failures += persona_preflight()
     failures += context_budget_preflight()
     failures += await summary_preflight()
     failures += fast_router_preflight()
