@@ -194,6 +194,36 @@ class AgentState(TypedDict, total=False):
     call_stage: str
     stage_nudged: str
 
+    # Objection architecture (config.OBJECTION_INTENTS): the ordered ledger of
+    # distinct objections this lead raised. ONE field serves both jobs — the
+    # isolate one-shot guard AND the SDR deliverable — so the A-I-P layer costs
+    # a single state field (anti-sprawl).
+    #   WRITER    — nodes._objection_gate (zero-model, head of validator_node);
+    #               appends the STRUCTURED intent name, never parsed prose.
+    #   READER    — the gate itself (empty ⇒ this is the first objection ⇒ the
+    #               isolate question fires), _director (a repeat objection
+    #               bypasses the stage one-shot so the pivot always happens),
+    #               and the "objections" SUMMARY_TEMPLATE source.
+    #   LIFECYCLE — persisted by the checkpointer, NOT in TURN_RESET (an
+    #               objection ledger is by definition cross-turn, like
+    #               stall_count); append-only within a call; reset on restart.
+    #               Untouched when OBJECTION_INTENTS is empty.
+    objections_raised: list
+
+    # Micro-commitments (config.TIEDOWNS): consecutive agent turns that ended in
+    # a STATEMENT since the last landed agreement. The pacing counter behind the
+    # tie-down gate.
+    #   WRITER    — nodes.validator_node's tie-down block (zero-model): reset to
+    #               0 when a tie-down is emitted or when the lead's own message
+    #               matches _AFFIRM_RE outside a confirmation gate (a
+    #               micro-commitment landed on its own — never nag a lead who is
+    #               already agreeing); otherwise incremented.
+    #   READER    — nodes._tiedown (fires at >= config.TIEDOWN_EVERY_N_TURNS).
+    #   LIFECYCLE — persisted by the checkpointer, NOT in TURN_RESET (pacing is
+    #               cross-turn); reset on restart. NEVER written at all when
+    #               TIEDOWN_EVERY_N_TURNS is 0, so inbound agents are unchanged.
+    turns_since_tiedown: int
+
     # Lead record (config.SUMMARY_TEMPLATE): the structured, cross-turn record of
     # this call — both durable memory and the SDR's deliverable.
     #   WRITER  — nodes._update_summary (zero-model, at the head of validator_node

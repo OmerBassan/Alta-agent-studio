@@ -44,7 +44,14 @@ Roles (each a model tier via llm_client):
                                  final_response; carries the deterministic
                                  STALL gate (invariant 25): the N-th
                                  consecutive identical reply is swapped for
-                                 the clarify-then-escalate STALL_TEXT
+                                 the clarify-then-escalate STALL_TEXT.
+                                 Also hosts three zero-model sales gates, in
+                                 this ORDER (each is in-node, never a graph
+                                 node): objection A-I-P -> director agenda move
+                                 -> scrub -> stall fingerprint -> tie-down.
+                                 The tie-down is appended LAST, after the
+                                 fingerprint, so its rotating text can never
+                                 mask a repeated reply from the stall gate.
 
 Every node returns a state-update dict only; routing lives on edges (graph.py).
 In MOCK mode each model-backed node uses a deterministic fallback so the whole
@@ -524,6 +531,38 @@ async def agentic_retrieval_node(state) -> dict:
     return {"retrieved_context": context}
 
 
+def _word_count(text: str) -> int:
+    """Spoken-word count for the reply budget. Punctuation-only tokens (a bare
+    em dash) are not words — matches selftest's voice-budget counter."""
+    return len([w for w in (text or "").split() if any(c.isalnum() for c in w)])
+
+
+def _is_objection(state) -> bool:
+    """An objection turn, decided from the STRUCTURED intent only (never prose,
+    never the raw message). False for every agent with no OBJECTION_INTENTS."""
+    intents = tuple(getattr(config, "OBJECTION_INTENTS", ()) or ())
+    return bool(intents) and state.get("intent", "") in intents
+
+
+def _objection_ctx(state) -> str:
+    """ACKNOWLEDGE (step 1 of A-I-P): prompt shaping for an objection turn, zero
+    extra model calls. Returned as the knowledge prompt's TAIL, replacing the
+    help-desk 'offer further help' line rather than stacking on it.
+
+    It forbids the model from asking a question, because the turn's ONE question
+    is owned by the deterministic layer that runs after it — the isolate question
+    (first objection) or the director's pivot (every later one). A model-authored
+    question here would collide with that and ship two questions in one breath.
+    Empty for non-objection turns, so ordinary knowledge prompts are unchanged."""
+    if not _is_objection(state):
+        return ""
+    return (f"The lead just pushed back — this is an OBJECTION, not a question. Validate it "
+            f"first in under six words ('Totally fair', 'I hear you'), then answer it in ONE "
+            f"short sentence using ONLY the facts above. Stay under {config.MAX_REPLY_WORDS} "
+            "words total and do NOT ask a question or add a next step — your next move is "
+            "appended for you. Never argue with the lead or repeat a rebuttal they already heard.")
+
+
 async def knowledge_node(state) -> dict:
     intent = state.get("intent", "")
     retrieval = intent in config.RETRIEVAL_INTENTS
@@ -553,7 +592,7 @@ async def knowledge_node(state) -> dict:
     text = await _answer_or_mock(
         state,
         prompts.build_knowledge_system(_grounding_ctx(state), retrieved, _objective_ctx(state),
-                                       _summary_ctx(state)),
+                                       _summary_ctx(state), _objection_ctx(state)),
         mock, anchor=_recency_anchor(state))
     return {"draft_response": text + _resume_suffix(state), "needs_enrichment": False}
 
@@ -571,7 +610,8 @@ async def system_node(state) -> dict:
         return _clear_plan(_clear_pending({"draft_response": config.RESTART_TEXT,
                                            "needs_enrichment": False, "last_action": {},
                                            "session_facts": {}, "paused_flow": {},
-                                           "stall_count": 0, "last_reply_fingerprint": ""}))
+                                           "stall_count": 0, "last_reply_fingerprint": "",
+                                           "objections_raised": [], "turns_since_tiedown": 0}))
     if intent == "human_handoff":
         logger.info("escalation: human handoff requested")
         return _clear_plan(_clear_pending({"draft_response": config.HANDOFF_TEXT,
@@ -1277,12 +1317,58 @@ def _append_move(draft: str, move: str) -> str:
     return f"{draft} {move}" if draft else move
 
 
-def _director(state) -> dict:
+def _objection_gate(state) -> dict:
+    """ISOLATE (step 2 of A-I-P), zero model. Records the objection in the
+    cross-turn ledger and, on the FIRST objection of the call only, emits the
+    isolate question under the "isolate" key (the caller pops it; it is not a
+    state field).
+
+    Two deliberately separate guards:
+      * the LEDGER is written on every objection turn — it is the SDR
+        deliverable, and an objection raised mid-flow still counts;
+      * the QUESTION additionally requires the lead NOT to hold the floor,
+        because mid slot-fill the reply already ends in the flow's own question
+        (_resume_suffix) and this engine ships ONE question per turn.
+    Returns {} for non-objection turns and for agents with no OBJECTION_INTENTS."""
+    if not _is_objection(state):
+        return {}
+    intent = state.get("intent", "")
+    raised = list(state.get("objections_raised") or [])
+    first = not raised
+    if intent not in raised:
+        raised.append(intent)
+    updates = {"objections_raised": raised}
+
+    template = getattr(config, "OBJECTION_ISOLATE_TEMPLATE", "") or ""
+    topic = (getattr(config, "OBJECTION_TOPICS", {}) or {}).get(intent, "")
+    if first and template and topic and not _lead_has_floor(state):
+        try:
+            updates["isolate"] = template.format(topic=topic)
+        except (KeyError, IndexError):
+            # A malformed template must never break a live call; the objection
+            # still acknowledges and pivots. selftest's objection_preflight
+            # fails the build on this so it is caught before shipping.
+            logger.warning("OBJECTION_ISOLATE_TEMPLATE is malformed (%r) — isolation skipped",
+                           template)
+    return updates
+
+
+def _director(state, objection: bool = False, suppress_move: bool = False) -> dict:
     """Zero-model agenda gate. Advances call_stage when the current stage's
     structured exit is met, then makes ONE proactive move for the (possibly new)
     stage — enter its flow, speak its scripted line, or steer back with its
     nudge — guarded one-shot per stage. Returns a state-update dict (may carry a
-    modified draft_response); {} when it stands down."""
+    modified draft_response); {} when it stands down.
+
+    A-I-P integration (both flags default False, so non-objection turns behave
+    exactly as before):
+      objection=True     the lead pushed back. The one-shot guard is BYPASSED so
+                         the agent re-anchors on the arc EVERY time — the old
+                         behaviour let the second objection in a stage end on the
+                         lead's terms, handing back the floor mid-qualification.
+      suppress_move=True the isolate question already owns this turn's one
+                         question; advance the cursor but speak no agenda move.
+    """
     arc = _arc_stages()
     if not arc or _lead_has_floor(state):
         return {}
@@ -1308,7 +1394,9 @@ def _director(state) -> dict:
 
     stage = stages[new_stage]
     already_led = updates.get("stage_nudged", state.get("stage_nudged", "")) == new_stage
-    if already_led:
+    if suppress_move:
+        return updates          # the isolate question owns this turn's one question
+    if already_led and not objection:
         return updates                          # one move per stage — no broken record
 
     draft = state.get("draft_response", "") or ""
@@ -1317,18 +1405,24 @@ def _director(state) -> dict:
     # 2a) Drive this stage's flow: pend it (next turn routes through the already-
     #     budgeted think path) AND ask its first slot now, so the agent leads
     #     THIS turn. Skipped when the flow has already completed.
+    #     On a REPEAT objection (already_led) this is the re-pivot: re-anchor on
+    #     the same flow WITHOUT clobbering what it already collected, and ask the
+    #     next slot still missing — a fresh question, so no broken record.
     if stage.flow and stage.flow in config.FLOWS and not _flow_complete(stage.flow, state):
         flow = config.FLOWS[stage.flow]
-        missing = [s for s in flow.slots if s in flow.slot_prompts]
+        kept = dict(state.get("pending_slots") or {}) if already_led else {}
+        missing = [s for s in flow.slots if s in flow.slot_prompts and not kept.get(s)]
         updates["pending_intent"] = stage.flow
-        updates["pending_slots"] = {}
+        updates["pending_slots"] = kept
         updates["stage_nudged"] = new_stage
         if missing:
             updates["draft_response"] = _append_move(draft, _ask_for(flow, missing))
         return updates
 
     # 2b) A reactive turn (the lead asked / objected): steer back with the nudge.
-    if reactive_answer and stage.nudge:
+    #     A repeat objection on a stage that already spoke its nudge prefers the
+    #     scripted line below (different words) over repeating itself.
+    if reactive_answer and stage.nudge and not (already_led and stage.line):
         updates["draft_response"] = _append_move(draft, stage.nudge)
         updates["stage_nudged"] = new_stage
         return updates
@@ -1359,6 +1453,10 @@ def _summary_source_value(field, state):
     if src == "followups":
         summ = ((state.get("last_action") or {}).get("summary") or "").strip()
         return summ or None
+    if src == "objections":
+        # The ledger is already the distinct, ordered list the record wants —
+        # written zero-model by _objection_gate from structured intents.
+        return list(state.get("objections_raised") or []) or None
     if src.startswith("fact:"):
         return (state.get("session_facts") or {}).get(src.split(":", 1)[1]) or None
     if src.startswith("slot:"):
@@ -1497,15 +1595,57 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _MD_RE = re.compile(r"[*_`#>~]")
 
 
+def _tiedown(text: str, state, director_moved: bool) -> str | None:
+    """MICRO-COMMITMENT gate (zero model, zero prompt tokens). Returns the
+    tie-down to append, or None.
+
+    Fires ONLY on a statement-ending agent turn. That single condition is what
+    makes the gate safe: a tie-down is a question, this engine ships ONE question
+    per turn, so refusing to append after an existing "?" is what keeps it from
+    ever colliding with a slot ask, a confirm gate, the isolate question, a stage
+    nudge, or the close CTA. The other guards: never stack onto a director move,
+    never speak over a lead who holds the floor (a firm no, a handoff, an open
+    HITL gate), and never push the reply past config.MAX_REPLY_WORDS."""
+    every = int(getattr(config, "TIEDOWN_EVERY_N_TURNS", 0) or 0)
+    variants = list(getattr(config, "TIEDOWNS", None) or [])
+    if every <= 0 or not variants or not text:
+        return None
+    if text.rstrip().endswith("?") or director_moved or _lead_has_floor(state):
+        return None
+    if state.get("turns_since_tiedown", 0) < every:
+        return None
+    candidate = filler.pick_from(variants, key="_tiedown")
+    if not candidate:
+        return None
+    cap = int(getattr(config, "MAX_REPLY_WORDS", 0) or 0)
+    if cap and _word_count(text) + _word_count(candidate) > cap:
+        logger.info("tie-down suppressed: %d + %d words exceeds the %d-word reply budget",
+                    _word_count(text), _word_count(candidate), cap)
+        return None
+    return candidate
+
+
 def validator_node(state) -> dict:
+    # Objection gate (config.OBJECTION_INTENTS): record the push-back and, on the
+    # first one of the call, take this turn's question slot with the ISOLATE
+    # question. Runs BEFORE the director because its outcome decides whether the
+    # director may speak an agenda move at all. Zero model; {} for inbound agents.
+    objection = _objection_gate(state)
+    isolate = objection.pop("isolate", "")
+
     # Proactive SDR director (config.CALL_ARC): advance the sales agenda and,
     # if it's the agent's turn to lead, append the next proactive move BEFORE
     # the exit filter scrubs the draft. Zero model; a no-op for inbound agents.
     # Its call_stage / stage_nudged / pending_* updates ride out in this node's
     # return so the cursor persists across turns.
-    director = _director(state)
+    director = _director(state, objection=bool(objection), suppress_move=bool(isolate))
     if director.get("draft_response") is not None:
         state = {**state, "draft_response": director["draft_response"]}
+
+    # PIVOT is the director's move above; ISOLATE lands here instead when it
+    # owns the turn (the two are mutually exclusive by construction).
+    if isolate:
+        state = {**state, "draft_response": _append_move(state.get("draft_response", ""), isolate)}
 
     text = state.get("draft_response", "") or ""
     text = _ANSI_RE.sub("", text)
@@ -1526,6 +1666,8 @@ def validator_node(state) -> dict:
     # pending_*) out with the response; draft_response is per-turn (already
     # folded into `text`) so it is deliberately dropped here.
     updates = {k: v for k, v in director.items() if k != "draft_response"}
+    # The objection ledger rides out with the director's persistent updates.
+    updates.update(objection)
     # Lead record (config.SUMMARY_TEMPLATE): aggregate this turn's structured
     # state into the cross-turn record. Zero model — the slots/facts it reads
     # were already produced by this turn's INTENT/THINK calls. No-op for agents
@@ -1546,8 +1688,28 @@ def validator_node(state) -> dict:
         updates["last_reply_fingerprint"] = fingerprint
         updates["stall_count"] = count
 
-    if text:
-        updates["recent_messages"] = [AIMessage(content=text)]
+    # Micro-commitment (tie-down) gate — DELIBERATELY the last mutation, AFTER
+    # the stall fingerprint above. The tie-down bank rotates, so appending it
+    # before the fingerprint would give a byte-identical repeated reply a
+    # different fingerprint every turn and silently disable the stall detector
+    # (invariant 25) — the escalation path of last resort. Fingerprint the reply
+    # BODY; append the tie-down to the outgoing text only.
+    if int(getattr(config, "TIEDOWN_EVERY_N_TURNS", 0) or 0) > 0:
+        tie = _tiedown(text, state, director_moved=bool(director.get("draft_response")))
+        if tie:
+            updates["final_response"] = f"{text.rstrip()} {tie}".strip()
+            updates["turns_since_tiedown"] = 0
+        elif (_AFFIRM_RE.search(state.get("user_message", "") or "")
+                and not (state.get("pending_confirmation") or {})):
+            # The lead just agreed on their own — a micro-commitment landed, so
+            # restart the cadence instead of nagging someone already saying yes.
+            updates["turns_since_tiedown"] = 0
+        else:
+            updates["turns_since_tiedown"] = state.get("turns_since_tiedown", 0) + 1
+
+    final = updates.get("final_response", "")
+    if final:
+        updates["recent_messages"] = [AIMessage(content=final)]
     return updates
 
 

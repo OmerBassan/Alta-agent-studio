@@ -28,9 +28,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 STEP_FILES = ("step1_discovery.md", "step2_playbook.md",
               "step3_contract.md", "step4_build.md")
+# step3 (4_000 -> 4_300) and step4 (6_000 -> 6_200) were raised when the
+# objection (A-I-P) + tie-down surfaces landed: genuinely NEW authoring the
+# contract/build steps must mandate, not slack. Both were paid for FIRST by
+# tightening existing prose (step3 4_799 -> 4_144, step4 6_278 -> 6_124 after
+# the additions) and by pushing field-level rules into the [CUSTOMIZE] blocks in
+# boilerplate/config.py, which Agent A already reads while editing that file.
+# Raise a budget only for new REQUIRED surface, never to avoid trimming — the
+# split exists to cap per-phase reading cost.
 BUDGETS = {"SKILL.md": 5_000, "step1_discovery.md": 6_000,
-           "step2_playbook.md": 4_000, "step3_contract.md": 4_000,
-           "step4_build.md": 6_000}
+           "step2_playbook.md": 4_000, "step3_contract.md": 4_300,
+           "step4_build.md": 6_200}
 
 
 def test_skill_core_is_slim_and_schedules_the_steps():

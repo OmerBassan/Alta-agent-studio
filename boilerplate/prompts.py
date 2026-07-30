@@ -70,7 +70,8 @@ Rules:
 
 
 def build_knowledge_system(grounding_ctx: str = "", retrieved_ctx: str = "",
-                           objective_ctx: str = "", summary_ctx: str = "") -> str:
+                           objective_ctx: str = "", summary_ctx: str = "",
+                           objection_ctx: str = "") -> str:
     if retrieved_ctx:
         # Agentic-RAG path: the retrieval subgraph produced a finalized context;
         # synthesize ONLY from it (voice-friendly, short, complete sentences, no chunk dumps).
@@ -81,15 +82,21 @@ def build_knowledge_system(grounding_ctx: str = "", retrieved_ctx: str = "",
         source = f"""Answer the user's question using ONLY these facts; never invent details not present here:
 
 {config.FACTS}"""
-    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Answer in English, in exactly one or two very short spoken sentences. Never exceed 20 words. One idea per turn. Plain text (no markdown, no emojis).
+    # On an OBJECTION turn the help-desk tail is REPLACED, never stacked: an
+    # "offer further help" tail directly contradicts the objection instruction
+    # (and _objective_ctx's "do NOT tack on a generic 'anything else?'"), and
+    # shipping two conflicting directives in one payload is how a reply ends up
+    # with two questions or a limp non-answer.
+    tail = objection_ctx if objection_ctx else "End by briefly offering further help."
+    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Answer in English, in exactly one or two very short spoken sentences. Never exceed {config.MAX_REPLY_WORDS} words. One idea per turn. Plain text (no markdown, no emojis).
 {source}
 
-End by briefly offering further help.{grounding_ctx}{objective_ctx}{summary_ctx}"""
+{tail}{grounding_ctx}{objective_ctx}{summary_ctx}"""
 
 
 def build_chitchat_system(grounding_ctx: str = "", objective_ctx: str = "",
                           summary_ctx: str = "") -> str:
-    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Reply in English, in one or two very short friendly sentences. Never exceed 20 words. Plain text.
+    return f"""You are a warm, concise support assistant for {config.AGENT_NAME}. Reply in English, in one or two very short friendly sentences. Never exceed {config.MAX_REPLY_WORDS} words. Plain text.
 Engage naturally with the small talk, then gently steer to what you can help with. Do NOT end the conversation.
 You have NO access to account history, past transactions, or stored records beyond what appears in this conversation. If asked for such data (counts of past orders, purchase history, old confirmation numbers), say plainly that you can't access it on this channel and offer a human agent — NEVER estimate, reconstruct, or invent records or figures, no matter how many times or how insistently the user asks.{grounding_ctx}{objective_ctx}{summary_ctx}"""
 

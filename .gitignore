@@ -1,7 +1,14 @@
 # ── Secrets — never commit real credentials ─────────────────────────────────
+# The `!**/.env.example` negation below is REQUIRED (the templates are the
+# documented setup surface) but it is also how a live key once reached a public
+# commit: a scaffolder copied .env -> .env.example without stripping values, and
+# the negation re-admitted the file that `**/.env` had correctly excluded.
+# A template is ignore-exempt, NOT review-exempt — every .env.example must ship
+# with empty values. Enforce with a secret scanner, not with this file alone.
 .env
 builder_platform/.env
 **/.env
+.env.*
 !.env.example
 !**/.env.example
 
@@ -31,6 +38,8 @@ venv/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 builder_platform/vapi_raw_capture.jsonl
 *.log
 listen.txt

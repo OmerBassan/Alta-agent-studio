@@ -269,6 +269,69 @@ class Stage:
 CALL_ARC: Tuple[Stage, ...] = ()
 
 
+# ── Objection architecture: Acknowledge → Isolate → Pivot ──── [CUSTOMIZE] ──
+# Objections are ALREADY ordinary KNOWLEDGE_INTENTS (they route to knowledge_node
+# and stay grounded in FACTS/RAG). The tuple below is a MARKER over that set — it
+# adds no category, no route, no node — telling the engine "this intent is a
+# push-back, not a question", which is what the A-I-P gate conditions on.
+#
+#   ACKNOWLEDGE  nodes._objection_ctx swaps the help-desk tail of the knowledge
+#                prompt for a validate-first instruction (prompt shaping only —
+#                zero extra model calls).
+#   ISOLATE      OBJECTION_ISOLATE_TEMPLATE is spoken ONCE PER CALL, by code, on
+#                the first objection. It is structurally identical every time
+#                (only {topic} varies), so a model call to author it would buy
+#                pure latency for zero variance. Asking it twice is the
+#                broken-record anti-pattern and burns the tactic's credibility.
+#   PIVOT        nodes._director steers back to the live CALL_ARC stage. On the
+#                isolate turn the pivot is SUPPRESSED (the isolate question owns
+#                this turn's ONE question); on a repeat objection the director's
+#                one-shot guard is bypassed so the agent always re-anchors.
+#
+# EMPTY => the whole A-I-P layer is a no-op (correct for inbound/non-SDR agents).
+OBJECTION_INTENTS: Tuple[str, ...] = ()
+
+# Objection intent -> the spoken noun phrase for {topic} in the isolate question.
+# Keep it a short, natural object ("the price", "switching suppliers") — it is
+# read aloud mid-sentence. An intent with no entry here simply never isolates.
+OBJECTION_TOPICS: Dict[str, str] = {}
+
+# The one-per-call isolate question. MUST contain {topic}, MUST end in a question
+# mark, and MUST stay short — it shares this turn's MAX_REPLY_WORDS budget with
+# the rebuttal that precedes it. EMPTY => isolation is disabled (acknowledge and
+# pivot still run). Example:
+#   "Besides {topic}, is there anything else holding you back?"
+OBJECTION_ISOLATE_TEMPLATE: str = ""
+
+
+# ── Micro-commitments (tie-downs) ───────────────────────────── [CUSTOMIZE] ──
+# Short agreement checks ("Does that make sense?") appended DETERMINISTICALLY by
+# nodes._tiedown at the exit filter — zero model calls, zero prompt tokens.
+#
+# The trigger is NOT reply length: this engine caps every reply at one or two
+# short sentences and takes strict turns, so a monologue is structurally
+# impossible. The real decay signal is a RUN OF AGENT TURNS ENDING IN A
+# STATEMENT — turns that give the lead no prompted reason to speak. A tie-down
+# is itself a question, and this engine's contract is ONE question per turn, so
+# the gate fires only when the reply does NOT already end in "?" (which is also
+# why it can never collide with a slot ask, a confirm gate, the isolate
+# question, a stage nudge, or the close CTA).
+#
+# Rotated non-repeating through filler.pick_from, like FILLERS/ENRICH_TEMPLATES.
+TIEDOWNS: List[str] = []
+
+# Emit a tie-down after this many consecutive statement-ending agent turns.
+# 0 => the gate is OFF and state.turns_since_tiedown is never written (inbound
+# agents stay byte-for-byte unchanged). 2-3 is a natural sales cadence; 1 nags.
+TIEDOWN_EVERY_N_TURNS = int(os.getenv("TIEDOWN_EVERY_N_TURNS", "0"))
+
+# Hard spoken-reply word budget. Until now the "<=20 words" rule lived ONLY as
+# prose inside the system prompts; it is a real constraint (TTS airtime), so the
+# deterministic appenders (tie-down, isolate) MUST measure against a constant
+# rather than hope. A tie-down that would push the reply past this is dropped.
+MAX_REPLY_WORDS = int(os.getenv("MAX_REPLY_WORDS", "20"))
+
+
 # ── Lead record (conversation memory + the SDR deliverable) ── [CUSTOMIZE] ──
 @dataclass(frozen=True)
 class SummaryField:
@@ -290,6 +353,9 @@ class SummaryField:
                              "slot:<s>" also accepted
         "followups"          accumulates distinct completed tool-action summaries
                              (booked meeting, queued email) from last_action
+        "objections"         the distinct OBJECTION_INTENTS this lead raised, in
+                             order, from state.objections_raised (append-only,
+                             written by the zero-model objection gate)
         "freetext"           prose synthesized ONCE at call-end by
                              nodes.build_call_record (off the reply path) — the
                              only model-filled source; _update_summary never

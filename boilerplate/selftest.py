@@ -896,6 +896,236 @@ async def summary_preflight() -> list:
     return failures
 
 
+def objection_preflight() -> list:
+    """Objection architecture (Acknowledge -> Isolate -> Pivot) invariants — the
+    zero-model gate at the head of validator_node. Behavior runs on a SYNTHETIC
+    objection intent + arc so coverage holds for EVERY domain (an agent with an
+    empty OBJECTION_INTENTS is a no-op); the SHIPPED config gets a strict shape
+    and word-budget gate. nodes reads these tuples at call time, so monkeypatched
+    config needs no graph rebuild."""
+    import nodes  # noqa: E402
+
+    failures = []
+    cap = int(getattr(config, "MAX_REPLY_WORDS", 20) or 20)
+
+    def _words(s: str) -> int:
+        return len([w for w in (s or "").split() if any(c.isalnum() for c in w)])
+
+    # --- Shape + STRICT word budget on the SHIPPED config (skips when empty) ---
+    shipped = tuple(getattr(config, "OBJECTION_INTENTS", ()) or ())
+    template = getattr(config, "OBJECTION_ISOLATE_TEMPLATE", "") or ""
+    topics = getattr(config, "OBJECTION_TOPICS", {}) or {}
+    if shipped:
+        for name in shipped:
+            if name not in config.VALID_INTENTS:
+                failures.append(f"objection: {name!r} is not a valid intent")
+            if name not in config.KNOWLEDGE_INTENTS:
+                failures.append(f"objection: {name!r} must also be a KNOWLEDGE_INTENT "
+                                "(objections route through knowledge_node for grounding)")
+        for name in topics:
+            if name not in shipped:
+                failures.append(f"objection: OBJECTION_TOPICS has {name!r}, not in OBJECTION_INTENTS")
+        if template:
+            if "{topic}" not in template:
+                failures.append("objection: OBJECTION_ISOLATE_TEMPLATE must contain {topic}")
+            if not template.rstrip().endswith("?"):
+                failures.append("objection: OBJECTION_ISOLATE_TEMPLATE must end in a question mark")
+            for name, topic in topics.items():
+                try:
+                    rendered = template.format(topic=topic)
+                except (KeyError, IndexError) as e:
+                    failures.append(f"objection: isolate template does not render for {name!r}: {e}")
+                    continue
+                # STRICT budget: the isolate question shares the turn with the
+                # rebuttal that precedes it, so it must leave room for one.
+                if _words(rendered) > cap // 2:
+                    failures.append(
+                        f"objection: isolate question for {name!r} is {_words(rendered)} words "
+                        f"(>{cap // 2}); it shares the {cap}-word reply with the rebuttal — {rendered!r}")
+                rebuttal = (config.MOCK_KNOWLEDGE.get(name) or "").strip()
+                if rebuttal and _words(rebuttal) + _words(rendered) > cap:
+                    failures.append(
+                        f"objection: rebuttal + isolate for {name!r} is "
+                        f"{_words(rebuttal) + _words(rendered)} words (>{cap}) — shorten "
+                        f"MOCK_KNOWLEDGE[{name!r}]")
+
+    # --- Behavioral gate on a SYNTHETIC objection (monkeypatched) ---
+    Stage = config.Stage
+    real = (getattr(config, "OBJECTION_INTENTS", ()), getattr(config, "OBJECTION_TOPICS", {}),
+            getattr(config, "OBJECTION_ISOLATE_TEMPLATE", ""), getattr(config, "CALL_ARC", ()),
+            tuple(config.KNOWLEDGE_INTENTS), tuple(config.VALID_INTENTS))
+    config.OBJECTION_INTENTS = ("obj_probe",)
+    config.OBJECTION_TOPICS = {"obj_probe": "the price"}
+    config.OBJECTION_ISOLATE_TEMPLATE = "Besides {topic}, is anything else holding you back?"
+    config.KNOWLEDGE_INTENTS = tuple(config.KNOWLEDGE_INTENTS) + ("obj_probe",)
+    config.VALID_INTENTS = tuple(config.VALID_INTENTS) + ("obj_probe",)
+    config.CALL_ARC = (
+        Stage(name="pitch", objective="book the meeting",
+              nudge="Would a short demo next week help?", advance_when={}),
+    )
+    try:
+        base = {"category": "ANSWER", "intent": "obj_probe", "call_stage": "pitch",
+                "draft_response": "Totally fair, our price is locked for a year."}
+
+        # (a) ISOLATE fires on the FIRST objection, and the director's pivot is
+        #     SUPPRESSED so the turn ships exactly ONE question.
+        first = nodes.validator_node(dict(base))
+        out = first.get("final_response", "")
+        if "anything else holding you back" not in out.lower():
+            failures.append(f"objection: first objection must ask the isolate question, got {out!r}")
+        if "demo next week" in out.lower():
+            failures.append("objection: the stage nudge must be SUPPRESSED on the isolate turn "
+                            "(one question per turn)")
+        if out.count("?") != 1:
+            failures.append(f"objection: isolate turn must ship exactly one question, got {out!r}")
+        if first.get("objections_raised") != ["obj_probe"]:
+            failures.append(f"objection: ledger must record the intent, got {first.get('objections_raised')!r}")
+
+        # (b) ISOLATE IS ONE-PER-CALL: a second objection never re-isolates, but
+        #     DOES pivot (the old one-shot guard let it end on the lead's terms).
+        second = nodes.validator_node({**base, "intent": "obj_probe",
+                                       "objections_raised": ["obj_probe"],
+                                       "stage_nudged": "pitch"})
+        out2 = second.get("final_response", "")
+        if "anything else holding you back" in out2.lower():
+            failures.append("objection: the isolate question must fire ONCE per call, never twice")
+        if "demo next week" not in out2.lower():
+            failures.append(f"objection: a REPEAT objection must still pivot back to the arc, got {out2!r}")
+
+        # (c) LEDGER is deduped and ordered.
+        if second.get("objections_raised") != ["obj_probe"]:
+            failures.append(f"objection: ledger must dedupe, got {second.get('objections_raised')!r}")
+
+        # (d) FLOOR: mid slot-fill the reply already ends in the flow's question,
+        #     so the isolate must NOT fire — but the ledger still records it.
+        held = nodes.validator_node({**base, "pending_intent": "some_flow",
+                                     "draft_response": "Fair. What's your monthly volume?"})
+        if "anything else holding you back" in held.get("final_response", "").lower():
+            failures.append("objection: isolate must stand down while the lead holds the floor")
+        if held.get("objections_raised") != ["obj_probe"]:
+            failures.append("objection: the ledger must still record an objection raised mid-flow")
+
+        # (e) NO-OP: an agent with no OBJECTION_INTENTS is untouched.
+        config.OBJECTION_INTENTS = ()
+        noop = nodes.validator_node(dict(base))
+        if "objections_raised" in noop:
+            failures.append("objection: empty OBJECTION_INTENTS must not write the ledger")
+        if "holding you back" in noop.get("final_response", "").lower():
+            failures.append("objection: empty OBJECTION_INTENTS must not isolate")
+    finally:
+        (config.OBJECTION_INTENTS, config.OBJECTION_TOPICS,
+         config.OBJECTION_ISOLATE_TEMPLATE, config.CALL_ARC,
+         config.KNOWLEDGE_INTENTS, config.VALID_INTENTS) = real
+
+    scope = f"{len(shipped)} shipped objection intent(s)" if shipped else "no shipped objections (no-op)"
+    print(f"[objection preflight] acknowledge/isolate-once/pivot/floor/word-budget + {scope}, "
+          f"{len(failures)} failed")
+    return failures
+
+
+def tiedown_preflight() -> list:
+    """Micro-commitment (tie-down) invariants — the zero-model gate at the TAIL
+    of validator_node. The load-bearing one is ORDERING: the tie-down must be
+    appended AFTER the stall fingerprint, or its rotating text gives an
+    identical repeated reply a fresh fingerprint every turn and silently
+    disables the stall detector (invariant 25)."""
+    import nodes  # noqa: E402
+    import filler  # noqa: E402
+
+    failures = []
+    real = (getattr(config, "TIEDOWNS", []), getattr(config, "TIEDOWN_EVERY_N_TURNS", 0),
+            getattr(config, "MAX_REPLY_WORDS", 20), getattr(config, "CALL_ARC", ()))
+    config.TIEDOWNS = ["Does that make sense?", "Are we on the same page?"]
+    config.TIEDOWN_EVERY_N_TURNS = 2
+    config.MAX_REPLY_WORDS = 20
+    config.CALL_ARC = ()          # isolate the tie-down from the director
+    filler.reset_rotation()
+    try:
+        # (a) FIRES on a statement-ending turn once the cadence is due.
+        due = nodes.validator_node({"draft_response": "We ship within two days.",
+                                    "category": "ANSWER", "intent": "chitchat",
+                                    "turns_since_tiedown": 2})
+        if "?" not in due.get("final_response", ""):
+            failures.append(f"tiedown: must append on a due statement turn, got {due.get('final_response')!r}")
+        if due.get("turns_since_tiedown") != 0:
+            failures.append("tiedown: emitting must reset the pacing counter")
+
+        # (b) NEVER a second question: a reply already ending in "?" is skipped.
+        q = nodes.validator_node({"draft_response": "What's your monthly volume?",
+                                  "category": "ANSWER", "intent": "chitchat",
+                                  "turns_since_tiedown": 5})
+        if q.get("final_response", "").count("?") != 1:
+            failures.append(f"tiedown: must never add a 2nd question, got {q.get('final_response')!r}")
+
+        # (c) NOT YET DUE: counter increments instead of firing.
+        early = nodes.validator_node({"draft_response": "We ship within two days.",
+                                      "category": "ANSWER", "intent": "chitchat",
+                                      "turns_since_tiedown": 0})
+        if "?" in early.get("final_response", ""):
+            failures.append("tiedown: must not fire before TIEDOWN_EVERY_N_TURNS")
+        if early.get("turns_since_tiedown") != 1:
+            failures.append("tiedown: a non-firing statement turn must increment the counter")
+
+        # (d) LEAD AGREED: an affirmation resets the cadence (never nag a yes).
+        agreed = nodes.validator_node({"draft_response": "Great.", "category": "ANSWER",
+                                       "intent": "chitchat", "user_message": "yes, that works",
+                                       "turns_since_tiedown": 1})
+        if agreed.get("turns_since_tiedown") != 0:
+            failures.append("tiedown: a lead affirmation must reset the pacing counter")
+
+        # (e) FLOOR: never speak over a firm no / handoff.
+        bye = nodes.validator_node({"draft_response": "Thanks for your time.",
+                                    "intent": "goodbye", "exit_conversation": True,
+                                    "turns_since_tiedown": 9})
+        if "?" in bye.get("final_response", ""):
+            failures.append("tiedown: must stand down when the lead holds the floor")
+
+        # (f) WORD BUDGET: a reply at the cap drops the tie-down rather than
+        #     blowing the spoken budget.
+        long_reply = " ".join(["word"] * 19) + "."
+        capped = nodes.validator_node({"draft_response": long_reply, "category": "ANSWER",
+                                       "intent": "chitchat", "turns_since_tiedown": 5})
+        if "?" in capped.get("final_response", ""):
+            failures.append("tiedown: must be dropped when it would exceed MAX_REPLY_WORDS")
+
+        # (g) THE ORDERING INVARIANT: with tie-downs ON, an identical repeated
+        #     reply must STILL trip the stall detector — proof the fingerprint is
+        #     taken on the body, before the rotating tie-down is appended.
+        if config.STALL_THRESHOLD:
+            body = "We ship within two days."
+            st = {"draft_response": body, "category": "ANSWER", "intent": "chitchat",
+                  "last_reply_fingerprint": body.casefold(),
+                  "stall_count": config.STALL_THRESHOLD - 1, "turns_since_tiedown": 5}
+            trip = nodes.validator_node(st)
+            escalated = (config.STALL_TEXT.casefold() in trip.get("final_response", "").casefold())
+            if not escalated:
+                failures.append("tiedown: ORDERING BUG — a rotating tie-down masked the stall "
+                                "detector; fingerprint the body BEFORE appending the tie-down")
+
+        # (h) KILL SWITCH: 0 disables the gate and never writes the counter.
+        config.TIEDOWN_EVERY_N_TURNS = 0
+        off = nodes.validator_node({"draft_response": "We ship within two days.",
+                                    "category": "ANSWER", "intent": "chitchat",
+                                    "turns_since_tiedown": 9})
+        if "?" in off.get("final_response", "") or "turns_since_tiedown" in off:
+            failures.append("tiedown: gate ran while TIEDOWN_EVERY_N_TURNS=0")
+    finally:
+        (config.TIEDOWNS, config.TIEDOWN_EVERY_N_TURNS,
+         config.MAX_REPLY_WORDS, config.CALL_ARC) = real
+        filler.reset_rotation()
+
+    # Shipped-config shape: every tie-down must be a SHORT question.
+    for t in (getattr(config, "TIEDOWNS", []) or []):
+        if not t.rstrip().endswith("?"):
+            failures.append(f"tiedown: {t!r} must be a question (it is a micro-commitment ask)")
+        if len([w for w in t.split() if any(c.isalnum() for c in w)]) > 6:
+            _warn(f"tiedown: {t!r} is wordy — a tie-down should be 3-6 words")
+
+    print(f"[tiedown preflight] fire/no-2nd-question/cadence/floor/budget/stall-ordering/kill-switch, "
+          f"{len(failures)} failed")
+    return failures
+
+
 async def main() -> int:
     failures = []
     failures += run_hook_checks()
@@ -903,6 +1133,8 @@ async def main() -> int:
     failures += retrieval_coverage_preflight()
     failures += stall_preflight()
     failures += call_arc_preflight()
+    failures += objection_preflight()
+    failures += tiedown_preflight()
     failures += voice_budget_preflight()
     failures += context_budget_preflight()
     failures += await summary_preflight()
