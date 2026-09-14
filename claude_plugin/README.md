@@ -1,7 +1,7 @@
 # Alta Builder — Claude Code plugin
 
 Runs the same Agent Builder as the web platform (`builder_platform/`), but as
-a native `/alta-build` slash command in an interactive Claude Code terminal
+a native `/alta-builder:alta-build` slash command in an interactive Claude Code terminal
 session — no browser, no FastAPI server.
 
 ## Single source, by design
@@ -18,7 +18,10 @@ exactly this reason: `${CLAUDE_PLUGIN_ROOT}` then resolves to the same root
 
 ## What's here
 
-- `commands/alta-build.md` — the `/alta-build` slash command.
+- `commands/alta-build.md` — the `/alta-builder:alta-build` slash command. Plugin
+  commands are always namespaced as `/<plugin-name>:<command-name>` (the plugin's
+  `name` in `.claude-plugin/plugin.json` is `alta-builder`) — there is no bare
+  `/alta-build`; typing it returns `Unknown command`.
 - `.claude-plugin/plugin.json` `mcpServers` — bundles
   `claude_plugin/mcp_server.py`, a stdio MCP server exposing
   `instantiate_boilerplate`/`run_selftest`, both thin wrappers around
@@ -62,6 +65,7 @@ cd /path/to/some/other/project    # NOT inside this repo — proves cwd-relative
 claude --plugin-dir "C:\Users\Omer Bassan\Desktop\Projects\Alta 2.0"
 ```
 
-Then run `/alta-build` in that session. `${CLAUDE_PLUGIN_ROOT}` still
+Then run `/alta-builder:alta-build` in that session (not bare `/alta-build`
+— plugin commands are always namespaced by plugin name). `${CLAUDE_PLUGIN_ROOT}` still
 resolves to this repo (so `SKILL.md`/`skill_steps/`/etc. load correctly);
 the generated project lands in the directory you launched from, not here.
