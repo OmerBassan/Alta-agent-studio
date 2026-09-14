@@ -19,9 +19,14 @@ exactly this reason: `${CLAUDE_PLUGIN_ROOT}` then resolves to the same root
 ## What's here
 
 - `commands/alta-build.md` — the `/alta-build` slash command.
-- `.mcp.json` (repo root) — bundles `claude_plugin/mcp_server.py`, a stdio
-  MCP server exposing `instantiate_boilerplate`/`run_selftest`, both thin
-  wrappers around `builder_platform/builder_core.py`.
+- `.claude-plugin/plugin.json` `mcpServers` — bundles
+  `claude_plugin/mcp_server.py`, a stdio MCP server exposing
+  `instantiate_boilerplate`/`run_selftest`, both thin wrappers around
+  `builder_platform/builder_core.py`. Declared INLINE in the manifest, never
+  in a root `.mcp.json`: that path is also where Claude Code looks for
+  project-scoped MCP config, and since this repo is its own plugin root the
+  file would be loaded by both — and the project-scope loader does not
+  substitute `${CLAUDE_PLUGIN_ROOT}`, so that load always fails.
 - `hooks/hooks.json` (repo root) + `claude_plugin/hooks/guard_engine_files.py`
   — a Pre/PostToolUse guard that denies a Write/Edit to a protected engine
   file, scoped to only fire inside a recognized Alta-generated project (it's

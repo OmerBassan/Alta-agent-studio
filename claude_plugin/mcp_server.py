@@ -5,8 +5,14 @@ the same two privileged operations the web platform's SDK-MCP tools wrap
 straight into builder_platform/builder_core.py, the single shared engine.
 Nothing here duplicates that logic; this file is protocol plumbing only.
 
-Registered via .mcp.json (repo root) as a stdio server, auto-started by
-Claude Code whenever this plugin is enabled — no manual `claude mcp add`.
+Registered as a stdio server by the `mcpServers` block inside
+`.claude-plugin/plugin.json`, auto-started by Claude Code whenever this
+plugin is enabled — no manual `claude mcp add`. It is declared inline in the
+manifest rather than in a root `.mcp.json` on purpose: that filename is ALSO
+the project-scope MCP location, and this repo is its own plugin root, so a
+root `.mcp.json` gets loaded twice — once as a plugin (where
+${CLAUDE_PLUGIN_ROOT} is substituted) and once as a project config (where it
+is not, leaving a literal path and a dead server).
 
 Every tool takes an explicit `workspace_dir` (absolute path) rather than
 inferring one from the process's own cwd: a stdio MCP server's cwd is fixed

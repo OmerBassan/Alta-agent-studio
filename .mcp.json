@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "alta-builder": {
-      "type": "stdio",
-      "command": "python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/claude_plugin/mcp_server.py"]
-    }
-  }
-}

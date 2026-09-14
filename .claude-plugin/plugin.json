@@ -2,5 +2,12 @@
   "name": "alta-builder",
   "displayName": "Alta Agent Builder",
   "description": "Chat-driven builder for voice AI sales agents (LangGraph + an OpenAI-compatible brain). Discovery -> playbook -> build -> selftest gate, run natively in your Claude Code terminal.",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "mcpServers": {
+    "alta-builder": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/claude_plugin/mcp_server.py"]
+    }
+  }
 }
