@@ -49,13 +49,14 @@ async def _preload_brain() -> None:
         from runtime import get_runtime
         get_runtime()
 
-# One-shot ground-truth capture: dump the full raw body of each POST as a JSON
-# line so we can inspect Vapi's exact payload shape. Set RAW_CAPTURE=0 to disable.
+# Ground-truth capture for diagnosing a payload-shape mismatch: dump the full
+# raw body of each POST as a JSON line. Off by default (it logs full call
+# transcripts) — set RAW_CAPTURE=1 to enable while debugging.
 RAW_CAPTURE_PATH = os.environ.get(
     "RAW_CAPTURE_PATH",
     os.path.join(os.path.dirname(__file__), "vapi_raw_capture.jsonl"),
 )
-RAW_CAPTURE = os.environ.get("RAW_CAPTURE", "1") == "1"
+RAW_CAPTURE = os.environ.get("RAW_CAPTURE", "0") == "1"
 
 MODEL_NAME = "alta-voice-agent"
 
@@ -169,15 +170,6 @@ async def chat_completions(request: Request):
                 fh.write(json.dumps(body, ensure_ascii=False) + "\n")
         except Exception as exc:  # never let capture break a live call
             print(f"[vapi] raw-capture failed: {exc}", flush=True)
-
-    # Observability for Day 1: log what Vapi actually sends (call id, transcript).
-    call_id = (body.get("call") or {}).get("id", "no-call-id")
-    messages = body.get("messages", [])
-    last_user = next(
-        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-        "",
-    )
-
 
     skeleton = _brain_mode() == "skeleton"
 

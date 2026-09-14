@@ -266,7 +266,7 @@ class AgentRuntime:
         filler_mod = importlib.import_module("filler")
         graph_mod = importlib.import_module("graph")
         nodes_mod = importlib.import_module("nodes")
-        llm = importlib.import_module("llm_client")
+        importlib.import_module("llm_client")
         from langchain_core.messages import HumanMessage
         from langgraph.checkpoint.memory import MemorySaver
 
