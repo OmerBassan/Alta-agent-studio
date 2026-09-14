@@ -45,15 +45,23 @@ pip install -r requirements.txt
 
 ## Local install (no marketplace listing)
 
-Point Claude Code at this repo as a local plugin source, then enable
-`alta-builder`. From a Claude Code session:
+`/plugin install` targets a marketplace-registered plugin — this repo isn't
+one, and pointing it at a raw local path fails (`Marketplace "..." not
+found`, and the space in "Alta 2.0" makes it worse: the path gets split on
+whitespace). For a local, no-marketplace plugin, Claude Code has a separate
+mechanism: the `--plugin-dir` CLI flag, which "loads your plugin directly
+without requiring installation" (verified against the official plugin docs).
+It's a `claude` launch flag, not a slash command — so it must be run from an
+interactive terminal outside this session.
 
+Launch from the directory you want the generated agent to land in, pointing
+the flag at this repo:
+
+```bash
+cd /path/to/some/other/project    # NOT inside this repo — proves cwd-relative output
+claude --plugin-dir "C:\Users\Omer Bassan\Desktop\Projects\Alta 2.0"
 ```
-/plugin install "C:\Users\Omer Bassan\Desktop\Projects\Alta 2.0"
-```
 
-(Exact install command/flags depend on your installed Claude Code version —
-see `claude plugin --help` or the in-app `/plugin` command if this differs.)
-
-Once enabled, run `/alta-build` from **any** project directory — the
-generated agent lands in that directory, not inside this repo.
+Then run `/alta-build` in that session. `${CLAUDE_PLUGIN_ROOT}` still
+resolves to this repo (so `SKILL.md`/`skill_steps/`/etc. load correctly);
+the generated project lands in the directory you launched from, not here.
