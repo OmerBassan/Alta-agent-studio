@@ -18,10 +18,13 @@
    test to author. If the client provided `test_details`, create a
    `.test_variables.json` file with those details as a flat JSON dictionary.
    Engine files (`graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`,
-   `rag_subgraph.py`, `compaction.py`, `filler.py`) are copied verbatim and
-   write-blocked — never read them, never edit them; engine fixes go upstream
-   in `boilerplate/`, once. The director and the objection/tie-down gates are
-   engine code you drive from `config.py`, never edit.
+   `rag_subgraph.py`, `compaction.py`, `filler.py`, `agent_sandbox.py`) are
+   copied verbatim and write-blocked — never read them, never edit them;
+   engine fixes go upstream in `boilerplate/`, once. The director and the
+   objection/tie-down gates are engine code you drive from `config.py`, never
+   edit. `agent_sandbox.py` is a text-chat REPL (`python agent_sandbox.py`)
+   for testing the built agent with zero voice infrastructure — mention it to
+   the client only if they're a developer testing from a terminal.
 3. **Voice style pass** — every user-audible string (OPENER, HELP/STALL/HANDOFF
    text, slot prompts, confirm templates, NEXT_STEP_HINTS, enrich templates,
    filler banks, `Stage.line`/`Stage.nudge`, the isolate template, `TIEDOWNS`)

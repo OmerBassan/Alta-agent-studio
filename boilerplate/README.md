@@ -22,12 +22,13 @@ pip install -r requirements.txt
 python selftest.py              # mock-mode invariant checks (must PASS)
 ```
 
-This project is brain-only — no CLI shell ships with it. It is driven by the
-host platform's voice/SSE runtime, which calls `graph.build_pipeline()` per
-turn and resets the `graph.TURN_RESET` fields; `selftest.py` is the local
-scripted harness. Live mode: copy `.env.example` → `.env`, set
-`OPENAI_API_KEY` (+ base URL / tier models). `SHOW_TRACE=1` prints per-turn
-routing.
+This project ships no CLIENT-facing shell — it is driven by the host
+platform's voice/SSE runtime, which calls `graph.build_pipeline()` per turn
+and resets the `graph.TURN_RESET` fields; `selftest.py` is the local scripted
+harness. For a quick manual sanity-check with no voice infrastructure at all,
+`python agent_sandbox.py` opens a text-chat REPL on the same pipeline. Live
+mode: copy `.env.example` → `.env`, set `OPENAI_API_KEY` (+ base URL / tier
+models). `SHOW_TRACE=1` prints per-turn routing.
 
 ## Architecture
 
@@ -143,6 +144,7 @@ START
 | `rag_subgraph.py` | Agentic-RAG loop (private state, bounded) | rarely |
 | `llm_client.py` | multi-tier OpenAI-compatible client + JSON-mode fallback | no |
 | `filler.py` | filler channel: canned pre-answer acknowledgments over a frontend-agnostic sink | no (bank lives in config) |
+| `agent_sandbox.py` | text-chat REPL on the same pipeline — dev-only, never wired into the voice/SSE runtime | no |
 
 ## Swapping in real tools
 

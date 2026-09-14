@@ -35,10 +35,12 @@ STEP_FILES = ("step1_discovery.md", "step2_playbook.md",
 # the additions) and by pushing field-level rules into the [CUSTOMIZE] blocks in
 # boilerplate/config.py, which Agent A already reads while editing that file.
 # Raise a budget only for new REQUIRED surface, never to avoid trimming — the
-# split exists to cap per-phase reading cost.
+# split exists to cap per-phase reading cost. step4 (6_200 -> 6_450) was raised
+# when agent_sandbox.py (the text-chat sandbox) landed as a new engine file the
+# build step must know is write-blocked, same as every other engine file.
 BUDGETS = {"SKILL.md": 5_000, "step1_discovery.md": 6_000,
            "step2_playbook.md": 4_000, "step3_contract.md": 4_300,
-           "step4_build.md": 6_200}
+           "step4_build.md": 6_450}
 
 
 def test_skill_core_is_slim_and_schedules_the_steps():

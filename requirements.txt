@@ -10,6 +10,11 @@ httpx==0.28.1
 python-dotenv==1.2.1
 claude-agent-sdk==0.2.120
 
+# claude_plugin/ (the /alta-build Claude Code plugin's bundled MCP server +
+# guard hook) — previously only a transitive dep of claude-agent-sdk; now a
+# direct one since claude_plugin/mcp_server.py imports it on its own.
+mcp==1.28.1
+
 # Generated agents (selftest + voice runtime run in this same venv)
 langgraph==1.0.5
 langchain-core==1.2.5
