@@ -291,6 +291,38 @@ def test_build_pipeline_refuses_to_start_on_a_misdeclared_flow(monkeypatch):
         build_pipeline()
 
 
+@dataclasses.dataclass(frozen=True)
+class _PreDay2Flow:
+    """The Flow shape an agent's config.py had before `properties` existed —
+    Flow lives in each agent's own config.py, so old agents still carry it."""
+    tool: str
+    slots: tuple
+    slot_prompts: dict = dataclasses.field(default_factory=dict)
+    confirm: bool = False
+    confirm_template: str = ""
+    validators: dict = dataclasses.field(default_factory=dict)
+    enrich: bool = True
+    hitl: bool = False
+    cache_keys: tuple = ()
+
+
+def test_flow_without_properties_field_still_starts_and_is_gated(monkeypatch, calls):
+    shipped = config.FLOWS["book_fitting"]
+    old = _PreDay2Flow(tool=shipped.tool, slots=shipped.slots, slot_prompts=shipped.slot_prompts,
+                       confirm=True, confirm_template=shipped.confirm_template,
+                       cache_keys=shipped.cache_keys)
+    monkeypatch.setitem(config.FLOWS, "book_fitting", old)
+    monkeypatch.setitem(nodes.FLOW_BY_TOOL, old.tool, old)
+    g = build_pipeline()                      # must not raise AttributeError
+    st = _turn(g, "old1", "hello", tool_action_pending=True, cold_payload={
+        "tool": "book_appointment",
+        "args": {"branch": "downtown", "slot_iso": "2026-01-01T15:00:00"}})
+    assert not calls and st["refusal"]["kind"] == "platform_error"
+    _turn(g, "old2", BOOK)
+    _turn(g, "old2", "yes")
+    assert [c[0] for c in calls] == ["book_appointment"]
+
+
 # ── the ledger itself: binding, one-time use, expiry ─────────────────────────
 def _ledger(**kw):
     import authz

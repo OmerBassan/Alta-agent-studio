@@ -58,7 +58,9 @@ Turn-taking is the Shell's job (the host frontend — voice/SSE runtime, test
 harness — re-invokes from START per user message, resetting TURN_RESET fields).
 The checkpointer persists pending_* slots across turns for multi-turn
 slot-filling; pass a durable checkpointer (e.g. sqlite) for cross-restart
-session resume — mandatory if hitl approvals may span restarts.
+session resume. That is NOT enough for a gated action: confirm/hitl records
+live in the in-process AuthorizationLedger, so a restart between a yes or an
+approval and its execution refuses the run (fail closed) — see authz.py.
 
 Loops: the agentic_retrieval node encapsulates one loop (a compiled RAG
 subgraph with a private state namespace, bounded by config.RAG_MAX_ITERATIONS).

@@ -82,12 +82,19 @@ class Refusal:
 
 
 # ── declaration: properties -> gates ────────────────────────────────────────
+def _declared(flow):
+    """`properties` as written in the agent's config.py. Flow is defined per
+    agent, so an agent whose config.py predates the field has none: that is
+    "nothing declared", and its legacy booleans still set the gates."""
+    return getattr(flow, "properties", frozenset())
+
+
 def flow_properties(flow) -> FrozenSet[str]:
     """The flow's effective action properties. `confirm=True` / `hitl=True`
     are the legacy spelling of state_changing / liability; they are folded in
     here — the only place either spelling is read — so a mixed declaration
     can only ADD gates, never cancel one."""
-    props = set(flow.properties)
+    props = set(_declared(flow))
     if flow.confirm:
         props.add("state_changing")
     if flow.hitl:
@@ -110,7 +117,7 @@ def preflight_flows(flows: Mapping[str, object]) -> None:
     tool_flows: Dict[str, list] = {}
     for name, flow in flows.items():
         tool_flows.setdefault(flow.tool, []).append(name)
-        props = flow.properties
+        props = _declared(flow)
         if not isinstance(props, (set, frozenset)):
             problems.append(f"{name}: properties must be a set of names, "
                             f"got {type(props).__name__} {props!r}")
