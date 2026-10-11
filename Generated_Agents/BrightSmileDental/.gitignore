@@ -1,0 +1,31 @@
+# local environment
+.venv/
+__pycache__/
+*.pyc
+
+# secrets — never commit the real key; .env.example is the template
+.env
+
+# credentials — OAuth clients, refreshed tokens, service accounts, keys.
+# Integration recipes (integrations/) drop these next to the code; they are
+# live credentials, not config. Add any recipe-specific file here too.
+credentials.json
+client_secret*.json
+token.json
+token_*.json
+*-service-account.json
+service_account*.json
+*.pem
+*.key
+*.p12
+.credentials/
+secrets/
+
+# session persistence + scratch
+sessions.db
+*.db
+_*.json
+.selftest_passed.json
+
+# per-conversation traces (episode_trace.py) — may contain customer details
+traces/

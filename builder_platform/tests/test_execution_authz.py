@@ -134,6 +134,24 @@ def test_operator_denial_is_a_business_refusal(calls):
     assert st["final_response"] == config.HITL_DENIED_TEXT
 
 
+@pytest.mark.parametrize("reply", [
+    "yes, but let me talk to a manager first",
+    "okay — actually, can I speak to a person?",
+    "sure, but get me a real person",
+    "no, I want a human",
+    "right, put me through to a supervisor",
+])
+def test_escalation_at_the_confirmation_gate_is_not_consent(calls, reply):
+    """A pending yes/no must never swallow a request for a person: the handoff
+    path runs, the pending action is dropped, nothing executes."""
+    g = build_pipeline()
+    _turn(g, "esc", BOOK)
+    st = _turn(g, "esc", reply)
+    assert not calls, f"{reply!r} was taken as consent"
+    assert st.get("handoff_requested") is True
+    assert not st.get("pending_confirmation")
+
+
 # ── 1. modified payload ──────────────────────────────────────────────────────
 def test_payload_modified_between_question_and_yes_is_refused(calls):
     g = build_pipeline()

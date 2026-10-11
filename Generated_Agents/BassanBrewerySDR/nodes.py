@@ -190,7 +190,13 @@ async def intent_detect_node(state, thread_id: str = "", ledger=None) -> dict:
     # depend on a model's mood. Anything that is neither falls through to
     # normal classification (a detour); the confirmation stays pending.
     confirm = state.get("pending_confirmation") or {}
-    if confirm:
+    # An escalation is never an answer to the yes/no: "okay, but get me a
+    # person" (or an urgent symptom, where an agent declares those as
+    # human_handoff keywords) must reach the handoff path, which clears the
+    # pending action. Skipping resolution here can only withhold consent.
+    escalating = any(k in user_message.lower()
+                     for k in config.INTENT_KEYWORDS.get("human_handoff", ()))
+    if confirm and not escalating:
         if _NEGATE_RE.search(user_message):
             logger.info("confirmation declined for %s", confirm.get("tool"))
             if ledger is not None:
