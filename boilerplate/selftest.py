@@ -118,7 +118,12 @@ async def _run(graph, msg, cfg=None):
     """Invoke one turn (or resume an open HITL interrupt)."""
     cfg = cfg or _fresh_cfg()
     if msg == RESUME_APPROVE:
-        return await graph.ainvoke(Command(resume={"approved": True}), config=cfg), cfg
+        # An operator approves the SPECIFIC offer the interrupt showed; an
+        # approval that names no offer is refused by the engine (authz.py).
+        snap = await graph.aget_state(cfg)
+        offer_id = snap.interrupts[0].value.get("offer_id") if snap.interrupts else None
+        return await graph.ainvoke(Command(resume={"approved": True, "offer_id": offer_id}),
+                                   config=cfg), cfg
     payload = dict(_TURN_RESET)
     payload["user_message"] = msg
     payload["recent_messages"] = [HumanMessage(content=msg)]

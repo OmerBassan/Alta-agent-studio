@@ -29,12 +29,14 @@ Roles (each a model tier via llm_client):
   3. think (ANSWER)            — Think step for any config.FLOWS intent:
                                  entity resolution + slot validators, then
                                  act-now (cold tool payload), need-info, a
-                                 confirm question (Flow.confirm), or the HITL
-                                 gate (Flow.hitl)
+                                 confirm question (state_changing), or the
+                                 HITL gate (liability) — see authz.py
   3b. hitl_gate (no model)     — interrupt(): suspend for OPERATOR approval of
-                                 a high-stakes payload before Act
-  4. tool_exec (no model)      — Act step: deterministic side-effect via
-                                 registry, circuit-breaker guarded
+                                 a liability payload before Act
+  4. tool_exec (no model)      — Act step: refuses a gated tool without a
+                                 one-time platform record for this exact
+                                 payload (authz.py), then deterministic
+                                 side-effect via registry, breaker guarded
   4b. execution_validator (no model) — Layer 2.5: inspect the tool result;
                                  route failure vs enrich vs SLM-bypass
   4c. failure (no model)       — graceful tool-failure reply, flow retryable
@@ -72,6 +74,7 @@ import asyncio
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
+import authz
 import compaction
 import config
 import filler
@@ -83,8 +86,9 @@ from schemas import AgentState, EnrichVerdict, IntentResult, PlanResult, PlanSte
 
 logger = logging.getLogger(__name__)
 
-# tool name -> Flow (for the execution validator's enrich decision and the
-# router's HITL check on confirmed payloads).
+# tool name -> Flow (for the execution validator's enrich decision, the
+# router's HITL check on confirmed payloads, and tool_exec's gate lookup —
+# authz.preflight_flows guarantees a GATED tool has exactly one owning flow).
 FLOW_BY_TOOL = {flow.tool: flow for flow in config.FLOWS.values()}
 
 # Yes/no resolution for the confirmation gate. Negation is checked FIRST so
@@ -176,7 +180,7 @@ def _history(state) -> list:
 # ======================================================================== #
 # 1. INTENT DETECTION (Tier: INTENT)                                        #
 # ======================================================================== #
-async def intent_detect_node(state) -> dict:
+async def intent_detect_node(state, thread_id: str = "", ledger=None) -> dict:
     user_message = state.get("user_message", "")
     pending = state.get("pending_intent")
     pending_slots = dict(state.get("pending_slots") or {})
@@ -189,6 +193,8 @@ async def intent_detect_node(state) -> dict:
     if confirm:
         if _NEGATE_RE.search(user_message):
             logger.info("confirmation declined for %s", confirm.get("tool"))
+            if ledger is not None:
+                ledger.revoke("confirm", thread_id)
             # A decline also aborts any active plan: later steps may depend on
             # the declined action, so never execute past a refused gate.
             return _clear_plan({"intent": "chitchat", "category": "ANSWER", "slots": {},
@@ -196,6 +202,14 @@ async def intent_detect_node(state) -> dict:
                                 "pending_confirmation": {}, "confirmation_declined": True})
         if _AFFIRM_RE.search(user_message):
             logger.info("confirmation accepted for %s", confirm.get("tool"))
+            # The user's yes is the GRANT of the platform's outstanding offer
+            # (minted by think when it asked). A yes with no offer behind it —
+            # a pending_confirmation that came from anywhere but think — grants
+            # nothing, and tool_exec, the one enforcement point, refuses.
+            refused = ledger.grant("confirm", thread_id) if ledger is not None else None
+            if refused is not None:
+                logger.warning("confirm grant refused [thread=%s tool=%s]: %s",
+                               thread_id, confirm.get("tool"), refused.reason)
             # The flow is handed to Act — nothing is pending anymore (mirrors
             # think's act branch). A stale pending left here would later be
             # parked by the interrupt archive as a zombie of a DONE flow.
@@ -832,7 +846,7 @@ def _with_plan_report(plan: list, draft: str) -> str:
 # ======================================================================== #
 # 3. THINK (Tier: ANSWER) — one generic node for every config.FLOWS intent  #
 # ======================================================================== #
-async def think_node(state) -> dict:
+async def think_node(state, thread_id: str = "", ledger=None) -> dict:
     intent = state.get("intent", "")
     flow = config.FLOWS[intent]
     slots = dict(state.get("slots") or {})
@@ -911,16 +925,20 @@ async def think_node(state) -> dict:
 
     if decision.status == "act" and not missing:
         args = {s: slots[s] for s in flow.slots}
-        if flow.confirm:
-            # Destructive flow: stash the ready payload and ask before acting.
+        gates = authz.flow_gates(flow)
+        if "confirm" in gates:
+            # State-changing flow: stash the ready payload and ask before
+            # acting. The question is the moment the user is shown this exact
+            # payload, so the platform's confirm OFFER is minted here.
             question = _confirm_question(intent, flow, args)
+            _offer(ledger, "confirm", thread_id, intent, flow.tool, args)
             return {"draft_response": question, "needs_enrichment": False,
                     "tool_action_pending": False, "slots": slots,
                     "pending_intent": intent, "pending_slots": slots,
                     "pending_confirmation": {"intent": intent, "tool": flow.tool,
                                              "args": args, "question": question}}
-        if flow.hitl:
-            # High-stakes flow: the payload is ready but an OPERATOR must
+        if "hitl" in gates:
+            # Liability flow: the payload is ready but an OPERATOR must
             # approve it — route to the interrupt gate instead of acting.
             return _clear_pending({
                 "cold_payload": {"tool": flow.tool, "args": args},
@@ -988,39 +1006,108 @@ def _mock_think(flow: config.Flow, slots: dict) -> ThinkDecision:
 # ======================================================================== #
 # 3b. HITL GATE (no model) — interrupt() for OPERATOR approval               #
 # ======================================================================== #
-async def hitl_gate_node(state) -> dict:
-    """Flow.hitl=True: the graph SUSPENDS here (checkpoint-persisted) with the
-    ready payload and resumes only on a human Command(resume={"approved": ...}).
-    Distinct from Flow.confirm (end-user yes/no): this is the hard
-    excessive-agency gate — the model cannot talk its way past it."""
+def _offer(ledger, gate: str, thread_id: str, flow: str, tool: str, args: dict):
+    """Mint the platform offer for `gate`; None when it cannot be minted (no
+    ledger, no conversation id, args that do not canonicalize). A missing offer
+    is not an error HERE — it simply leaves nothing to grant, and tool_exec
+    refuses the run."""
+    if ledger is None or not thread_id:
+        logger.warning("no %s offer minted for %s: ledger=%s thread=%r",
+                       gate, tool, ledger is not None, thread_id)
+        return None
+    try:
+        return ledger.offer(gate, ledger.binding(thread_id, flow, tool, args))
+    except TypeError as e:
+        logger.warning("no %s offer minted for %s: args not canonical (%s)", gate, tool, e)
+        return None
+
+
+async def hitl_gate_node(state, thread_id: str = "", ledger=None) -> dict:
+    """Liability flows: the graph SUSPENDS here (checkpoint-persisted) with
+    the ready payload and resumes only on an operator
+    Command(resume={"approved": bool, "offer_id": <the id shown>}).
+    Distinct from the confirm gate (end-user yes/no): this is the hard
+    excessive-agency gate — the model cannot talk its way past it.
+
+    The node re-runs from the top on resume, so the offer is minted
+    idempotently: an unchanged payload finds the same offer id it showed; a
+    payload changed during the suspension gets a NEW id, and the operator's
+    approval of the old one no longer matches."""
     payload = state.get("cold_payload", {})
+    tool = payload.get("tool", "")
+    offer_id = _offer(ledger, "hitl", thread_id, state.get("intent", ""), tool,
+                      payload.get("args", {}))
+    if offer_id is None:
+        return _hitl_refused(state, authz.Refusal(
+            authz.PLATFORM_ERROR, "could not open an approval record", "hitl"), tool)
     decision = interrupt({
         "type": "hitl_approval",
         "intent": state.get("intent", ""),
-        "tool": payload.get("tool", ""),
+        "tool": tool,
         "args": payload.get("args", {}),
+        "offer_id": offer_id,
     })
-    approved = bool(decision.get("approved")) if isinstance(decision, dict) else bool(decision)
-    logger.info("hitl %s for %s", "APPROVED" if approved else "DENIED", payload.get("tool"))
-    if approved:
-        return {"tool_action_pending": True, "awaiting_human": False}
-    denial = config.HITL_DENIED_TEXT
+    if not isinstance(decision, dict) or not decision.get("approved"):
+        ledger.revoke("hitl", thread_id)
+        logger.info("hitl DENIED for %s [thread=%s]", tool, thread_id)
+        return _hitl_refused(state, authz.Refusal(
+            authz.BUSINESS_REFUSAL, "operator denied", "hitl"), tool)
+    named = decision.get("offer_id")
+    refused = (ledger.grant("hitl", thread_id, offer_id=named) if isinstance(named, str) and named
+               else authz.Refusal(authz.PLATFORM_ERROR, "approval does not name an offer", "hitl"))
+    if refused is not None:
+        logger.warning("hitl approval REFUSED for %s [thread=%s]: %s", tool, thread_id, refused.reason)
+        ledger.revoke("hitl", thread_id)
+        return _hitl_refused(state, refused, tool)
+    logger.info("hitl APPROVED for %s [thread=%s offer=%s]", tool, thread_id, offer_id)
+    return {"tool_action_pending": True, "awaiting_human": False}
+
+
+def _hitl_refused(state, refusal, tool: str) -> dict:
+    """No execution. An operator's no is told as a decision; a platform
+    failure to establish approval is told as a snag (nothing changed) — the
+    two never share wording, and `refusal` tells the Shell which it was."""
+    text = (config.HITL_DENIED_TEXT if refusal.kind == authz.BUSINESS_REFUSAL
+            else config.FAILURE_TEXT)
     updates = {"needs_enrichment": False, "tool_action_pending": False,
-               "awaiting_human": False, "cold_payload": {}}
+               "awaiting_human": False, "cold_payload": {},
+               "refusal": refusal.as_dict(tool)}
     if _plan_active(state):
-        # A denial mid-plan aborts the remaining steps (later steps may depend
-        # on the denied one) but still reports what already completed.
+        # A refusal mid-plan aborts the remaining steps (later steps may depend
+        # on the refused one) but still reports what already completed.
         plan = [dict(s) for s in state.get("plan_steps") or []]
-        denial = _with_plan_report(plan, denial)
+        text = _with_plan_report(plan, text)
         updates = _clear_plan(updates)
-    updates["draft_response"] = denial
+    updates["draft_response"] = text
     return _clear_pending(updates)
+
+
+def _authorize(state, name: str, thread_id: str, ledger):
+    """Execution-time gate check, run by tool_exec BEFORE the tool. Returns a
+    Refusal, or None when the tool needs no gate or every required gate holds a
+    granted, unconsumed record for exactly this payload (consumed here)."""
+    flow = FLOW_BY_TOOL.get(name)
+    gates = authz.flow_gates(flow) if flow is not None else frozenset()
+    if not gates:
+        return None
+    intent = state.get("intent", "")
+    active = config.FLOWS.get(intent)
+    if active is None or active.tool != name:
+        return authz.Refusal(authz.PLATFORM_ERROR,
+                             f"tool {name} does not belong to the active flow {intent!r}")
+    if ledger is None or not thread_id:
+        return authz.Refusal(authz.PLATFORM_ERROR, "no authorization ledger or conversation id")
+    try:
+        binding = ledger.binding(thread_id, intent, name, state.get("cold_payload", {}).get("args", {}))
+    except TypeError as e:
+        return authz.Refusal(authz.PLATFORM_ERROR, f"arguments are not canonical: {e}")
+    return ledger.consume(gates, binding)
 
 
 # ======================================================================== #
 # 4. ACT (deterministic tool execution via registry, circuit-breaker guarded)#
 # ======================================================================== #
-async def tool_exec_node(state) -> dict:
+async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
     payload = state.get("cold_payload", {})
     name = payload.get("tool", "")
     calls = state.get("tool_call_count", 0)
@@ -1035,6 +1122,19 @@ async def tool_exec_node(state) -> dict:
                   "summary": "Too many actions were attempted in one turn."}
         return {"tool_result": result, "tool_action_pending": False,
                 "tool_call_count": calls}
+
+    # Execution-time authorization: whatever routed here (a yes, an operator
+    # approval, or state that merely CLAIMS one), a gated tool runs only on a
+    # platform record for this exact payload. Nothing ran, so the call
+    # counter does not move.
+    refusal = _authorize(state, name, thread_id, ledger)
+    if refusal is not None:
+        logger.warning("authorization refused for %s [thread=%s intent=%s]: %s",
+                       name, thread_id, state.get("intent", ""), refusal.reason)
+        result = {"tool": name or "unknown", "error": f"not authorized: {refusal.reason}",
+                  "refusal": refusal.kind, "summary": config.FAILURE_TEXT}
+        return {"tool_result": result, "tool_action_pending": False,
+                "tool_call_count": calls, "refusal": refusal.as_dict(name)}
 
     fn = tools.TOOL_REGISTRY.get(name)
     if fn is None:

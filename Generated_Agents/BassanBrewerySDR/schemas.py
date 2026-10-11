@@ -156,7 +156,7 @@ class AgentState(TypedDict, total=False):
     # cleared on restart and goodbye; never touched by the plan walk.
     paused_flow: dict
 
-    # Confirmation gate for destructive flows (Flow.confirm=True): the Think
+    # Confirmation gate for state_changing flows: the Think
     # step stashes the ready payload here and asks yes/no instead of acting.
     # {"intent", "tool", "args", "question"} — persisted until answered.
     pending_confirmation: dict
@@ -257,16 +257,27 @@ class AgentState(TypedDict, total=False):
     retrieved_context: str
 
     # Think→Act payload + result.
-    cold_payload: dict          # {"tool": ..., "args": {...}} — set only by the Think step
+    cold_payload: dict          # {"tool": ..., "args": {...}} — written by think and by
+                                # intent_detect on a yes; it carries NO authority (authz.py)
     tool_action_pending: bool
     tool_result: dict           # deterministic tool output (structured, no prose)
     needs_enrichment: bool      # set by the execution validator: route via ENRICH or bypass
     tool_call_count: int        # circuit breaker: tool executions this turn (reset per turn)
     execution_error: dict       # set by the execution validator on tool failure/breaker trip
 
-    # HITL gate (Flow.hitl=True): the graph is interrupt()-suspended awaiting
-    # an OPERATOR decision (distinct from Flow.confirm, the end-user yes/no).
+    # HITL gate (a "liability" flow): the graph is interrupt()-suspended
+    # awaiting an OPERATOR decision (distinct from the confirm gate, the
+    # end-user yes/no). Approvals themselves are NOT state — see authz.py.
     awaiting_human: bool
+
+    # Typed refusal of a gated action this turn ({} when none):
+    #   {"kind": "business_refusal" | "platform_error", "reason", "gate", "tool"}
+    #   writer:    hitl_gate (operator denial / unprovable approval) and
+    #              tool_exec (execution-time authorization failed).
+    #   reader:    the Shell and the trace — tells "a human said no" apart
+    #              from "the platform could not prove a yes".
+    #   lifecycle: reset to {} by TURN_RESET at the start of every turn.
+    refusal: dict
 
     draft_response: str         # pre-validation assistant text
     final_response: str         # post-validation (what the user sees)

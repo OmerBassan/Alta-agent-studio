@@ -9,7 +9,9 @@
                                    and routes straight to think)
       -> [route by intent]
            confirmed action (yes at a gate) -> tool_exec (Act) directly
-                                               (or hitl_gate if Flow.hitl)
+                                               (or hitl_gate for a liability
+                                               flow: confirm first, then the
+                                               operator)
            SYSTEM intents (help/restart/
                            human_handoff)   -> system   -> validator
            chitchat                         -> validator
@@ -22,16 +24,24 @@
                 -> think ... tool ... -> plan_step -> ... until done/paused
            any config.FLOWS intent: think (ANSWER tier)
                 -> need_info?               -> validator
-                -> confirm flow ready?      -> ask yes/no      -> validator
-                -> hitl flow ready?         -> hitl_gate: interrupt() —
+                -> state_changing ready?    -> ask yes/no      -> validator
+                -> liability ready?         -> hitl_gate: interrupt() —
                                                OPERATOR approves/denies
-                -> ready?                   -> tool_exec (Act, breaker-guarded)
+                -> ready?                   -> tool_exec (Act: authz-checked
+                                               BEFORE the tool, breaker-guarded)
                      -> execution_validator (Layer 2.5, deterministic)
                           failure           -> failure -> validator
                           ok, enrich=False  -> validator   (SLM BYPASS)
                           ok, enrich=True   -> enrichment (ENRICH/SLM)
                                             -> validator
       -> validator (RESPONSE validator, exit filter) -> END
+
+Execution-time authorization (authz.py): routing is NOT the gate. tool_exec
+refuses a gated tool unless the AuthorizationLedger build_pipeline creates
+holds a granted, one-time record for every gate the flow's properties
+require, bound to this conversation, agent, configuration fingerprint, flow,
+tool and canonical args. The ledger is outside AgentState; nodes reach it only
+through the _traced wrapper, which also forwards the conversation's thread_id.
 
 A knowledge/chitchat detour NEVER clears a pending flow or confirmation — the
 reply carries a deterministic resume line instead (nodes._resume_suffix).
@@ -64,12 +74,16 @@ together if a client needs longer plans.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from typing import Any, Callable, Literal
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+import authz
 import config
+from episode_trace import config_fingerprint
 from schemas import AgentState
 from nodes import (
     intent_detect_node, knowledge_node, agentic_retrieval_node, chitchat_node,
@@ -84,10 +98,11 @@ def route_by_intent(state: AgentState) -> Literal[
         "think", "tool_exec", "hitl_gate", "planner"]:
     # A resolved confirmation gate (user said yes) carries a ready payload from
     # intent_detect — execute it directly, no second Think pass. A Flow.hitl
-    # payload still has to pass the operator gate first.
+    # payload still has to pass the operator gate first. Either way tool_exec
+    # re-checks authorization itself; this edge only picks the next human.
     if state.get("tool_action_pending") and state.get("cold_payload"):
         flow = FLOW_BY_TOOL.get(state["cold_payload"].get("tool", ""))
-        if flow is not None and flow.hitl:
+        if flow is not None and "hitl" in authz.flow_gates(flow):
             return "hitl_gate"
         return "tool_exec"
     intent = state.get("intent", "chitchat")
@@ -127,7 +142,7 @@ def route_after_plan_step(state: AgentState) -> Literal["think", "validator"]:
 
 def route_after_think(state: AgentState) -> Literal["tool_exec", "hitl_gate", "plan_step", "validator"]:
     """Think -> Act only if the reasoning tier produced a ready tool call; a
-    Flow.hitl payload detours through the operator gate; otherwise (need_info,
+    liability payload detours through the operator gate; otherwise (need_info,
     confirm question) the reply goes straight to the exit — via the plan
     controller first when a plan is active, so the pause is book-kept."""
     if state.get("awaiting_human"):
@@ -179,7 +194,7 @@ TURN_RESET = {
     "exit_conversation": False, "confirmation_declined": False,
     "retrieved_context": "", "execution_error": {},
     "tool_call_count": 0, "awaiting_human": False, "fast_routed": False,
-    "handoff_requested": False,
+    "handoff_requested": False, "refusal": {},
     "trace": [],   # reducer append_or_reset: an empty list resets the per-turn trace
 }
 
@@ -206,12 +221,14 @@ def _trace_entry(name: str, state: dict, update: dict) -> dict:
                      awaiting_confirmation=bool(confirm),
                      awaiting_human=bool(update.get("awaiting_human")))
     elif name == "hitl_gate":
-        entry.update(approved=bool(update.get("tool_action_pending")))
+        entry.update(approved=bool(update.get("tool_action_pending")),
+                     refusal=update.get("refusal") or None)
     elif name == "tool_exec":
         result = update.get("tool_result") or {}
         payload = state.get("cold_payload") or {}
         entry.update(tool=result.get("tool") or payload.get("tool"), args=payload.get("args"),
-                     ok=not result.get("error"), error=result.get("error"))
+                     ok=not result.get("error"), error=result.get("error"),
+                     refusal=update.get("refusal") or None)
     elif name == "execution_validator":
         err = update.get("execution_error") or {}
         entry.update(ok=not err, error=err.get("error"))
@@ -226,9 +243,21 @@ def _trace_entry(name: str, state: dict, update: dict) -> dict:
     return entry
 
 
-def _traced(name: str, fn: Callable) -> Callable:
-    async def node(state):
-        update = fn(state)
+def _traced(name: str, fn: Callable, ledger: authz.AuthorizationLedger) -> Callable:
+    # Nodes that take part in authorization declare `thread_id` / `ledger`
+    # keyword parameters; only those receive them. LangGraph injects the
+    # run's config into this wrapper by the parameter NAME `config` — the
+    # nodes themselves never see it (their module also imports `config`).
+    params = inspect.signature(fn).parameters
+    wants_thread, wants_ledger = "thread_id" in params, "ledger" in params
+
+    async def node(state, config: RunnableConfig):
+        kwargs: dict[str, Any] = {}
+        if wants_thread:
+            kwargs["thread_id"] = str((config.get("configurable") or {}).get("thread_id") or "")
+        if wants_ledger:
+            kwargs["ledger"] = ledger
+        update = fn(state, **kwargs)
         if inspect.isawaitable(update):
             update = await update
         update = dict(update or {})
@@ -238,24 +267,31 @@ def _traced(name: str, fn: Callable) -> Callable:
     return node
 
 
-def build_pipeline(checkpointer=None):
+def build_pipeline(checkpointer=None, ledger: authz.AuthorizationLedger | None = None):
+    # Startup preflight: a misdeclared flow never takes a call.
+    authz.preflight_flows(config.FLOWS)
+    if ledger is None:
+        agent_dir = Path(config.__file__).resolve().parent
+        ledger = authz.AuthorizationLedger(
+            agent_id=agent_dir.name,
+            fingerprint=config_fingerprint(agent_dir, config)["config_sha256"])
     b = StateGraph(AgentState)
 
-    b.add_node("intent_detect", _traced("intent_detect", intent_detect_node))
-    b.add_node("knowledge", _traced("knowledge", knowledge_node))
-    b.add_node("agentic_retrieval", _traced("agentic_retrieval", agentic_retrieval_node))
-    b.add_node("chitchat", _traced("chitchat", chitchat_node))
-    b.add_node("closing", _traced("closing", closing_node))
-    b.add_node("system", _traced("system", system_node))
-    b.add_node("planner", _traced("planner", planner_node))
-    b.add_node("plan_step", _traced("plan_step", plan_step_node))
-    b.add_node("think", _traced("think", think_node))
-    b.add_node("hitl_gate", _traced("hitl_gate", hitl_gate_node))
-    b.add_node("tool_exec", _traced("tool_exec", tool_exec_node))
-    b.add_node("execution_validator", _traced("execution_validator", execution_validator_node))
-    b.add_node("failure", _traced("failure", failure_node))
-    b.add_node("enrichment", _traced("enrichment", enrichment_node))
-    b.add_node("validator", _traced("validator", validator_node))
+    b.add_node("intent_detect", _traced("intent_detect", intent_detect_node, ledger))
+    b.add_node("knowledge", _traced("knowledge", knowledge_node, ledger))
+    b.add_node("agentic_retrieval", _traced("agentic_retrieval", agentic_retrieval_node, ledger))
+    b.add_node("chitchat", _traced("chitchat", chitchat_node, ledger))
+    b.add_node("closing", _traced("closing", closing_node, ledger))
+    b.add_node("system", _traced("system", system_node, ledger))
+    b.add_node("planner", _traced("planner", planner_node, ledger))
+    b.add_node("plan_step", _traced("plan_step", plan_step_node, ledger))
+    b.add_node("think", _traced("think", think_node, ledger))
+    b.add_node("hitl_gate", _traced("hitl_gate", hitl_gate_node, ledger))
+    b.add_node("tool_exec", _traced("tool_exec", tool_exec_node, ledger))
+    b.add_node("execution_validator", _traced("execution_validator", execution_validator_node, ledger))
+    b.add_node("failure", _traced("failure", failure_node, ledger))
+    b.add_node("enrichment", _traced("enrichment", enrichment_node, ledger))
+    b.add_node("validator", _traced("validator", validator_node, ledger))
 
     b.add_edge(START, "intent_detect")
     b.add_conditional_edges("intent_detect", route_by_intent, {

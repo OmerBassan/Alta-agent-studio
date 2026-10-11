@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 
 try:  # load .env before reading safety-constant overrides (idempotent)
     from dotenv import load_dotenv
@@ -171,8 +171,17 @@ class Flow:
         must be live-safe, e.g. a fixed template body — never a mock
         placeholder). Give a slot a prompt only if the lead should be asked.
 
-    confirm: destructive/irreversible flows (checkout, cancel, book) ask a
-      deterministic yes/no before Act; the payload is stashed until answered.
+    properties: WHAT the action is, as a set — the engine derives the gates
+      (authz.PROPERTY_GATES) and tool_exec refuses to run without a matching
+      one-time platform record for each:
+        "state_changing" -> confirm: an end-user yes/no read-back before Act
+                            (checkout, cancel, book, send).
+        "liability"      -> hitl: an OPERATOR approves via interrupt/resume
+                            (money moves, deletion).
+      Both -> both, user confirmation first. Must be a set of known names;
+      build_pipeline rejects anything else at startup.
+    confirm / hitl: legacy spellings of state_changing / liability, still
+      honoured (they can only add gates). Prefer `properties`.
     confirm_template: the yes/no question, .format(**args); empty -> generic.
     validators: per-slot hooks run by Think AFTER entity resolution, before
       Act. Each takes (value, all_slots) and returns
@@ -184,10 +193,6 @@ class Flow:
     enrich: route the tool result through the ENRICH (SLM) tier. Set False for
       tools whose "summary" is already perfectly formatted — the graph bypasses
       the SLM hop entirely (deterministic phrasing, one less network call).
-    hitl: HIGH-STAKES flows (refunds, deletion): instead of executing, the
-      graph interrupt()-suspends with the ready payload and waits for an
-      OPERATOR approval (Command(resume=...)). Distinct from `confirm`, which
-      is an in-band end-user yes/no.
     cache_keys: whitelist of tool-result fields copied into session_facts
       after a SUCCESSFUL Act (hard transactional identifiers only — order ids,
       confirmation numbers — never soft data). The merge is a code-level dict
@@ -203,6 +208,7 @@ class Flow:
     enrich: bool = True
     hitl: bool = False
     cache_keys: Tuple[str, ...] = ()
+    properties: FrozenSet[str] = frozenset()
 
 
 # ── Proactive sales arc (the SDR "spine") ───────────────────── [CUSTOMIZE] ──
@@ -482,7 +488,7 @@ FLOWS: Dict[str, Flow] = {
         slot_prompts={
             "slot_iso": "can I set up fifteen minutes with our account manager this week — what day and time works",
         },
-        confirm=True,
+        properties=frozenset({"state_changing"}),
         confirm_template="Just to confirm — fifteen minutes with our account manager for {slot_iso}, and I'll send details to {email}. Sound good?",
         cache_keys=("confirmation",),
     ),
