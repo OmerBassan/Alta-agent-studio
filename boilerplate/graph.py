@@ -196,7 +196,7 @@ TURN_RESET = {
     "exit_conversation": False, "confirmation_declined": False,
     "retrieved_context": "", "execution_error": {},
     "tool_call_count": 0, "awaiting_human": False, "fast_routed": False,
-    "handoff_requested": False, "refusal": {},
+    "handoff_requested": False, "refusal": {}, "action_outcome": {},
     "trace": [],   # reducer append_or_reset: an empty list resets the per-turn trace
 }
 
@@ -230,10 +230,14 @@ def _trace_entry(name: str, state: dict, update: dict) -> dict:
         payload = state.get("cold_payload") or {}
         entry.update(tool=result.get("tool") or payload.get("tool"), args=payload.get("args"),
                      ok=not result.get("error"), error=result.get("error"),
+                     tool_status=result.get("tool_status"),
                      refusal=update.get("refusal") or None)
     elif name == "execution_validator":
         err = update.get("execution_error") or {}
-        entry.update(ok=not err, error=err.get("error"))
+        outcome = update.get("action_outcome") or {}
+        entry.update(ok=not err, error=err.get("error"), outcome=outcome.get("outcome"),
+                     verified=outcome.get("verified"), evidence=outcome.get("evidence"),
+                     tool_status=outcome.get("tool_status"))
     elif name == "planner":
         entry.update(steps=len(update.get("plan_steps") or []))
     elif name in ("agentic_retrieval", "knowledge"):

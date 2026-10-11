@@ -288,6 +288,11 @@ def structural_preflight() -> list:
         failures.append("structural: STALL_TEXT's escape phrase matches no human_handoff keyword "
                         "(invariant 25 — the escape phrase must actually escalate)")
 
+    # Every gated flow's effect must be readable back (outcome verification).
+    import authz
+    import tools
+    failures.extend(authz.verification_gaps(config.FLOWS, getattr(tools, "VERIFIERS", {})))
+
     # HOOK_CHECK coverage -> WARNING.
     exercised = set()
     for kind, flow_name, slot, *_rest in HOOK_CHECKS:
@@ -304,7 +309,8 @@ def structural_preflight() -> list:
             if id(fn) not in exercised:
                 _warn(f"structural: validator for {flow_name}.{slot} has no HOOK_CHECK")
 
-    print(f"[structural preflight] escalation-wiring gate + coverage warnings, {len(failures)} failed")
+    print(f"[structural preflight] escalation-wiring + verification gates + coverage warnings, "
+          f"{len(failures)} failed")
     return failures
 
 

@@ -20,8 +20,10 @@ import logging
 import os
 import re
 import smtplib
+import threading
+import time
 from email.mime.text import MIMEText
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,76 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 _BRANCH_LABELS = {"downtown": "Downtown (12 River St)", "mall": "Mall (Westfield, level 2)",
                   "airport": "Airport (Terminal B)"}
+
+
+class SimulatedBackend:
+    """The mock system of record the effect tools write to and the verifiers
+    read back from — what a calendar or payments API is in a real deployment.
+
+    Writer: the effect tools; reader: VERIFIERS; one lock guards both. Ids are
+    issued per write (never derived from the args), so a dropped write cannot
+    be mistaken for an earlier identical one. In-memory and process-local;
+    reset() clears it (tests, a fresh sandbox run).
+
+    Failure injection, read at call time from the environment:
+      SIMULATED_FAILURE=drop_write     the tool reports success, nothing is stored
+      SIMULATED_FAILURE=reject         the system refuses; the tool returns an error
+      SIMULATED_FAILURE=timeout        the write hangs SIMULATED_DELAY_S seconds
+      SIMULATED_FAILURE=readback_down  every read-back raises
+    SIMULATED_FAILURE_TOOLS (comma list) limits injection to those tools."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._records: Dict[Tuple[str, Tuple], Dict[str, object]] = {}
+        self._seq = 0
+
+    def reset(self) -> None:
+        with self._lock:
+            self._records.clear()
+            self._seq = 0
+
+    @staticmethod
+    def _failure(tool: str) -> str:
+        mode = os.getenv("SIMULATED_FAILURE", "").strip()
+        scope = [t.strip() for t in os.getenv("SIMULATED_FAILURE_TOOLS", "").split(",") if t.strip()]
+        return mode if mode and (not scope or tool in scope) else ""
+
+    def write(self, tool: str, key: Tuple, record: Dict[str, object], prefix: str) -> Optional[str]:
+        """Store `record` under (tool, key) and return the issued id; None when
+        the system rejected the write. Under drop_write the id is returned but
+        nothing is stored — the lie the read-back exists to catch."""
+        mode = self._failure(tool)
+        if mode == "reject":
+            return None
+        if mode == "timeout":
+            # Deterministic for tests: the hung write never lands.
+            time.sleep(float(os.getenv("SIMULATED_DELAY_S", "30")))
+            return None
+        with self._lock:
+            self._seq += 1
+            issued = f"{prefix}-{self._seq:05d}"
+            if mode != "drop_write":
+                self._records[(tool, key)] = {**record, "id": issued}
+        return issued
+
+    def read(self, tool: str, key: Tuple) -> Optional[Dict[str, object]]:
+        if self._failure(tool) == "readback_down":
+            raise ConnectionError(f"{tool} read-back unavailable (simulated)")
+        with self._lock:
+            rec = self._records.get((tool, key))
+            return dict(rec) if rec else None
+
+
+BACKEND = SimulatedBackend()
+
+
+def _read_back(tool: str, key: Tuple, issued: str) -> Tuple[str, str]:
+    rec = BACKEND.read(tool, key)
+    if rec is None:
+        return "absent", f"no {tool} record for {key}"
+    if not issued or rec["id"] != issued:
+        return "mismatch", f"{tool} record for {key} is {rec['id']}, the tool reported {issued or 'none'}"
+    return "present", f"{tool} record {rec['id']} found for {key}"
 
 
 def _stable_hash(*parts: str) -> int:
@@ -154,12 +226,21 @@ def capture_lead_profile(buyer_character: str = "", drink_mix: str = "", renewal
 
 def book_sales_call(slot_iso: str = "", email: str = "", **_) -> Dict[str, object]:
     """Mock account-manager scheduling. Real impl -> calendar/CRM API."""
-    ok = bool(slot_iso)
-    confirmation = f"BB-{_stable_hash('bb', slot_iso, email) % 100000:05d}" if ok else ""
-    summary = (f"Your call with our account manager is booked for {slot_iso} (confirmation {confirmation})."
-               if ok else "The booking could not be completed.")
+    confirmation = (BACKEND.write("book_sales_call", (slot_iso, email),
+                                  {"slot_iso": slot_iso, "email": email}, "BB")
+                    if slot_iso else None)
+    if not confirmation:
+        return {"tool": "book_sales_call", "slot_iso": slot_iso, "email": email,
+                "booked": False, "error": "calendar rejected the booking",
+                "summary": "The booking could not be completed."}
+    summary = f"Your call with our account manager is booked for {slot_iso} (confirmation {confirmation})."
     return {"tool": "book_sales_call", "slot_iso": slot_iso, "email": email,
-            "booked": ok, "confirmation": confirmation, "summary": summary}
+            "booked": True, "confirmation": confirmation, "summary": summary}
+
+
+def verify_sales_call(args: dict, result: dict) -> Tuple[str, str]:
+    return _read_back("book_sales_call", (args.get("slot_iso", ""), args.get("email", "")),
+                      str(result.get("confirmation") or ""))
 
 
 # name -> callable; the Think step's cold payload references these names.
@@ -170,6 +251,11 @@ TOOL_REGISTRY: Dict[str, Callable[..., Dict[str, object]]] = {
     "send_email": send_email,
     "capture_lead_profile": capture_lead_profile,
     "book_sales_call": book_sales_call,
+}
+
+# tool name -> read-back (outcome verification; required for gated flows).
+VERIFIERS: Dict[str, Callable[[dict, dict], Tuple[str, str]]] = {
+    "book_sales_call": verify_sales_call,
 }
 
 # Compaction retrieval (engine, not domain): pages back the full items behind

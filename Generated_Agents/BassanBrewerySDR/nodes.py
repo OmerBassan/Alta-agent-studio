@@ -1120,8 +1120,8 @@ async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
         result = {"tool": name or "unknown",
                   "error": f"circuit breaker: exceeded {config.MAX_TOOL_CALLS_PER_TURN} tool calls per turn",
                   "summary": "Too many actions were attempted in one turn."}
-        return {"tool_result": result, "tool_action_pending": False,
-                "tool_call_count": calls}
+        return {"tool_result": {**result, "tool_status": "refused"},
+                "tool_action_pending": False, "tool_call_count": calls}
 
     # Execution-time authorization: whatever routed here (a yes, an operator
     # approval, or state that merely CLAIMS one), a gated tool runs only on a
@@ -1132,13 +1132,14 @@ async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
         logger.warning("authorization refused for %s [thread=%s intent=%s]: %s",
                        name, thread_id, state.get("intent", ""), refusal.reason)
         result = {"tool": name or "unknown", "error": f"not authorized: {refusal.reason}",
-                  "refusal": refusal.kind, "summary": config.FAILURE_TEXT}
+                  "refusal": refusal.kind, "tool_status": "refused",
+                  "summary": config.FAILURE_TEXT}
         return {"tool_result": result, "tool_action_pending": False,
                 "tool_call_count": calls, "refusal": refusal.as_dict(name)}
 
     fn = tools.TOOL_REGISTRY.get(name)
     if fn is None:
-        result = {"tool": name or "unknown", "error": "no such tool",
+        result = {"tool": name or "unknown", "error": "no such tool", "tool_status": "refused",
                   "summary": "I hit a snag completing that — a human agent will follow up."}
     else:
         # Filler channel: cover the tool's latency with a canned acknowledgment
@@ -1166,12 +1167,25 @@ async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
                 done, _ = await asyncio.wait({task}, timeout=max(config.FILLER_DELAY_MS, 0) / 1000)
                 if not done:
                     filler.emit({"type": "filler", "kind": "tool", "tool": name, "text": filler_text})
-            result = await task
+            # Every tool call is bounded: a hung backend becomes a typed
+            # timeout, never a turn that waits for the Shell's own ceiling. A
+            # sync tool's worker thread cannot be killed and may still finish
+            # — which is exactly why a timed-out effect is "unverified", not
+            # "nothing changed" (execution_validator).
+            timeout = _setting("TOOL_TIMEOUT_S", 15.0)
+            result = await asyncio.wait_for(task, timeout=timeout)
             if asyncio.iscoroutine(result):   # a sync factory that returns a coroutine
-                result = await result
+                result = await asyncio.wait_for(result, timeout=timeout)
+            if isinstance(result, dict):
+                result = {**result, "tool_status": "error" if result.get("error") else "ok"}
+        except asyncio.TimeoutError:
+            logger.warning("tool %s timed out after %.2fs [thread=%s]", name, timeout, thread_id)
+            result = {"tool": name, "error": f"{name} timed out after {timeout:g}s",
+                      "tool_status": "timeout",
+                      "summary": "I hit a snag completing that — a human agent will follow up."}
         except Exception as e:
             logger.exception("tool %s crashed", name)
-            result = {"tool": name, "error": str(e),
+            result = {"tool": name, "error": str(e), "tool_status": "crashed",
                       "summary": "I hit a snag completing that — a human agent will follow up."}
     logger.info("tool %s -> %s", name, result)
 
@@ -1184,22 +1198,11 @@ async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
     if config.COMPACTION_ENABLED and isinstance(result, dict):
         result = compaction.crush_result(result)
 
-    # Functional session cache (zero-inference update): after a HEALTHY run,
-    # copy the flow's whitelisted result fields into session_facts with a
-    # code-level dict merge — no model, no token cost, no reasoning errors.
-    facts = dict(state.get("session_facts") or {})
-    flow = FLOW_BY_TOOL.get(name)
-    if flow is not None and isinstance(result, dict) and not result.get("error"):
-        for key in flow.cache_keys:
-            if result.get(key):
-                facts[key] = str(result[key])
-
+    # The session cache and last_action (grounding, flow completion) are NOT
+    # written here: a tool's own report is not evidence. execution_validator
+    # writes them once the outcome is classified (verified / unchecked).
     return {"tool_result": result, "tool_action_pending": False,
-            "tool_call_count": calls + 1, "session_facts": facts,
-            # Grounding memory: persists across turns so follow-ups ("cash",
-            # "how do you know?") are understood in context of this action.
-            "last_action": {"tool": result.get("tool", name),
-                            "summary": result.get("summary", ""), "result": result}}
+            "tool_call_count": calls + 1}
 
 
 # ======================================================================== #
@@ -1209,23 +1212,133 @@ async def tool_exec_node(state, thread_id: str = "", ledger=None) -> dict:
 #     it entirely (Flow.enrich=False) for deterministic sub-600ms replies.   #
 # ======================================================================== #
 async def execution_validator_node(state) -> dict:
+    """Classify what the tool call actually achieved, from evidence:
+
+      verified    tool ok AND its read-back (tools.VERIFIERS) shows exactly
+                  this effect                              -> success path
+      unchecked   no read-back exists and the flow is not gated (a read-only
+                  lookup), tool ok                         -> success path
+      failed      the tool never ran (refused), a read-only tool erred, or an
+                  effect tool RETURNED an error and the read-back proves
+                  nothing landed                           -> FAILURE_TEXT, retryable
+      unverified  an effect was attempted and none of the above holds:
+                  timeout, crash, dropped write, mismatched or unreadable
+                  read-back, or a gated tool with no read-back at all
+                                                          -> UNVERIFIED_TEXT
+
+    Only verified/unchecked results reach enrichment, the session cache and
+    last_action — so nothing downstream can phrase, cache or count as done an
+    effect nobody saw land."""
     result = state.get("tool_result", {}) or {}
-    tool = result.get("tool") or state.get("cold_payload", {}).get("tool", "")
-    malformed = not isinstance(result, dict) or not result.get("summary")
-    if (isinstance(result, dict) and result.get("error")) or malformed:
-        error = result.get("error", "malformed tool result") if isinstance(result, dict) else "malformed tool result"
-        logger.info("execution validator: FAIL for %s (%s)", tool, error)
-        return {"execution_error": {"tool": tool, "error": str(error)},
-                "needs_enrichment": False}
+    payload = state.get("cold_payload", {}) or {}
+    tool = (result.get("tool") if isinstance(result, dict) else "") or payload.get("tool", "")
+    outcome = await _classify_outcome(tool, result, payload.get("args", {}) or {})
+    logger.info("execution validator: %s for %s (%s)", outcome["outcome"].upper(), tool,
+                outcome.get("evidence") or outcome.get("reason", ""))
+    updates: dict = {"action_outcome": outcome}
+
+    if outcome["outcome"] in ("failed", "unverified"):
+        updates.update(needs_enrichment=False, execution_error={
+            "tool": tool, "error": outcome["reason"], "outcome": outcome["outcome"]})
+        if outcome["outcome"] == "unverified":
+            # Grounding must not repeat the tool's success summary, and the
+            # flow must not count as complete (its result carries an error).
+            updates["last_action"] = {"tool": tool, "summary": _unverified_text(),
+                                      "result": {**result, "error": f"unverified: {outcome['reason']}"}}
+        elif result.get("tool_status") != "refused":
+            updates["last_action"] = {"tool": tool, "summary": result.get("summary", ""),
+                                      "result": result}
+        return updates
+
+    # Functional session cache (zero-inference update): only after an outcome
+    # the platform can stand behind, copy the flow's whitelisted result fields
+    # into session_facts with a code-level dict merge.
+    facts = dict(state.get("session_facts") or {})
     flow = FLOW_BY_TOOL.get(tool)
+    for key in (flow.cache_keys if flow is not None else ()):
+        if result.get(key):
+            facts[key] = str(result[key])
+    updates.update(execution_error={}, session_facts=facts,
+                   # Grounding memory: persists across turns so follow-ups
+                   # ("how do you know?") are understood in context.
+                   last_action={"tool": tool, "summary": result.get("summary", ""), "result": result})
     enrich = flow.enrich if flow is not None else True
-    logger.info("execution validator: OK for %s (enrich=%s)", tool, enrich)
     if not enrich:
         # SLM bypass: the tool's summary is already user-ready — phrase it
         # deterministically here (summary + declared hint), zero model hops.
-        return {"execution_error": {}, "needs_enrichment": False,
-                **_offer_paused(state, _phrase_result(result))}
-    return {"execution_error": {}, "needs_enrichment": True}
+        updates["needs_enrichment"] = False
+        updates.update(_offer_paused(state, _phrase_result(result)))
+        return updates
+    updates["needs_enrichment"] = True
+    return updates
+
+
+def _setting(name: str, default):
+    """An engine knob the agent's config.py may set. config.py is per agent and
+    may predate the knob, so absence means the engine default."""
+    return getattr(config, name, default)
+
+
+_UNVERIFIED_DEFAULT = ("I couldn't confirm that went through on our side, so please don't "
+                       "count on it yet. A team member will check and get back to you.")
+
+
+def _unverified_text() -> str:
+    return _setting("UNVERIFIED_TEXT", _UNVERIFIED_DEFAULT)
+
+
+async def _read_back(verifier, args: dict, result: dict) -> tuple:
+    """Run a verifier bounded by VERIFY_TIMEOUT_S. Returns (status, detail);
+    status "unreadable" when it raised or timed out — never a guess."""
+    timeout = _setting("VERIFY_TIMEOUT_S", 5.0)
+    try:
+        if asyncio.iscoroutinefunction(verifier):
+            out = await asyncio.wait_for(verifier(args, result), timeout=timeout)
+        else:
+            out = await asyncio.wait_for(asyncio.to_thread(verifier, args, result), timeout=timeout)
+    except asyncio.TimeoutError:
+        return "unreadable", f"read-back timed out after {timeout:g}s"
+    except Exception as e:   # domain code: any failure is "could not read", typed below
+        logger.warning("read-back raised %s: %s", type(e).__name__, e)
+        return "unreadable", f"read-back failed: {type(e).__name__}: {e}"
+    if not (isinstance(out, tuple) and len(out) == 2 and out[0] in ("present", "absent", "mismatch")):
+        return "unreadable", f"verifier returned an invalid verdict {out!r}"
+    return out
+
+
+async def _classify_outcome(tool: str, result, args: dict) -> dict:
+    if not isinstance(result, dict):
+        return {"outcome": "failed", "verified": None, "tool_status": "malformed",
+                "reason": "malformed tool result"}
+    status = result.get("tool_status") or ("error" if result.get("error") else "ok")
+    healthy = status == "ok" and bool(result.get("summary"))
+    if status == "refused":
+        return {"outcome": "failed", "verified": None, "tool_status": status,
+                "reason": str(result.get("error", "refused before running"))}
+
+    flow = FLOW_BY_TOOL.get(tool)
+    verifier = getattr(tools, "VERIFIERS", {}).get(tool)
+    gated = flow is not None and bool(authz.flow_gates(flow))
+    if verifier is None and not gated:
+        # Read-only: a failed lookup changed nothing.
+        if healthy:
+            return {"outcome": "unchecked", "verified": None, "tool_status": status}
+        return {"outcome": "failed", "verified": None, "tool_status": status,
+                "reason": str(result.get("error") or "malformed tool result")}
+    if verifier is None:
+        return {"outcome": "unverified", "verified": False, "tool_status": status,
+                "reason": f"gated tool {tool} has no read-back in tools.VERIFIERS"}
+
+    seen, detail = await _read_back(verifier, args, result)
+    if healthy and seen == "present":
+        return {"outcome": "verified", "verified": True, "tool_status": status, "evidence": detail}
+    if status == "error" and seen == "absent":
+        # The tool returned (did not hang) and the system holds nothing:
+        # "nothing was changed" is now a checked statement.
+        return {"outcome": "failed", "verified": False, "tool_status": status,
+                "reason": str(result.get("error")), "evidence": detail}
+    return {"outcome": "unverified", "verified": False, "tool_status": status,
+            "reason": f"tool {status}; read-back {seen}: {detail}"}
 
 
 def _phrase_result(result: dict) -> str:
@@ -1266,10 +1379,17 @@ def _offer_paused(state, draft: str) -> dict:
 # 4c. FAILURE (no model) — graceful degradation for a failed Act             #
 # ======================================================================== #
 async def failure_node(state) -> dict:
-    """A tool failed (or the breaker tripped): tell the user plainly, keep the
-    session alive, and keep the flow RETRYABLE by re-pending it with its slots
-    — the next 'try again' resumes without re-collecting everything."""
+    """A tool failed (or the breaker tripped, or authorization refused it):
+    tell the user plainly, keep the session alive, and keep the flow RETRYABLE
+    by re-pending it with its slots — the next 'try again' resumes without
+    re-collecting everything. An UNVERIFIED effect is different: see below."""
     intent = state.get("intent", "")
+    if (state.get("execution_error") or {}).get("outcome") == "unverified":
+        # An effect may or may not have landed. Never "nothing was changed",
+        # never an invitation to retry (a retry could double it), and the
+        # promised human check is wired through the Shell-observed flag.
+        return {"draft_response": _unverified_text(), "needs_enrichment": False,
+                "handoff_requested": True}
     updates = {"draft_response": config.FAILURE_TEXT, "needs_enrichment": False}
     if intent in config.FLOWS:
         updates["pending_intent"] = intent

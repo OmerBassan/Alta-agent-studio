@@ -11,6 +11,12 @@ Contract for every tool:
     one plain-English sentence used verbatim by mock mode and as grounding by
     the ENRICH tier in live mode.
 Register each tool in TOOL_REGISTRY at the bottom.
+
+Every tool with a real-world effect (any gated flow) also registers a
+read-back in VERIFIERS: verify(args, result) -> (status, detail), status one
+of "present" (the system holds exactly this effect), "absent" (it holds
+nothing for these args) or "mismatch" (it holds something else). The engine
+never takes a tool's own "booked: True" as evidence — only the read-back.
 """
 
 from __future__ import annotations
@@ -20,8 +26,10 @@ import logging
 import os
 import re
 import smtplib
+import threading
+import time
 from email.mime.text import MIMEText
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +54,76 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 _BRANCH_LABELS = {"downtown": "Downtown (12 River St)", "mall": "Mall (Westfield, level 2)",
                   "airport": "Airport (Terminal B)"}
+
+
+class SimulatedBackend:
+    """The mock system of record the effect tools write to and the verifiers
+    read back from — what a calendar or payments API is in a real deployment.
+
+    Writer: the effect tools; reader: VERIFIERS; one lock guards both. Ids are
+    issued per write (never derived from the args), so a dropped write cannot
+    be mistaken for an earlier identical one. In-memory and process-local;
+    reset() clears it (tests, a fresh sandbox run).
+
+    Failure injection, read at call time from the environment:
+      SIMULATED_FAILURE=drop_write     the tool reports success, nothing is stored
+      SIMULATED_FAILURE=reject         the system refuses; the tool returns an error
+      SIMULATED_FAILURE=timeout        the write hangs SIMULATED_DELAY_S seconds
+      SIMULATED_FAILURE=readback_down  every read-back raises
+    SIMULATED_FAILURE_TOOLS (comma list) limits injection to those tools."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._records: Dict[Tuple[str, Tuple], Dict[str, object]] = {}
+        self._seq = 0
+
+    def reset(self) -> None:
+        with self._lock:
+            self._records.clear()
+            self._seq = 0
+
+    @staticmethod
+    def _failure(tool: str) -> str:
+        mode = os.getenv("SIMULATED_FAILURE", "").strip()
+        scope = [t.strip() for t in os.getenv("SIMULATED_FAILURE_TOOLS", "").split(",") if t.strip()]
+        return mode if mode and (not scope or tool in scope) else ""
+
+    def write(self, tool: str, key: Tuple, record: Dict[str, object], prefix: str) -> Optional[str]:
+        """Store `record` under (tool, key) and return the issued id; None when
+        the system rejected the write. Under drop_write the id is returned but
+        nothing is stored — the lie the read-back exists to catch."""
+        mode = self._failure(tool)
+        if mode == "reject":
+            return None
+        if mode == "timeout":
+            # Deterministic for tests: the hung write never lands.
+            time.sleep(float(os.getenv("SIMULATED_DELAY_S", "30")))
+            return None
+        with self._lock:
+            self._seq += 1
+            issued = f"{prefix}-{self._seq:05d}"
+            if mode != "drop_write":
+                self._records[(tool, key)] = {**record, "id": issued}
+        return issued
+
+    def read(self, tool: str, key: Tuple) -> Optional[Dict[str, object]]:
+        if self._failure(tool) == "readback_down":
+            raise ConnectionError(f"{tool} read-back unavailable (simulated)")
+        with self._lock:
+            rec = self._records.get((tool, key))
+            return dict(rec) if rec else None
+
+
+BACKEND = SimulatedBackend()
+
+
+def _read_back(tool: str, key: Tuple, issued: str) -> Tuple[str, str]:
+    rec = BACKEND.read(tool, key)
+    if rec is None:
+        return "absent", f"no {tool} record for {key}"
+    if not issued or rec["id"] != issued:
+        return "mismatch", f"{tool} record for {key} is {rec['id']}, the tool reported {issued or 'none'}"
+    return "present", f"{tool} record {rec['id']} found for {key}"
 
 
 def _stable_hash(*parts: str) -> int:
@@ -75,14 +153,24 @@ def lookup_order(order_id: str = "", **_) -> Dict[str, object]:
 
 
 def book_appointment(branch: str = "", slot_iso: str = "", **_) -> Dict[str, object]:
-    """Mock appointment booking. Real impl -> calendar/CRM API."""
-    ok = bool(branch and slot_iso)
-    confirmation = f"FIT-{_stable_hash('fit', branch, slot_iso) % 100000:05d}" if ok else ""
+    """Mock appointment booking against the simulated calendar. Real impl ->
+    calendar/CRM API; verify_appointment then reads that same calendar."""
     label = _BRANCH_LABELS.get(branch, branch or "the branch")
-    summary = (f"Your fitting at {label} is booked for {slot_iso} (confirmation {confirmation})."
-               if ok else "The booking could not be completed.")
+    confirmation = (BACKEND.write("book_appointment", (branch, slot_iso),
+                                  {"branch": branch, "slot_iso": slot_iso}, "FIT")
+                    if branch and slot_iso else None)
+    if not confirmation:
+        return {"tool": "book_appointment", "branch": branch, "slot_iso": slot_iso,
+                "booked": False, "error": "calendar rejected the booking",
+                "summary": "The booking could not be completed."}
+    summary = f"Your fitting at {label} is booked for {slot_iso} (confirmation {confirmation})."
     return {"tool": "book_appointment", "branch": branch, "slot_iso": slot_iso,
-            "booked": ok, "confirmation": confirmation, "summary": summary}
+            "booked": True, "confirmation": confirmation, "summary": summary}
+
+
+def verify_appointment(args: dict, result: dict) -> Tuple[str, str]:
+    return _read_back("book_appointment", (args.get("branch", ""), args.get("slot_iso", "")),
+                      str(result.get("confirmation") or ""))
 
 
 def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
@@ -90,12 +178,19 @@ def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
     only ever runs after an OPERATOR approved the payload at the interrupt
     gate. Real impl -> payments API. Its summary is fully formatted, so the
     flow sets enrich=False and the SLM hop is bypassed."""
-    ok = bool(order_id)
-    ref = f"RF-{_stable_hash('refund', order_id) % 100000:05d}" if ok else ""
-    summary = (f"Your refund for order {order_id} has been approved and submitted (reference {ref})."
-               if ok else "The refund could not be submitted.")
-    return {"tool": "issue_refund", "order_id": order_id, "refunded": ok,
+    ref = (BACKEND.write("issue_refund", (order_id,), {"order_id": order_id}, "RF")
+           if order_id else None)
+    if not ref:
+        return {"tool": "issue_refund", "order_id": order_id, "refunded": False,
+                "error": "payments system rejected the refund",
+                "summary": "The refund could not be submitted."}
+    summary = f"Your refund for order {order_id} has been approved and submitted (reference {ref})."
+    return {"tool": "issue_refund", "order_id": order_id, "refunded": True,
             "reference": ref, "summary": summary}
+
+
+def verify_refund(args: dict, result: dict) -> Tuple[str, str]:
+    return _read_back("issue_refund", (args.get("order_id", ""),), str(result.get("reference") or ""))
 
 
 def send_email(email: str = "", subject: str = "Follow-up from our call", body: str = "", **_) -> Dict[str, object]:
@@ -145,6 +240,13 @@ TOOL_REGISTRY: Dict[str, Callable[..., Dict[str, object]]] = {
     "book_appointment": book_appointment,
     "issue_refund": issue_refund,
     "send_email": send_email,
+}
+
+# tool name -> read-back. Required for every tool a gated flow runs (the
+# selftest's structural preflight fails without one); optional otherwise.
+VERIFIERS: Dict[str, Callable[[dict, dict], Tuple[str, str]]] = {
+    "book_appointment": verify_appointment,
+    "issue_refund": verify_refund,
 }
 
 # Compaction retrieval (engine, not domain): pages back the full items behind

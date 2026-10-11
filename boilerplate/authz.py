@@ -140,6 +140,16 @@ def preflight_flows(flows: Mapping[str, object]) -> None:
         raise FlowDeclarationError("misdeclared flows: " + "; ".join(problems))
 
 
+def verification_gaps(flows: Mapping[str, object], verifiers: Mapping[str, object]) -> list:
+    """Gated flows whose tool has no read-back. A gated action is a real-world
+    effect; without a read-back the engine can never report it as done (it
+    returns "unverified" at runtime), so the selftest fails the agent here."""
+    return [f"verification: flow {name} runs gated tool {flow.tool} with no read-back "
+            f"in tools.VERIFIERS — its effect could never be confirmed"
+            for name, flow in flows.items()
+            if flow_gates(flow) and flow.tool not in verifiers]
+
+
 # ── binding ─────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class Binding:

@@ -618,6 +618,17 @@ STALL_TEXT = ("I'm sorry — we seem to be going in circles, and I clearly haven
               "resolved what you need. Could you rephrase it in one short sentence? "
               "Or just say 'talk to a human' and I'll hand this conversation to a person.")
 
+# Deterministic reply when an effect was attempted but its read-back did not
+# confirm it (timeout, crash, dropped write, unreadable read-back). It must not
+# claim success, must not claim nothing changed, and must not invite a retry.
+UNVERIFIED_TEXT = ("I couldn't confirm that went through on our side, so please don't "
+                   "count on it yet. A team member will check and get back to you.")
+
+# Bounds on every tool call and every read-back (seconds). A hung backend
+# becomes a typed outcome instead of a stalled turn.
+TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "15"))
+VERIFY_TIMEOUT_S = float(os.getenv("VERIFY_TIMEOUT_S", "5"))
+
 # Deterministic reply from the failure node (execution validator caught a tool
 # error or the circuit breaker tripped). Keeps the session alive and retryable.
 FAILURE_TEXT = ("I hit a snag completing that on our side — nothing was changed. "

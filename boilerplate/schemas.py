@@ -264,6 +264,15 @@ class AgentState(TypedDict, total=False):
     needs_enrichment: bool      # set by the execution validator: route via ENRICH or bypass
     tool_call_count: int        # circuit breaker: tool executions this turn (reset per turn)
     execution_error: dict       # set by the execution validator on tool failure/breaker trip
+                                # {"tool", "error", "outcome": "failed" | "unverified"}
+
+    # What the last tool call is known to have achieved ({} when none ran):
+    #   {"outcome": "verified" | "unchecked" | "failed" | "unverified",
+    #    "verified": bool | None, "tool_status", "evidence" | "reason"}
+    #   writer:    execution_validator (read-back via tools.VERIFIERS).
+    #   reader:    failure_node (wording, retry, handoff), the trace, the Shell.
+    #   lifecycle: reset to {} by TURN_RESET at the start of every turn.
+    action_outcome: dict
 
     # HITL gate (a "liability" flow): the graph is interrupt()-suspended
     # awaiting an OPERATOR decision (distinct from the confirm gate, the
