@@ -1,6 +1,14 @@
 """Execution-time authorization for gated tools. Generic — do not edit per
 domain (engine file, see ENGINE_FILES in builder_core.py).
 
+Two questions, asked by tool_exec (nodes._authorize) before any tool runs:
+
+  * Authorization, for every tool: is it declared by a flow, and is it the
+    ACTIVE flow's tool? An undeclared tool, or one injected into another
+    turn, is refused. "Ungated" never means "runs in any turn".
+  * Approval, for gated tools only: has every required human gate been
+    passed for exactly this payload?
+
 A Flow declares WHAT its action is, as a set of properties; the engine derives
 WHICH gates that requires, and tool_exec refuses to run a gated tool unless a
 platform-owned record proves every required gate was passed for exactly this

@@ -209,6 +209,8 @@ def test_filler_emit_rotation_killswitch():
                         if f.tool in tools.TOOL_REGISTRY), None)
     if sample_tool is None:
         return
+    # tool_exec runs a tool only as the active flow's action.
+    sample_flow = next(n for n, f in config.FLOWS.items() if f.tool == sample_tool)
 
     async def _run():
         real_delay, real_enabled = config.FILLER_DELAY_MS, config.FILLER_ENABLED
@@ -221,7 +223,7 @@ def test_filler_emit_rotation_killswitch():
             emitted = []
             for _ in range(2):
                 await nodes.tool_exec_node(
-                    {"cold_payload": {"tool": sample_tool, "args": {}},
+                    {"cold_payload": {"tool": sample_tool, "args": {}}, "intent": sample_flow,
                      "tool_call_count": 0, "session_facts": {}})
                 events = []
                 while not sink.empty():
@@ -236,7 +238,7 @@ def test_filler_emit_rotation_killswitch():
             config.FILLER_ENABLED = False
             filler.reset_rotation()
             await nodes.tool_exec_node(
-                {"cold_payload": {"tool": sample_tool, "args": {}},
+                {"cold_payload": {"tool": sample_tool, "args": {}}, "intent": sample_flow,
                  "tool_call_count": 0, "session_facts": {}})
             assert sink.empty(), "emitted while FILLER_ENABLED=False"
         finally:

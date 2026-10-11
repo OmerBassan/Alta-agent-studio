@@ -174,9 +174,9 @@ def verify_appointment(args: dict, result: dict) -> Tuple[str, str]:
 
 
 def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
-    """Mock refund issuance. HIGH-STAKES: the flow is Flow(hitl=True), so this
-    only ever runs after an OPERATOR approved the payload at the interrupt
-    gate. Real impl -> payments API. Its summary is fully formatted, so the
+    """Mock refund issuance. HIGH-STAKES: its flow declares the "liability"
+    property, so this only ever runs after an OPERATOR approved the payload at
+    the interrupt gate. Real impl -> payments API. Its summary is fully formatted, so the
     flow sets enrich=False and the SLM hop is bypassed."""
     ref = (BACKEND.write("issue_refund", (order_id,), {"order_id": order_id}, "RF")
            if order_id else None)

@@ -281,7 +281,7 @@ class Stage:
 
 
 # The ordered sales spine. EMPTY => the director is a no-op and the agent stays
-# purely reactive (correct for an INBOUND support agent like this Acme demo).
+# purely reactive (correct for an INBOUND front-desk agent like this one).
 # An OUTBOUND SDR MUST define this from the approved playbook's spine scenes.
 CALL_ARC: Tuple[Stage, ...] = ()
 

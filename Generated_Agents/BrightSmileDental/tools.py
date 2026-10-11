@@ -21,7 +21,6 @@ never takes a tool's own "booked: True" as evidence — only the read-back.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -121,10 +120,6 @@ def _read_back(tool: str, key: Tuple, issued: str) -> Tuple[str, str]:
     if not issued or rec["id"] != issued:
         return "mismatch", f"{tool} record for {key} is {rec['id']}, the tool reported {issued or 'none'}"
     return "present", f"{tool} record {rec['id']} found for {key}"
-
-
-def _stable_hash(*parts: str) -> int:
-    return int(hashlib.md5(":".join(p or "" for p in parts).encode("utf-8")).hexdigest(), 16)
 
 
 def book_dental_visit(visit_type: str = "", slot_iso: str = "", **_) -> Dict[str, object]:

@@ -15,7 +15,6 @@ Register each tool in TOOL_REGISTRY at the bottom.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -45,10 +44,6 @@ _SMTP_TIMEOUT_S = float(os.getenv("SMTP_TIMEOUT_S", "10"))
 # ("name@site.com?") or surrounding words; sending that verbatim makes Gmail
 # reject the recipient and the whole follow-up silently fails.
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-
-_BRANCH_LABELS = {"downtown": "Downtown (12 River St)", "mall": "Mall (Westfield, level 2)",
-                  "airport": "Airport (Terminal B)"}
-
 
 class SimulatedBackend:
     """The mock system of record the effect tools write to and the verifiers
@@ -118,56 +113,6 @@ def _read_back(tool: str, key: Tuple, issued: str) -> Tuple[str, str]:
     if not issued or rec["id"] != issued:
         return "mismatch", f"{tool} record for {key} is {rec['id']}, the tool reported {issued or 'none'}"
     return "present", f"{tool} record {rec['id']} found for {key}"
-
-
-def _stable_hash(*parts: str) -> int:
-    return int(hashlib.md5(":".join(p or "" for p in parts).encode("utf-8")).hexdigest(), 16)
-
-
-def lookup_order(order_id: str = "", **_) -> Dict[str, object]:
-    """Mock order-tracking lookup. Deterministic per order_id so tests are
-    stable. Real impl -> orders API.
-
-    Order ids whose digits are all 9s simulate a BACKEND OUTAGE: the tool
-    returns an "error" result, which the execution validator routes to the
-    failure node (graceful degradation is testable without a live API)."""
-    digits = "".join(c for c in (order_id or "") if c.isdigit())
-    if digits and set(digits) == {"9"}:
-        return {"tool": "lookup_order", "order_id": order_id,
-                "error": "orders backend timeout (simulated)",
-                "summary": "The order system did not respond."}
-    h = _stable_hash("order", (order_id or "").upper())
-    status = ("shipped", "processing", "ready for pickup")[h % 3]
-    eta_days = (h % 4) + 1
-    summary = (f"Order {order_id} is {status}"
-               + (f" and should arrive in about {eta_days} days" if status == "shipped" else "")
-               + ".")
-    return {"tool": "lookup_order", "order_id": order_id, "status": status,
-            "eta_days": eta_days if status == "shipped" else None, "summary": summary}
-
-
-def book_appointment(branch: str = "", slot_iso: str = "", **_) -> Dict[str, object]:
-    """Mock appointment booking. Real impl -> calendar/CRM API."""
-    ok = bool(branch and slot_iso)
-    confirmation = f"FIT-{_stable_hash('fit', branch, slot_iso) % 100000:05d}" if ok else ""
-    label = _BRANCH_LABELS.get(branch, branch or "the branch")
-    summary = (f"Your fitting at {label} is booked for {slot_iso} (confirmation {confirmation})."
-               if ok else "The booking could not be completed.")
-    return {"tool": "book_appointment", "branch": branch, "slot_iso": slot_iso,
-            "booked": ok, "confirmation": confirmation, "summary": summary}
-
-
-def issue_refund(order_id: str = "", **_) -> Dict[str, object]:
-    """Mock refund issuance. HIGH-STAKES: the flow is Flow(hitl=True), so this
-    only ever runs after an OPERATOR approved the payload at the interrupt
-    gate. Real impl -> payments API. Its summary is fully formatted, so the
-    flow sets enrich=False and the SLM hop is bypassed."""
-    ok = bool(order_id)
-    ref = f"RF-{_stable_hash('refund', order_id) % 100000:05d}" if ok else ""
-    summary = (f"Your refund for order {order_id} has been approved and submitted (reference {ref})."
-               if ok else "The refund could not be submitted.")
-    return {"tool": "issue_refund", "order_id": order_id, "refunded": ok,
-            "reference": ref, "summary": summary}
 
 
 def send_email(email: str = "", subject: str = "Follow-up from our call", body: str = "", **_) -> Dict[str, object]:
@@ -245,9 +190,6 @@ def verify_sales_call(args: dict, result: dict) -> Tuple[str, str]:
 
 # name -> callable; the Think step's cold payload references these names.
 TOOL_REGISTRY: Dict[str, Callable[..., Dict[str, object]]] = {
-    "lookup_order": lookup_order,
-    "book_appointment": book_appointment,
-    "issue_refund": issue_refund,
     "send_email": send_email,
     "capture_lead_profile": capture_lead_profile,
     "book_sales_call": book_sales_call,

@@ -13,12 +13,14 @@ Request:
    "validator_drafts": ["text", ...]}         # optional: run the exit filter
   step = "message"
        | {"message": "...", "inject": {...state...}, "env": {"NAME": "value"}}
+       | {"resume": {"approved": bool}}   # operator decision on the open interrupt;
+                                          # the driver echoes the offer_id it showed
 Response:
   {"conversations": [[turn, ...], ...], "validator": ["filtered", ...],
    "tool_registry": [...], "verifiers": [...]}
   turn = {"message", "final_response", "trace", "handoff_requested",
           "pending_confirmation", "pending_intent", "session_facts",
-          "tool_calls": [[tool, args], ...], "interrupted"}
+          "tool_calls": [[tool, args], ...], "interrupted", "interrupt"}
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ def _main(agent_dir: str) -> None:
     import tools
     from graph import TURN_RESET, build_pipeline
     from langchain_core.messages import HumanMessage
+    from langgraph.types import Command
 
     request = json.loads(sys.stdin.read())
     calls: list = []
@@ -69,14 +72,23 @@ def _main(agent_dir: str) -> None:
             step = {"message": step} if isinstance(step, str) else step
             for k, v in (step.get("env") or {}).items():
                 os.environ[k] = v
-            payload = dict(TURN_RESET)
-            payload["user_message"] = step["message"]
-            payload["recent_messages"] = [HumanMessage(content=step["message"])]
-            payload.update(step.get("inject") or {})
             before = len(calls)
-            st = await graph.ainvoke(payload, config=cfg)
+            if "resume" in step:
+                snap = await graph.aget_state(cfg)
+                offer = snap.interrupts[0].value.get("offer_id") if snap.interrupts else None
+                decision = {**step["resume"], "offer_id": offer}
+                st = await graph.ainvoke(Command(resume=decision), config=cfg)
+                label = f"<operator {'approves' if decision.get('approved') else 'denies'}>"
+            else:
+                payload = dict(TURN_RESET)
+                payload["user_message"] = step["message"]
+                payload["recent_messages"] = [HumanMessage(content=step["message"])]
+                payload.update(step.get("inject") or {})
+                st = await graph.ainvoke(payload, config=cfg)
+                label = step["message"]
+            pause = st.get("__interrupt__") or []
             out.append({
-                "message": step["message"],
+                "message": label,
                 "final_response": st.get("final_response", ""),
                 "trace": st.get("trace") or [],
                 "handoff_requested": bool(st.get("handoff_requested")),
@@ -84,7 +96,8 @@ def _main(agent_dir: str) -> None:
                 "pending_intent": st.get("pending_intent"),
                 "session_facts": st.get("session_facts") or {},
                 "tool_calls": calls[before:],
-                "interrupted": bool(st.get("__interrupt__")),
+                "interrupted": bool(pause),
+                "interrupt": pause[0].value if pause else None,
             })
         return out
 

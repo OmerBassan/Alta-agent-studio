@@ -123,9 +123,11 @@ START
   validator to a graceful failure reply that keeps the flow retryable.
 - Safety rails: a per-turn tool budget (`MAX_TOOL_CALLS_PER_TURN`), a plan
   ceiling (`MAX_PLAN_STEPS`, keep it ≤ the tool budget), and
-  `Flow(hitl=True)` flows suspend via `interrupt()` for an **operator
-  approval** before executing (the CLI doubles as the operator console; use
-  `--session` sqlite if approvals may span restarts).
+  flows declaring the `liability` property suspend via `interrupt()` for an
+  **operator approval** before executing; the operator's
+  `Command(resume={"approved": ..., "offer_id": ...})` must name the offer the
+  interrupt showed. No operator console ships, and approvals are in-process:
+  they do not survive a restart (see `authz.py`).
 - `Flow(enrich=False)` bypasses the SLM: the execution validator phrases the
   result deterministically (summary + hint) — the low-latency fast path.
 - `validator` (response validator) is the only door to the user: strips

@@ -33,10 +33,12 @@ Roles (each a model tier via llm_client):
                                  HITL gate (liability) — see authz.py
   3b. hitl_gate (no model)     — interrupt(): suspend for OPERATOR approval of
                                  a liability payload before Act
-  4. tool_exec (no model)      — Act step: refuses a gated tool without a
-                                 one-time platform record for this exact
-                                 payload (authz.py), then deterministic
-                                 side-effect via registry, breaker guarded
+  4. tool_exec (no model)      — Act step: refuses a tool no flow declares,
+                                 a tool that is not the active flow's, and a
+                                 gated tool without a one-time platform record
+                                 for this exact payload (authz.py); then the
+                                 deterministic side-effect via registry,
+                                 breaker guarded
   4b. execution_validator (no model) — Layer 2.5: inspect the tool result;
                                  route failure vs enrich vs SLM-bypass
   4c. failure (no model)       — graceful tool-failure reply, flow retryable
@@ -1089,18 +1091,28 @@ def _hitl_refused(state, refusal, tool: str) -> dict:
 
 
 def _authorize(state, name: str, thread_id: str, ledger):
-    """Execution-time gate check, run by tool_exec BEFORE the tool. Returns a
-    Refusal, or None when the tool needs no gate or every required gate holds a
-    granted, unconsumed record for exactly this payload (consumed here)."""
+    """Execution-time check, run by tool_exec BEFORE the tool. Returns a
+    Refusal when the tool is declared by no flow, or is not the active flow's
+    tool (authorization, for every tool), or a required gate lacks a granted,
+    unconsumed record for exactly this payload (approval, gated tools only;
+    consumed here). Returns None when the tool may run."""
     flow = FLOW_BY_TOOL.get(name)
-    gates = authz.flow_gates(flow) if flow is not None else frozenset()
-    if not gates:
-        return None
+    if flow is None:
+        # A tool runs only as a declared flow's tool. One no flow declares
+        # (registered or not) has no declared gates to check, so it is never
+        # "ungated" — it is undeclared, and refused.
+        return authz.Refusal(authz.PLATFORM_ERROR, f"tool {name!r} is not declared by any flow")
+    # Authorization, for EVERY declared tool: it runs only as the active
+    # flow's action. Gates (below) are the separate question of whether a
+    # human must also say yes; "ungated" never means "runs in any turn".
     intent = state.get("intent", "")
     active = config.FLOWS.get(intent)
     if active is None or active.tool != name:
         return authz.Refusal(authz.PLATFORM_ERROR,
                              f"tool {name} does not belong to the active flow {intent!r}")
+    gates = authz.flow_gates(flow)
+    if not gates:
+        return None
     if ledger is None or not thread_id:
         return authz.Refusal(authz.PLATFORM_ERROR, "no authorization ledger or conversation id")
     try:

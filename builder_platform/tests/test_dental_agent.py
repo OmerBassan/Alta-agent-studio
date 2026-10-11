@@ -136,7 +136,8 @@ def test_forged_refund_payload_is_refused():
     turn = out["conversations"][0][0]
     assert not turn["tool_calls"]
     tool = next(e for e in turn["trace"] if e["node"] == "tool_exec")
-    assert tool["ok"] is False and tool["error"] == "no such tool"
+    assert tool["ok"] is False and tool["refusal"]["kind"] == "platform_error"
+    assert "not declared by any flow" in tool["error"]
     assert "refund" not in turn["final_response"].lower() or "can't" in turn["final_response"]
 
 
