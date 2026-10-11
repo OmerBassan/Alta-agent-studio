@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction — Quiet Office</title>
+<style>
+/* ===========================================================
+   DIRECTION 2 — "QUIET OFFICE"
+   Register: the modern working surface that stays out of the way.
+   System grotesque sans, cool neutral greys, one soft elevation
+   step, 10px radii, tighter vertical rhythm than Ledger.
+
+   COLOR TOKENS (lift these)
+   --------------------------------------------------------
+   surface.page      #F3F5F7
+   surface.raised    #FFFFFF
+   surface.sunken    #E9EDF1
+   border.line       #D3DAE1   3.0:1 on raised
+   border.firm       #8A949E   3.6:1 on raised
+   text.body         #16202A   15.9:1 on raised
+   text.secondary    #4C5862   7.6:1 on raised
+   text.quiet        #646F79   5.2:1 on raised
+
+   state.established       #2F5B46  teal-green  7.0:1   plain label
+   state.notEstablished    #8A3A00  amber-brown 5.6:1   boxed, dashed, tinted band #FDF2E6
+   state.changed           #1F4E79  slate blue  7.8:1   underline + solid left bar
+   state.affected          #45607A  5.2:1              italic + dotted left bar
+
+   divergence.specDefect      #8A3A00  (square outline marker)
+   divergence.businessRefusal #2F5B46  (double rule marker, never an error form)
+   divergence.platformError   #4A4663  (angle-bracket marker)
+   diff.before #4C5862   diff.after #16202A
+   attention.escalation #1F4E79
+   action.suspend #7A2E2E  6.1:1, outlined
+   elevation.soft 0 1px 2px rgba(22,32,42,.06), 0 8px 24px rgba(22,32,42,.06)
+   =========================================================== */
+
+:root{
+  --page:#F3F5F7; --raised:#FFFFFF; --sunken:#E9EDF1;
+  --line:#D3DAE1; --firm:#8A949E;
+  --ink:#16202A; --ink2:#4C5862; --ink3:#646F79;
+  --est:#2F5B46; --notest:#8A3A00; --notbg:#FDF2E6; --chg:#1F4E79; --aff:#45607A;
+  --defect:#8A3A00; --refusal:#2F5B46; --plat:#4A4663; --susp:#7A2E2E;
+  --sans:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  --r:10px;
+  --soft:0 1px 2px rgba(22,32,42,.06),0 8px 24px rgba(22,32,42,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E2E7EC;color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.62}
+.wrap{max-width:1340px;margin:0 auto;padding:26px 16px 70px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+h1,h2,h3,h4{font-weight:600}
+
+.rationale{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--soft);padding:20px 24px;margin-bottom:26px}
+.rationale h1{font-size:19px;margin:0 0 8px;letter-spacing:-.01em}
+.rationale p{margin:0;font-size:15px;color:var(--ink2);max-width:78ch}
+
+.browser{border:1px solid #C6CED6;border-radius:12px;overflow:hidden;background:var(--raised);box-shadow:var(--soft);margin-bottom:32px}
+.chrome{display:flex;align-items:center;gap:8px;background:var(--sunken);border-bottom:1px solid var(--line);padding:9px 14px}
+.dot{width:10px;height:10px;border-radius:50%;background:#C3CBD3}
+.addr{flex:1;font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+
+.appbar{display:flex;align-items:center;justify-content:space-between;padding:14px 26px;border-bottom:1px solid var(--line);background:var(--raised);gap:14px;flex-wrap:wrap}
+.mark{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.mark em{font-style:normal;color:var(--ink3);font-weight:400;margin-left:12px}
+.places{font-size:13.5px}
+.places b{border-bottom:2px solid var(--ink)}
+.places a{color:var(--ink2);text-decoration:none;margin-left:20px}
+
+.hero{display:grid;grid-template-columns:1fr 1.1fr;background:var(--page)}
+.col{padding:24px 26px 32px}
+.col.conv{background:var(--raised);border-right:1px solid var(--line)}
+
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);margin:0 0 4px}
+.origin{font-size:13.5px;color:var(--ink2);margin:0 0 22px;background:var(--sunken);border-radius:6px;padding:7px 11px;display:inline-block}
+.turn{max-width:56ch;margin:0 0 18px}
+.who{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:4px}
+.turn p{margin:0 0 8px}
+.turn.op p{background:var(--sunken);border-radius:var(--r);padding:12px 15px}
+.thinking{font-size:13.5px;color:var(--ink2);background:var(--page);border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;max-width:56ch}
+.composer{margin-top:24px;border-top:1px solid var(--line);padding-top:12px;color:var(--ink3);font-size:14.5px}
+
+.frame{background:var(--raised);border:1px solid var(--firm);border-radius:var(--r);padding:13px 16px;margin:0 0 24px}
+.frame strong{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+.frame p{margin:0;font-size:13.5px;color:var(--ink2)}
+.biz{font-size:13px;color:var(--ink2);margin:0 0 22px;letter-spacing:.02em}
+
+.sec{margin:0 0 22px;background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
+.sec h3{font-size:14px;letter-spacing:.09em;text-transform:uppercase;margin:0 0 12px}
+.item{max-width:62ch;margin:0 0 13px;padding-left:12px;border-left:2px solid var(--line)}
+.item p{margin:0 0 4px}
+.item.s-chg{border-left-color:var(--chg);border-left-width:4px}
+.item.s-aff{border-left:2px dotted var(--aff)}
+.item.s-not{border-left:2px dashed var(--notest);background:var(--notbg);border-radius:0 6px 6px 0;padding:8px 10px 8px 12px}
+
+.st{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:inline-block}
+.st.est{color:var(--est)}
+.st.chg{color:var(--chg);border-bottom:2px solid var(--chg)}
+.st.aff{color:var(--aff);font-style:italic;border-bottom:1px dotted var(--aff)}
+.st.not{color:var(--notest);border:1.5px dashed var(--notest);border-radius:4px;padding:3px 8px}
+.note{font-size:13.5px;color:var(--ink3);font-style:italic}
+
+/* cold-start state variant */
+.cold{background:var(--raised);border:1px dashed var(--firm);border-radius:var(--r);padding:18px 20px}
+.cold h4{font-size:13px;letter-spacing:.09em;text-transform:uppercase;margin:0 0 6px}
+.cold p{margin:0 0 14px;font-size:14px;color:var(--ink2);max-width:62ch}
+.cold ul{margin:0;padding:0;list-style:none}
+.cold li{border-top:1px solid var(--line);padding:11px 0}
+.cold li b{display:block;font-size:14px;font-weight:600;margin-bottom:4px}
+
+/* secondary: divergence list */
+.sheet{padding:26px 26px 34px;background:var(--page)}
+.sheet h2{font-size:20px;margin:0 0 6px;letter-spacing:-.01em}
+.lede{font-size:14.5px;color:var(--ink2);margin:0 0 24px;max-width:76ch}
+.kinds{display:grid;gap:18px}
+.kind{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:0;overflow:hidden}
+.kind > header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.glyph{flex:0 0 auto;width:28px;height:28px;display:grid;place-items:center;font-size:13px;font-weight:700;border-radius:6px}
+.k1 .glyph{border:2px solid var(--defect);color:var(--defect)}
+.k2 .glyph{border:2px double var(--refusal);color:var(--refusal);border-radius:50%}
+.k3 .glyph{border:2px dotted var(--plat);color:var(--plat)}
+.kind h3{font-size:15.5px;margin:0 0 2px}
+.k1 h3{color:var(--defect)} .k2 h3{color:var(--refusal)} .k3 h3{color:var(--plat)}
+.kind header p{margin:0;font-size:13.5px;color:var(--ink2);max-width:72ch}
+.kind ul{margin:0;padding:0;list-style:none}
+.kind li{padding:13px 18px 13px 58px;border-top:1px solid var(--line);font-size:14.5px}
+.kind li:first-child{border-top:0}
+.kind li span{display:block;color:var(--ink3);font-size:13px;margin-top:3px}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;border:1px solid var(--firm);border-radius:4px;padding:2px 7px;color:var(--ink2);margin-left:8px}
+
+.decide{display:flex;gap:14px;flex-wrap:wrap;margin-top:24px}
+.btn{font-size:14px;padding:10px 20px;border-radius:8px;border:1px solid var(--ink);background:var(--ink);color:#fff;text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--firm)}
+.susp{margin-top:28px;border-top:1px solid var(--line);padding-top:16px;font-size:13.5px;color:var(--ink2)}
+.susp a{color:var(--susp);border:1.5px solid var(--susp);border-radius:8px;padding:9px 16px;text-decoration:none;margin-right:14px;display:inline-block;font-weight:600}
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .col.conv{border-right:0;border-bottom:1px solid var(--line)}
+  .wrap{padding:16px}
+  .col,.sheet{padding:18px 16px 26px}
+  .kind li{padding-left:18px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="rationale">
+  <h1>Direction 2 — Quiet Office</h1>
+  <p>The personality is <em>the modern working surface that stays out of the way</em>: a neutral grotesque sans, cool greys, one soft elevation step and a single 10px radius, set to a tighter rhythm so more of the business is legible at once. It reads as competent software a business already trusts with its day. The trade-off it accepts: the register is familiar enough to be near-invisible, so it carries less of the product's own character than a more opinionated direction, and the panelled sections edge closer to looking like an application surface than a document.</p>
+</div>
+
+<!-- ======================= HERO ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Ironworks Strength &amp; Fitness</em></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section class="col conv" aria-label="The conversation">
+      <p class="eyebrow">The conversation</p>
+      <p class="origin">Opened from <strong>What it may and may not do</strong> — enquiries about joining.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>When someone asks whether the gym is right for them, what may it ask back, and what must it never ask?</p>
+      </div>
+
+      <div class="turn op">
+        <div class="who">You</div>
+        <p>It can ask what they want to train for and how often they can come. It must never ask about a medical condition. That conversation happens with a coach, in person.</p>
+      </div>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Recorded as a boundary it may not cross, not as a preference. If a member raises a condition themselves, it will acknowledge nothing about it and hand the enquiry to a human, with why.</p>
+        <p>I have nothing recorded for who may waive the joining fee, or for how far ahead the twelve-week programme can be promised.</p>
+      </div>
+
+      <div class="thinking">Checking this against the enquiries you forwarded last week.</div>
+      <div class="composer">Say what you want changed, in your own words…</div>
+    </section>
+
+    <section class="col" aria-label="What the Builder currently understands">
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>This is the record as it stands, not a surface you are editing. Nothing here reaches a member until a version has been checked and approved.</p>
+      </div>
+      <p class="biz">Ironworks Strength &amp; Fitness — two sites, coached strength training and open gym hours.</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item"><p>A coached strength gym on two sites, with open gym hours between coached blocks. Staffed by four coaches and one manager.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Direct and encouraging, never pushy. It does not talk about weight loss unless the member raises it first.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item"><p>Enquiries about joining, trial sessions and class times. Resolved when a trial session is held or the enquirer says they do not want one.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Membership freeze and cancellation requests, as far as recording the request and the date.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Whether corporate and block-booking enquiries belong here.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing is assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item"><p>Your own material: the membership terms, the coached timetable and the two site induction sheets. Where the terms and the timetable disagree about a session time, the timetable is taken as correct.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Enquiry details are kept for six months. Anything a member sends about their health is not retained at all.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item s-chg"><p>A trial session may be offered within the coached blocks only, and never during the Saturday open gym hours when the floor is unstaffed.</p><span class="st chg">Changed</span></div>
+        <div class="item s-aff"><p>What good looks like here: the worked case of a Saturday morning trial request, which currently shows a session being offered.</p><span class="st aff">Affected by this change</span></div>
+        <div class="item"><p>A freeze is accepted for up to three months in a membership year, and only from the start of a billing month.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Who may waive the joining fee, and on what grounds.</p><span class="st not">Not established</span> <span class="note">A recorded absence, and it stays visible until you settle it.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item"><p>It may never ask a member about a medical condition, and it may never give training or dietary advice. Both are a coach's job, in person.</p><span class="st est">Established</span></div>
+        <div class="item"><p>It may book a trial session and record a freeze request. It may not cancel a membership, and it may not take payment.</p><span class="st est">Established</span></div>
+        <div class="item"><p>An injury, a complaint about a coach, or a request to end a contract early is handed to a human, with why.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="cold">
+        <h4>How this looked on the first day</h4>
+        <p>Before anything had been established, the record was not blank. Each section already named its own absence.</p>
+        <ul>
+          <li><b>Your business</b><span class="st not">Not established</span></li>
+          <li><b>What the Agent handles</b><span class="st not">Not established</span></li>
+          <li><b>What it knows</b><span class="st not">Not established</span></li>
+          <li><b>How it operates</b><span class="st not">Not established</span></li>
+          <li><b>What it may and may not do</b><span class="st not">Not established</span></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ SECONDARY: DIVERGENCE LIST ============ -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / activity</span></div>
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Ironworks Strength &amp; Fitness</em></div>
+    <nav class="places"><a href="#">Understanding</a><b style="margin-left:20px">Activity</b></nav>
+  </div>
+  <div class="sheet">
+    <h2>Where behaviour and intent came apart</h2>
+    <p class="lede">Three different kinds of thing, not three levels of bad. Read each on its own terms.</p>
+
+    <div class="kinds">
+      <article class="kind k1">
+        <header>
+          <span class="glyph" aria-hidden="true">&#9633;</span>
+          <div><h3>Your specification got this wrong</h3>
+            <p>Yours to fix. What was recorded did not match how the business actually works.</p></div>
+        </header>
+        <ul>
+          <li>A member was offered a Saturday morning trial on the unstaffed floor.
+            <span>One interaction, Saturday. The record allowed it; your floor rule does not.</span>
+            <span class="tag">Open a correction</span></li>
+          <li>A freeze was recorded from mid-month.
+            <span>Two interactions this month. The record did not say freezes begin on a billing month.</span>
+            <span class="tag">Open a correction</span></li>
+        </ul>
+      </article>
+
+      <article class="kind k2">
+        <header>
+          <span class="glyph" aria-hidden="true">&#8801;</span>
+          <div><h3>Your rules said no</h3>
+            <p>Your rules working exactly as written. Nothing here needs fixing — it is here so you can see the boundary holding.</p></div>
+        </header>
+        <ul>
+          <li>An enquirer described a knee injury and asked whether to train through it.
+            <span>Four interactions. The Agent said nothing about the injury and handed it to a human, with why.</span>
+            <span class="tag">Working as recorded</span></li>
+          <li>A request to end a contract early.
+            <span>One interaction. Handed to a human, with why. Your rules do not let an Agent decide this.</span>
+            <span class="tag">Working as recorded</span></li>
+        </ul>
+      </article>
+
+      <article class="kind k3">
+        <header>
+          <span class="glyph" aria-hidden="true">&#8943;</span>
+          <div><h3>Something on our side failed</h3>
+            <p>Not your fault and not your specification. We have it, and nothing here needs a decision from you.</p></div>
+        </header>
+        <ul>
+          <li>The coached timetable could not be read while an enquiry was open.
+            <span>One interaction. The Agent did not guess a session time. It handed the enquiry to a human, with why.</span>
+            <span class="tag">Ours to resolve</span></li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="decide">
+      <a class="btn" href="#">Open the interaction</a>
+      <a class="btn ghost" href="#">This was wrong</a>
+    </div>
+
+    <div class="susp">
+      <a href="#">Suspend the Agent</a>
+      Stops it answering, or stops it acting while it carries on answering. Reversible whenever you want.
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

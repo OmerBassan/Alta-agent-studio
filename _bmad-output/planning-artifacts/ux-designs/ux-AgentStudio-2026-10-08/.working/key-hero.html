@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key screen — The co-present hero</title>
+<style>
+/* ===========================================================
+   KEY SCREEN 1 — THE CO-PRESENT HERO
+   Foundation: Ledger (.working/direction-ledger.html)
+
+   GOVERNED BY
+   DESIGN.md      — Colors (Surface and text, State); Typography
+                    (Typography is doing structural work); Layout &
+                    Spacing (The co-present hero, Hairlines not cards,
+                    The sequencing prohibition is a layout rule);
+                    Elevation & Depth; Components (Conversation panel,
+                    Understanding document, Item state marker,
+                    Material intake)
+   EXPERIENCE.md  — Information Architecture (Understanding: five
+                    document sections over seventeen expression areas,
+                    The sequencing prohibition); Voice and Tone;
+                    Component Patterns (Conversation panel,
+                    Understanding document, Item state marker,
+                    Material intake); State Patterns (Specification
+                    item states, Timing); Key Flows / Flow 1 — Cold
+                    start to first live version; Accessibility Floor;
+                    Responsive & Platform (Application layout —
+                    persistent pane headings "Conversation" and
+                    "What the Builder currently understands")
+
+   Business: garden centre. Two states in this file:
+   (a) Understanding forming, (b) cold-start empty Understanding —
+   all five sections present, every one carrying Not established,
+   never blank.
+   =========================================================== */
+
+:root{
+  --page:#F7F4ED; --raised:#FFFDF8; --sunken:#EFEAE0;
+  --hair:#D9D2C4; --strong:#8C8372;
+  --ink:#221F19; --ink2:#5C5447; --ink3:#756C5C;
+  --est:#3F4A3A; --notest:#7A3A12; --chg:#1E4A6B; --aff:#46637A;
+  --susp:#6B2B2B;
+  --serif:Georgia,"Iowan Old Style","Times New Roman",Times,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E7E2D7;color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 16px 72px}
+a:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+
+.caption{background:var(--raised);border:1px solid var(--hair);border-left:4px solid var(--strong);padding:18px 24px;margin-bottom:28px}
+.caption h1{font-size:21px;margin:0 0 6px;letter-spacing:.02em;font-weight:400}
+.caption p{margin:0;font-size:16px;color:var(--ink2);max-width:76ch}
+
+.browser{border:1px solid #C9C2B2;background:var(--raised);margin-bottom:34px}
+.chrome{display:flex;align-items:center;gap:10px;background:#EAE4D8;border-bottom:1px solid var(--hair);padding:9px 14px}
+.dot{width:10px;height:10px;border:1px solid var(--strong);border-radius:50%}
+.addr{flex:1;font-family:var(--sans);font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--hair);padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--hair);gap:16px;flex-wrap:wrap}
+.mark{font-size:19px;letter-spacing:.06em}
+.mark span{color:var(--ink3);letter-spacing:.14em;font-size:12px;font-family:var(--sans);text-transform:uppercase;margin-left:12px}
+.places{font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.places b{color:var(--ink);border-bottom:2px solid var(--strong);padding-bottom:3px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:22px}
+
+.hero{display:grid;grid-template-columns:1fr 1.12fr}
+.hero > *{padding:30px 34px 40px}
+.hero > .doc{border-left:1px solid var(--hair);background:var(--page)}
+
+.panelhead{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 4px}
+.origin{font-size:15px;color:var(--ink2);font-style:italic;margin:0 0 26px}
+.turn{margin:0 0 24px;max-width:58ch}
+.who{font-family:var(--sans);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
+.turn p{margin:0 0 10px}
+.turn.op p{border-left:2px solid var(--strong);padding-left:16px;background:var(--sunken);padding-top:2px;padding-bottom:2px}
+.thinking{font-family:var(--sans);font-size:13px;color:var(--ink2);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:10px 0;max-width:58ch}
+.composer{border-top:1px solid var(--strong);margin-top:30px;padding-top:12px;font-size:16px;color:var(--ink3);font-style:italic}
+
+.frame{border:1px solid var(--strong);background:var(--sunken);padding:14px 18px;margin:0 0 30px}
+.frame strong{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:4px}
+.frame p{margin:0;font-size:15px;color:var(--ink2)}
+.biz{font-size:14px;color:var(--ink2);margin:0 0 26px;font-family:var(--sans);letter-spacing:.03em}
+
+.sec{border-top:1px solid var(--hair);padding-top:20px;margin-top:26px}
+.sec:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.sec h3{font-size:19px;font-weight:400;letter-spacing:.015em;margin:0 0 14px}
+.item{max-width:62ch;margin:0 0 16px;padding-left:14px;border-left:1px solid var(--hair)}
+.item p{margin:0 0 5px}
+.item.s-chg{border-left:3px solid var(--chg)}
+.item.s-aff{border-left:1px dotted var(--aff)}
+.item.s-not{border-left:1px dashed var(--notest);background:#FBF1E8;padding:4px 0 6px 14px}
+
+.st{font-family:var(--sans);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;display:inline-block}
+.st.est{color:var(--est)}
+.st.chg{color:var(--chg);border-bottom:2px solid var(--chg)}
+.st.aff{color:var(--aff);font-style:italic;border-bottom:1px dotted var(--aff)}
+.st.not{color:var(--notest);border:1px dashed var(--notest);padding:2px 7px;font-weight:700}
+.st.not::before{content:"[ "}
+.st.not::after{content:" ]"}
+.note{font-size:15px;color:var(--ink3);font-style:italic}
+
+.intake{border:1px solid var(--hair);background:var(--raised);padding:16px 18px;margin:28px 0 0}
+.intake h4{font-family:var(--sans);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;color:var(--ink3)}
+.intake dl{margin:0;font-size:15px}
+.intake dt{font-family:var(--sans);font-size:12px;letter-spacing:.06em;color:var(--ink);margin-top:11px}
+.intake dd{margin:2px 0 0;color:var(--ink2)}
+.bar{display:block;height:7px;background:var(--sunken);border:1px solid var(--strong);margin-top:7px;max-width:260px}
+.bar i{display:block;height:100%;width:62%;background:repeating-linear-gradient(135deg,var(--strong) 0 4px,transparent 4px 8px)}
+
+.statelabel{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--strong)}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .hero > .doc{border-left:0;border-top:1px solid var(--hair)}
+  .wrap{padding:16px}
+  .hero > *{padding:22px 16px 28px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="caption">
+  <h1>Key screen — the co-present hero</h1>
+  <p>The conversation and the Understanding sit side by side at equal standing: the conversation is where the work happens, the document is what the work produces. Neither is a sidebar to the other. The five sections are peers in a reading order and nothing more.</p>
+</div>
+
+<p class="statelabel">State one — a garden centre, partway through</p>
+
+<!-- ======================= HERO, FORMING ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Hollowfield Garden Centre</span></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section aria-label="The conversation">
+      <p class="panelhead">Conversation</p>
+      <p class="origin">Opened from <em>How it operates</em> — plant replacement.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>You replace a plant that fails in its first season. Tell me when you would say no to that even though the customer asks within the season.</p>
+      </div>
+
+      <div class="turn op">
+        <div class="who">You</div>
+        <p>If they planted it somewhere it was never going to live. Full sun shrub in deep shade, that sort of thing. We talk it through rather than just refuse.</p>
+      </div>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Understood. I have written that as a condition on the replacement rule rather than a rule of its own, so the two can never disagree.</p>
+        <p>I have nothing recorded yet for two things: who may approve a replacement above fifty pounds, and whether the till receipt or the delivery note is correct when the two disagree on a purchase date.</p>
+      </div>
+
+      <div class="thinking">Reading your planting guides for cases this would have changed.</div>
+
+      <div class="composer">Say what you want changed, in your own words…</div>
+    </section>
+
+    <section class="doc" aria-label="What the Builder currently understands">
+      <p class="panelhead">What the Builder currently understands</p>
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>A record of what has been established so far. Nothing here is being edited as you read it, and nothing here is in force until a version has been checked and approved.</p>
+      </div>
+      <p class="biz">Hollowfield Garden Centre — plants, growing advice and garden supplies.</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item"><p>An independent garden centre with a twelve-acre nursery, a hard landscaping yard and a growing-advice counter open seven days a week.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Speaks plainly and horticulturally. Never promises a plant will thrive in conditions it is not suited to.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item"><p>Plant availability and growing-condition questions. Resolved when the customer has a named plant, its conditions and whether it is in stock.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Replacement enquiries for a plant that failed in its first season, as far as a recorded claim.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Whether trade and landscaper accounts belong here at all, or go to the yard office.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item"><p>Your own material: the spring price list, the planting guides and the nursery stock sheet. Where the price list and the stock sheet disagree, the stock sheet is taken as correct.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Enquiry details are kept for twelve months and then removed.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item s-chg"><p>A plant that fails in its first season is replaced, unless it was planted in conditions the guides say it cannot survive.</p><span class="st chg">Changed</span></div>
+        <div class="item s-aff"><p>The growing-advice wording, which until now offered replacement without mentioning conditions.</p><span class="st aff">Affected by this change</span></div>
+        <div class="item"><p>A replacement is never agreed without a purchase date, because the first season is counted from it.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Who may approve a replacement worth more than fifty pounds.</p><span class="st not">Not established</span> <span class="note">A recorded absence, and it stays visible until you settle it.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item"><p>It may record a replacement claim and reserve stock for seven days. It may not take payment, and it may not issue a refund.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Anything touching a plant-health notice or a protected species is handed to a human, with why.</p><span class="st est">Established</span></div>
+        <div class="item"><p>It may not advise on using a pesticide, and it may not tell anyone a plant is safe to eat.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="intake">
+        <h4>Material being read</h4>
+        <dl>
+          <dt>Spring price list 2026.pdf</dt>
+          <dd>Being read now — eleven of thirty pages. Nothing from the unread pages has been used, and nothing has been guessed in its place.
+            <span class="bar"><i></i></span></dd>
+          <dt>Planting guides, shrubs.docx</dt>
+          <dd>Read. Held as your own material, at the version you gave us.</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+</div>
+
+<p class="statelabel">State two — the same surface at cold start, before anything has been established</p>
+
+<!-- ======================= HERO, COLD START ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Hollowfield Garden Centre</span></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section aria-label="The conversation">
+      <p class="panelhead">Conversation</p>
+      <p class="origin">Nothing has been established yet. This is where that begins.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Tell me about your business and the customer requests you want me to handle.</p>
+        <p>Say it however you would say it to someone starting on Monday. If you have a price list or your growing guides to hand, you can add them as supporting material — they are useful, and they are not required to begin.</p>
+      </div>
+
+      <div class="thinking">Nothing is being read yet.</div>
+
+      <div class="composer">Describe your business in your own words…</div>
+    </section>
+
+    <section class="doc" aria-label="What the Builder currently understands">
+      <p class="panelhead">What the Builder currently understands</p>
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>Nothing yet. Every section below says so in as many words, because a section with nothing recorded in it is an absence we are keeping track of — never a blank, and never a setting left off.</p>
+      </div>
+      <p class="biz">Hollowfield Garden Centre</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item s-not"><p>What the business is, how it speaks to customers, and what it will never say.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item s-not"><p>Which customer requests it takes on, what resolving each one means, and which requests it must never take on.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item s-not"><p>Your own material, which of it is correct when two pieces disagree, and how long enquiry details are kept.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item s-not"><p>What must be known before an outcome, what merely helps, your rules on eligibility, price and timing, and what good looks like here.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item s-not"><p>What it may conclude and on whose authority, what it may do, what it hands to a human, and what must never be asked.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="intake">
+        <h4>Material being read</h4>
+        <dl>
+          <dt>No material yet</dt>
+          <dd>You can add your price list, your growing guides or anything else you hand to a new member of staff. We will show you what we read and where each part of it came from.</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

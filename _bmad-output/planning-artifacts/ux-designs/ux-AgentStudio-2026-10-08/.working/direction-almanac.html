@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction — Almanac</title>
+<style>
+/* ===========================================================
+   DIRECTION 4 — "ALMANAC"
+   Register: the considered reference work. Old-style serif
+   headings over a humanist sans body, wide measure, very open
+   vertical rhythm, 2px radii, a single near-invisible lift.
+   Mixed-family type carries the whole hierarchy.
+
+   COLOR TOKENS (lift these)
+   --------------------------------------------------------
+   surface.page    #FAFAF6
+   surface.raised  #FFFFFF
+   surface.sunken  #F0F1EA
+   border.line     #DCDDD2   3.0:1 on raised
+   border.firm     #8B9083   3.5:1 on raised
+   text.body       #1B2620   15.2:1 on raised
+   text.secondary  #49544B   8.1:1 on raised
+   text.quiet      #5F6A60   5.7:1 on raised
+
+   state.established     #2C5340  7.4:1  plain spaced label
+   state.notEstablished  #8A3A12  6.0:1  open bracket rule + tint #FAF0E8 + rule above
+   state.changed         #1C4B72  8.1:1  solid left bar + underline
+   state.affected        #3F5E78  5.7:1  dotted left bar + italic
+
+   divergence.specDefect      #8A3A12
+   divergence.businessRefusal #2C5340
+   divergence.platformError   #474263
+   diff.before #49544B   diff.after #1B2620
+   validation.blocked  #8A3A12  (labelled "Blocked")
+   validation.warned   #6B5214  5.1:1 (labelled "Worth knowing")
+   attention.escalation #1C4B72
+   action.suspend #7A2D2D  6.5:1, outlined
+   elevation.lift 0 1px 1px rgba(27,38,32,.04), 0 10px 30px rgba(27,38,32,.05)
+   =========================================================== */
+
+:root{
+  --page:#FAFAF6; --raised:#FFFFFF; --sunken:#F0F1EA;
+  --line:#DCDDD2; --firm:#8B9083;
+  --ink:#1B2620; --ink2:#49544B; --ink3:#5F6A60;
+  --est:#2C5340; --notest:#8A3A12; --notbg:#FAF0E8; --chg:#1C4B72; --aff:#3F5E78;
+  --blocked:#8A3A12; --warned:#6B5214; --susp:#7A2D2D;
+  --serif:Palatino,"Palatino Linotype","Book Antiqua",Georgia,serif;
+  --sans:Optima,Candara,"Gill Sans","Segoe UI",system-ui,Helvetica,Arial,sans-serif;
+  --lift:0 1px 1px rgba(27,38,32,.04),0 10px 30px rgba(27,38,32,.05);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#EDEEE6;color:var(--ink);font-family:var(--sans);font-size:16.5px;line-height:1.8}
+.wrap{max-width:1340px;margin:0 auto;padding:30px 16px 80px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:3px}
+
+.rationale{background:var(--raised);border:1px solid var(--line);border-radius:2px;box-shadow:var(--lift);padding:24px 28px;margin-bottom:30px}
+.rationale h1{font-family:var(--serif);font-size:24px;font-weight:400;margin:0 0 10px}
+.rationale p{margin:0;font-size:16px;color:var(--ink2);max-width:76ch}
+
+.browser{border:1px solid #CFD1C6;border-radius:4px;overflow:hidden;background:var(--raised);box-shadow:var(--lift);margin-bottom:36px}
+.chrome{display:flex;align-items:center;gap:9px;background:var(--sunken);border-bottom:1px solid var(--line);padding:10px 15px}
+.dot{width:10px;height:10px;border-radius:50%;background:#D5D7CB}
+.addr{flex:1;font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--line);border-radius:2px;padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:20px 36px;border-bottom:1px solid var(--line);gap:16px;flex-wrap:wrap}
+.mark{font-family:var(--serif);font-size:21px}
+.mark em{font-family:var(--sans);font-style:normal;font-size:13px;color:var(--ink3);margin-left:14px;letter-spacing:.04em}
+.places{font-size:14px}
+.places b{font-weight:600;border-bottom:1px solid var(--ink);padding-bottom:4px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:24px}
+
+.hero{display:grid;grid-template-columns:1fr 1.1fr}
+.col{padding:34px 38px 46px}
+.col.doc{background:var(--page);border-left:1px solid var(--line)}
+
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);margin:0 0 6px}
+.origin{font-size:15px;color:var(--ink2);margin:0 0 30px;font-style:italic}
+.turn{max-width:56ch;margin:0 0 26px}
+.who{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px}
+.turn p{margin:0 0 10px}
+.turn.op p{background:var(--sunken);border-radius:2px;padding:14px 18px}
+.thinking{font-size:14.5px;color:var(--ink2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 0;max-width:56ch}
+.composer{margin-top:32px;border-top:1px solid var(--firm);padding-top:14px;color:var(--ink3);font-size:15.5px;font-style:italic}
+
+.frame{border-top:2px solid var(--firm);border-bottom:1px solid var(--line);padding:14px 0 16px;margin:0 0 34px}
+.frame strong{display:block;font-family:var(--serif);font-size:17px;font-weight:400;margin-bottom:4px}
+.frame p{margin:0;font-size:14.5px;color:var(--ink2);max-width:62ch}
+.biz{font-size:14px;color:var(--ink2);margin:0 0 30px;letter-spacing:.03em}
+
+.sec{margin:0 0 38px}
+.sec h3{font-family:var(--serif);font-size:21px;font-weight:400;margin:0 0 18px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.item{max-width:64ch;margin:0 0 20px;padding-left:16px;border-left:1px solid var(--line)}
+.item p{margin:0 0 6px}
+.item.s-chg{border-left:3px solid var(--chg)}
+.item.s-aff{border-left:1px dotted var(--aff)}
+.item.s-not{border-left:2px solid var(--notest);border-top:1px solid var(--notest);background:var(--notbg);padding:10px 14px 12px 16px;border-radius:0 2px 2px 0}
+
+.st{font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;display:inline-block}
+.st.est{color:var(--est)}
+.st.chg{color:var(--chg);border-bottom:2px solid var(--chg)}
+.st.aff{color:var(--aff);font-style:italic;border-bottom:1px dotted var(--aff)}
+.st.not{color:var(--notest);border:1px solid var(--notest);border-left:4px solid var(--notest);padding:3px 9px;border-radius:0 2px 2px 0}
+.note{font-size:14.5px;color:var(--ink3);font-style:italic}
+
+/* parse failure state variant */
+.intake{border:1px solid var(--line);border-radius:2px;background:var(--raised);padding:0;margin:0}
+.intake > h4{font-family:var(--serif);font-size:17px;font-weight:400;margin:0;padding:14px 18px;border-bottom:1px solid var(--line)}
+.row2{padding:14px 18px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:start}
+.row2:first-of-type{border-top:0}
+.row2 b{display:block;font-weight:600;font-size:15px}
+.row2 span{display:block;font-size:14px;color:var(--ink2);max-width:58ch}
+.failed{background:var(--notbg);border-left:4px solid var(--notest)}
+.mk{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.mk.ok{color:var(--est)}
+.mk.bad{color:var(--notest);border:1px solid var(--notest);padding:3px 8px}
+
+/* secondary: validation + approval */
+.sheet{padding:34px 38px 48px;background:var(--page)}
+.sheet h2{font-family:var(--serif);font-size:27px;font-weight:400;margin:0 0 8px}
+.lede{font-size:16px;color:var(--ink2);margin:0 0 32px;max-width:74ch}
+.gate{background:var(--raised);border:1px solid var(--line);border-radius:2px;box-shadow:var(--lift);margin-bottom:30px}
+.gate > header{padding:18px 22px;border-bottom:1px solid var(--line)}
+.gate h3{font-family:var(--serif);font-size:20px;font-weight:400;margin:0 0 4px}
+.gate header p{margin:0;font-size:14.5px;color:var(--ink2);max-width:72ch}
+.finding{padding:18px 22px;border-top:1px solid var(--line);display:grid;grid-template-columns:190px 1fr;gap:22px}
+.finding dt{margin:0;font-size:11.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.finding.block dt{color:var(--blocked);border-left:4px solid var(--blocked);padding-left:12px}
+.finding.warn dt{color:var(--warned);border-left:1px dashed var(--warned);padding-left:12px}
+.finding dd{margin:0;max-width:70ch}
+.finding dd p{margin:0 0 8px}
+.finding dd p:last-child{margin:0}
+.pending{padding:16px 22px;border-top:1px solid var(--line);font-size:14.5px;color:var(--ink2)}
+.approve{background:var(--raised);border:1px solid var(--firm);border-radius:2px;padding:24px 26px}
+.approve h3{font-family:var(--serif);font-size:20px;font-weight:400;margin:0 0 10px}
+.approve p{margin:0 0 12px;font-size:15.5px;color:var(--ink2);max-width:74ch}
+.decide{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;align-items:center}
+.btn{font-size:15px;padding:12px 24px;border-radius:2px;border:1px solid var(--ink);background:var(--ink);color:#fff;text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--firm)}
+.btn[aria-disabled="true"]{background:var(--sunken);color:var(--ink3);border-color:var(--line)}
+.susp{margin-top:32px;border-top:1px solid var(--line);padding-top:18px;font-size:14.5px;color:var(--ink2)}
+.susp a{color:var(--susp);border:1px solid var(--susp);border-radius:2px;padding:10px 18px;text-decoration:none;margin-right:16px;display:inline-block;font-weight:600}
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .col.doc{border-left:0;border-top:1px solid var(--line)}
+  .finding,.row2{grid-template-columns:1fr;gap:8px}
+  .wrap{padding:16px}
+  .col,.sheet{padding:24px 16px 32px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="rationale">
+  <h1>Direction 4 — Almanac</h1>
+  <p>The personality is <em>the considered reference work</em>: old-style serif headings over a humanist sans body, a wide measure and a very open vertical rhythm, with borders doing almost all the structural work and depth reduced to a single near-invisible lift. Mixed type families carry the hierarchy outright, which is how five sections stay unmistakable peers without any chrome. The trade-off it accepts: it is the airiest of the four, so an operator scrolls more to see their whole business, and the serif warmth risks reading as editorial rather than operational on a day when something has gone wrong.</p>
+</div>
+
+<!-- ======================= HERO ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Hollybank Garden Centre</em></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section class="col" aria-label="The conversation">
+      <p class="eyebrow">The conversation</p>
+      <p class="origin">Opened from <em>What it knows</em> — your planting material.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Your planting guides and your price list disagree about the hedging season. Which one is right when they do?</p>
+      </div>
+
+      <div class="turn op">
+        <div class="who">You</div>
+        <p>The planting guides. The price list is only right about prices. Dorothy writes the guides and she is the one who knows.</p>
+      </div>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Recorded: the planting guides take precedence on anything about growing, the price list on anything about price. Neither is ever filled in from general knowledge.</p>
+        <p>One of your files could not be read, so nothing from it has been used. It is named below as unread rather than as empty.</p>
+      </div>
+
+      <div class="thinking">Looking through the guides for other places the two disagree.</div>
+      <div class="composer">Say what you want changed, in your own words…</div>
+    </section>
+
+    <section class="col doc" aria-label="What the Builder currently understands">
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>The record as it currently stands. You are reading it, not editing it, and nothing here reaches a customer until a version has been checked and approved.</p>
+      </div>
+      <p class="biz">Hollybank Garden Centre — nursery, hard landscaping and a small tea room.</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item"><p>A family nursery with a hard landscaping yard and a tea room, open seven days from February to November and weekends only in winter.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Knowledgeable and generous with advice, never certain about anything it has not been told. It does not promise a plant will survive.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item"><p>Enquiries about stock, planting advice drawn from your own guides, and delivery of bulky orders. Resolved when the customer has what they asked for, or has been told we do not hold it.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Requests to reserve stock for collection, for up to three days.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Whether planting and design work for trade landscapers is handled here.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing is assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item s-chg"><p>Your own material: the planting guides, the 2026 price list and the delivery zones sheet. Where the guides and the price list disagree, the guides are correct on growing and the price list is correct on price.</p><span class="st chg">Changed</span></div>
+        <div class="item s-aff"><p>The hedging season answer, which until now followed the price list.</p><span class="st aff">Affected by this change</span></div>
+        <div class="item"><p>Enquiry details are kept for twelve months. Delivery addresses are kept only while an order is open.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item"><p>Bulky delivery is offered inside the three named zones only. Outside them, the customer is told collection is the only option.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Planting advice is given only where a guide covers it. Where no guide covers it, the customer is told we would rather ask Dorothy than guess.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>What happens to a reservation when the stock turns out not to be on the bench.</p><span class="st not">Not established</span> <span class="note">A recorded absence, and it stays visible until you settle it.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item"><p>It may reserve stock and quote a listed price. It may not discount, take payment, or promise a delivery date the yard has not confirmed.</p><span class="st est">Established</span></div>
+        <div class="item"><p>It may not advise on anything a guide does not cover, and it may not say a plant is in stock unless the stock sheet says so.</p><span class="st est">Established</span></div>
+        <div class="item"><p>A complaint about a dead plant, or any question about pesticide use, is handed to a human, with why.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="intake">
+        <h4>Your material</h4>
+        <div class="row2"><div><b>Planting guides, spring 2026.docx</b><span>Read. Held at the version you gave us, as your authoritative source on growing.</span></div><span class="mk ok">Read</span></div>
+        <div class="row2"><div><b>Price list 2026.xlsx</b><span>Read. Your authoritative source on price.</span></div><span class="mk ok">Read</span></div>
+        <div class="row2 failed"><div><b>Delivery zones, scanned map.pdf</b><span>We could not read this one. It is a scan with no text in it, so nothing has been taken from it and nothing has been guessed in its place. The three delivery zones above came from what you told us. Send it as a list of postcodes and we will read it.</span></div><span class="mk bad">Could not be read</span></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ======= SECONDARY: VALIDATION RESULT AND APPROVAL ======= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding / before this goes live</span></div>
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Hollybank Garden Centre</em></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+  <div class="sheet">
+    <h2>Before this version goes live</h2>
+    <p class="lede">Every version is checked before you can approve it. The check decides whether the version is valid. Your approval is a separate act, and it is yours.</p>
+
+    <div class="gate">
+      <header>
+        <h3>The check found one thing it will not let past, and one thing worth knowing</h3>
+        <p>The check is ours, not the Builder's, and there is no way to put a version live around it.</p>
+      </header>
+
+      <dl class="finding block">
+        <dt>Blocked</dt>
+        <dd>
+          <p>Two parts of the record disagree about reservations. <em>What the Agent handles</em> says stock may be reserved for three days; <em>How it operates</em> has nothing recorded for what happens when the stock is not on the bench.</p>
+          <p>A customer could be told something is reserved when it is not there. Settle that in the conversation and this version can be checked again.</p>
+        </dd>
+      </dl>
+
+      <dl class="finding warn">
+        <dt>Worth knowing</dt>
+        <dd>
+          <p>The delivery zones came from what you told us, not from your own material, because the scanned map could not be read. That is recorded as the source, and it is not a reason the version cannot go live.</p>
+        </dd>
+      </dl>
+
+      <div class="pending">The check on the planting-advice boundary is still running. It has no estimate and we will not invent one. This page will say so when it finishes.</div>
+    </div>
+
+    <div class="approve">
+      <h3>Your approval</h3>
+      <p>Approving records that you accept this version of what we understand about Hollybank. It does not mean you have checked how the Agent behaves — the check above decides that.</p>
+      <p>When an approved version goes live, conversations already underway finish on the previous understanding. There is no way to say how long that takes, and nothing is lost either way.</p>
+      <div class="decide">
+        <a class="btn" href="#" aria-disabled="true">Approve this version — not available while something is blocked</a>
+        <a class="btn ghost" href="#">Open the conversation about reservations</a>
+      </div>
+    </div>
+
+    <div class="susp">
+      <a href="#">Suspend the Agent</a>
+      Stops it answering, or stops it acting while it carries on answering. Reversible whenever you want.
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

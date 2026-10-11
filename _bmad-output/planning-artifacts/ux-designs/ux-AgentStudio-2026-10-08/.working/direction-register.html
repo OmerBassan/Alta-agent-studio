@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction — Register</title>
+<style>
+/* ===========================================================
+   DIRECTION 3 — "REGISTER"
+   Register: the plain institutional record, built for being read
+   quickly and not misread. Wide-set humanist sans (Verdana/Tahoma),
+   square corners, firm 1px borders, high weight contrast, compact
+   rhythm. Zero shadow except one lift on the moment of decision.
+
+   COLOR TOKENS (lift these)
+   --------------------------------------------------------
+   surface.page    #EEF1F2
+   surface.raised  #FFFFFF
+   surface.sunken  #E2E7E9
+   border.line     #BFC8CC   3.0:1 on raised
+   border.firm     #76838A   4.1:1 on raised
+   text.body       #11242E   15.5:1 on raised
+   text.secondary  #44535C   8.0:1 on raised
+   text.quiet      #5C6A72   5.5:1 on raised
+
+   state.established     #27503C  7.9:1  plain small-caps label
+   state.notEstablished  #8C3B07  5.5:1  solid 2px box + hatched edge + tint #FBF0E7
+   state.changed         #16496E  8.5:1  heavy left bar + underline
+   state.affected        #3E5C76  5.9:1  thin double bar + italic
+
+   divergence.specDefect      #8C3B07
+   divergence.businessRefusal #27503C
+   divergence.platformError   #413E5C
+   diff.before #44535C   diff.after #11242E
+   attention.escalation #16496E
+   action.suspend #7C2A2A  6.3:1, outlined, never filled
+   elevation.decision 0 2px 10px rgba(17,36,46,.10)
+   =========================================================== */
+
+:root{
+  --page:#EEF1F2; --raised:#FFFFFF; --sunken:#E2E7E9;
+  --line:#BFC8CC; --firm:#76838A;
+  --ink:#11242E; --ink2:#44535C; --ink3:#5C6A72;
+  --est:#27503C; --notest:#8C3B07; --notbg:#FBF0E7; --chg:#16496E; --aff:#3E5C76;
+  --susp:#7C2A2A;
+  --sans:Verdana,Tahoma,"DejaVu Sans",Geneva,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#DCE2E4;color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.58}
+.wrap{max-width:1360px;margin:0 auto;padding:22px 14px 64px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+h1,h2,h3,h4{font-weight:700;letter-spacing:-.005em}
+
+.rationale{background:var(--raised);border:1px solid var(--firm);border-top:3px solid var(--ink);padding:16px 20px;margin-bottom:22px}
+.rationale h1{font-size:16px;margin:0 0 7px}
+.rationale p{margin:0;font-size:13px;color:var(--ink2);max-width:92ch}
+
+.browser{border:1px solid #AEB9BE;background:var(--raised);margin-bottom:28px}
+.chrome{display:flex;align-items:center;gap:8px;background:var(--sunken);border-bottom:1px solid var(--line);padding:7px 12px}
+.dot{width:9px;height:9px;border:1px solid var(--firm)}
+.addr{flex:1;font-size:11px;color:var(--ink2);background:var(--raised);border:1px solid var(--line);padding:3px 8px}
+
+.appbar{display:flex;align-items:center;justify-content:space-between;padding:11px 22px;border-bottom:2px solid var(--ink);gap:12px;flex-wrap:wrap}
+.mark{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.mark em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink2);margin-left:12px}
+.places{font-size:12px;text-transform:uppercase;letter-spacing:.07em}
+.places b{border-bottom:3px solid var(--ink);padding-bottom:2px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:18px}
+
+.hero{display:grid;grid-template-columns:1fr 1.14fr}
+.col{padding:18px 22px 26px}
+.col.conv{border-right:1px solid var(--firm)}
+.col.doc{background:var(--page)}
+
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 3px}
+.origin{font-size:12px;color:var(--ink2);border:1px solid var(--line);background:var(--sunken);padding:5px 9px;display:inline-block;margin:0 0 18px}
+.turn{max-width:54ch;margin:0 0 15px}
+.who{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3);margin-bottom:3px}
+.turn p{margin:0 0 7px}
+.turn.op p{border:1px solid var(--line);border-left:3px solid var(--firm);background:var(--page);padding:9px 12px}
+.thinking{font-size:12px;color:var(--ink2);border:1px dashed var(--firm);padding:8px 11px;max-width:54ch}
+.composer{margin-top:20px;border-top:2px solid var(--ink);padding-top:9px;color:var(--ink3);font-size:12.5px}
+
+.frame{border:2px solid var(--ink);padding:11px 14px;margin:0 0 20px;background:var(--raised)}
+.frame strong{display:block;font-size:11px;letter-spacing:.11em;text-transform:uppercase;margin-bottom:3px}
+.frame p{margin:0;font-size:12.5px;color:var(--ink2)}
+.biz{font-size:12px;color:var(--ink2);margin:0 0 18px}
+
+.sec{margin:0 0 18px;border-top:2px solid var(--ink);padding-top:12px}
+.sec h3{font-size:12.5px;letter-spacing:.11em;text-transform:uppercase;margin:0 0 10px}
+.item{max-width:64ch;margin:0 0 11px;padding-left:11px;border-left:2px solid var(--line)}
+.item p{margin:0 0 3px}
+.item.s-chg{border-left:5px solid var(--chg)}
+.item.s-aff{border-left:3px double var(--aff)}
+.item.s-not{border-left:0;border:2px solid var(--notest);background:var(--notbg);padding:8px 10px;
+  background-image:repeating-linear-gradient(90deg,var(--notest) 0 6px,transparent 6px 12px);
+  background-size:100% 3px;background-repeat:no-repeat;background-position:top left}
+
+.st{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;display:inline-block}
+.st.est{color:var(--est)}
+.st.chg{color:var(--chg);border-bottom:2px solid var(--chg)}
+.st.aff{color:var(--aff);font-style:italic;border-bottom:1px dotted var(--aff)}
+.st.not{color:var(--notest);border:2px solid var(--notest);padding:2px 7px}
+.note{font-size:12px;color:var(--ink3);font-style:italic}
+
+/* suspended state variant */
+.suspended{border:2px solid var(--susp);padding:0;margin:20px 0 0;background:var(--raised)}
+.suspended header{background:var(--susp);color:#fff;padding:8px 14px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.suspended .body{padding:13px 14px}
+.suspended p{margin:0 0 9px;font-size:12.5px;color:var(--ink2);max-width:62ch}
+.suspended dl{margin:0;display:grid;grid-template-columns:150px 1fr;gap:4px 14px;font-size:12.5px}
+.suspended dt{font-weight:700;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+.suspended dd{margin:0}
+.lift{box-shadow:0 2px 10px rgba(17,36,46,.10)}
+
+/* secondary: one interaction */
+.sheet{padding:20px 22px 30px;background:var(--page)}
+.sheet h2{font-size:17px;margin:0 0 5px}
+.lede{font-size:12.5px;color:var(--ink2);margin:0 0 20px;max-width:88ch}
+.env{background:var(--raised);border:1px solid var(--firm)}
+.env > div{display:grid;grid-template-columns:230px 1fr;gap:22px;padding:14px 18px;border-top:1px solid var(--line)}
+.env > div:first-child{border-top:0}
+.env h4{margin:0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.env .v{margin:0;max-width:74ch}
+.env .v p{margin:0 0 7px}
+.env .v p:last-child{margin-bottom:0}
+.env .v ul{margin:0;padding-left:18px}
+.env .v li{margin-bottom:5px}
+.said{border:1px solid var(--line);background:var(--sunken);padding:10px 13px;font-size:13px}
+.decide{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+.btn{font-size:12.5px;font-weight:700;padding:10px 18px;border:2px solid var(--ink);background:var(--ink);color:#fff;text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--firm)}
+.susp{margin-top:24px;border-top:1px solid var(--line);padding-top:14px;font-size:12.5px;color:var(--ink2)}
+.susp a{color:var(--susp);border:2px solid var(--susp);padding:9px 15px;text-decoration:none;margin-right:12px;display:inline-block;font-weight:700}
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .col.conv{border-right:0;border-bottom:1px solid var(--firm)}
+  .env > div,.suspended dl{grid-template-columns:1fr;gap:6px}
+  .wrap{padding:14px}
+  .col,.sheet{padding:16px 16px 24px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="rationale">
+  <h1>Direction 3 — Register</h1>
+  <p>The personality is <em>the plain institutional record</em>: a wide-set humanist sans at a compact rhythm, square corners, firm rules and high weight contrast, with no shadow anywhere except a single lift under a moment that asks for a decision. It is built to be read fast and not misread, which is why boundaries here look structural rather than decorative. The trade-off it accepts: the density and the hard edges read as serious rather than warm, and the direction has to work harder than the others to feel conversational rather than administrative.</p>
+</div>
+
+<!-- ======================= HERO ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Mornington Dental Practice</em></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section class="col conv" aria-label="The conversation">
+      <p class="eyebrow">The conversation</p>
+      <p class="origin">Opened from <strong>What it may and may not do</strong> — what must never be asked.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>When someone writes in asking for an appointment, what must the Agent never ask them?</p>
+      </div>
+
+      <div class="turn op">
+        <div class="who">You</div>
+        <p>It must never ask about symptoms, pain or anything in their medical history. Not even to decide how urgent it is. The nurse does that on the phone.</p>
+      </div>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Recorded as a boundary it may not cross. It will not ask, and it will not infer urgency from anything the patient volunteers. Where someone describes pain themselves, the request goes to a human, with why, and nothing clinical is repeated back.</p>
+        <p>That leaves me with nothing recorded for which appointment types it may offer directly, and for whether a patient may be told a dentist's name before the appointment is confirmed.</p>
+      </div>
+
+      <div class="thinking">Reading your appointment guide for anything that contradicts this.</div>
+      <div class="composer">Say what you want changed, in your own words…</div>
+    </section>
+
+    <section class="col doc" aria-label="What the Builder currently understands">
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>The record as it currently stands. This is not a surface you are editing, and nothing here is in force until a version has been checked and approved.</p>
+      </div>
+      <p class="biz">Mornington Dental Practice — four surgeries, three dentists, one hygienist.</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item"><p>A long-standing neighbourhood practice with four surgeries. Takes both private patients and a small continuing public list.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Warm and unhurried in writing. Never reassuring about anything clinical, and never says a treatment will not hurt.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item"><p>Requests for a routine check-up or a hygienist visit. Resolved when a day and a time are recorded and the patient has confirmed them.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Changes and cancellations to an appointment already held.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Whether fee enquiries for treatment plans are handled here or passed to reception.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing is assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item"><p>Your own material: the appointment guide, the private fee sheet and the opening hours notice. Where the fee sheet and the guide disagree on a price, the fee sheet is taken as correct.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Nothing a patient writes about their health is retained. Contact details are kept for twelve months.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item s-chg"><p>A check-up may be offered up to eight weeks ahead, and never in the Thursday afternoon session kept for the hygienist.</p><span class="st chg">Changed</span></div>
+        <div class="item s-aff"><p>What good looks like here: the worked case of a Thursday check-up request, which currently shows a time being offered.</p><span class="st aff">Affected by this change</span></div>
+        <div class="item"><p>A cancellation inside twenty-four hours is recorded but never waived. Reception decides on the fee.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Which appointment types the Agent may offer directly without reception confirming.</p><span class="st not">Not established</span> <span class="note">A recorded absence, and it stays visible until you settle it.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item"><p>It may never ask about symptoms, pain or medical history, and it may never judge how urgent a request is. It does not repeat back anything clinical a patient volunteers.</p><span class="st est">Established</span></div>
+        <div class="item"><p>It may hold and change an appointment. It may not quote a treatment price, take payment, or discuss any treatment a patient has had.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Anyone describing pain, swelling or an accident is handed to a human, with why, and told a person will come back to them today.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="suspended lift">
+        <header>Suspended — acting only</header>
+        <div class="body">
+          <p>You suspended the Agent's ability to act. It is still answering, and it can no longer hold, change or cancel anything.</p>
+          <dl>
+            <dt>Suspended by</dt><dd>You, today at 09:14</dd>
+            <dt>Still doing</dt><dd>Answering questions about opening hours and what to expect at a first visit</dd>
+            <dt>No longer doing</dt><dd>Holding, changing or cancelling appointments. Those requests are handed to a human, with why.</dd>
+            <dt>Reversible</dt><dd>Yes, in one action, whenever you want</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ SECONDARY: ONE INTERACTION ============ -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / activity / one interaction</span></div>
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <em>Mornington Dental Practice</em></div>
+    <nav class="places"><a href="#">Understanding</a><b style="margin-left:18px">Activity</b></nav>
+  </div>
+  <div class="sheet">
+    <h2>One interaction — a Thursday check-up request</h2>
+    <p class="lede">What happened and why. Read in whatever order is useful to you; this is not an order of events the Agent must follow.</p>
+
+    <div class="env">
+      <div><h4>The goal</h4><div class="v"><p>A patient asked for a routine check-up, ideally on a Thursday afternoon, in the next fortnight.</p></div></div>
+      <div><h4>Was it served</h4><div class="v"><p>Partly. A time was offered and held, on a Thursday afternoon.</p><p>That time sits in the session kept for the hygienist, so it should not have been offered.</p></div></div>
+      <div><h4>Under which authority</h4><div class="v"><p>It may hold a routine check-up without reception confirming. That authority is recorded and it was in force.</p><p>It did not ask about symptoms, pain or medical history, and it was never permitted to.</p></div></div>
+      <div><h4>On what evidence</h4><div class="v"><ul>
+        <li>Your appointment guide, at the version you gave us, for what a routine check-up needs.</li>
+        <li>The opening hours notice, for Thursday afternoon.</li>
+        <li>Nothing was drawn from general knowledge, and nothing was drawn from your material about the hygienist session, because the guide does not mention it.</li>
+      </ul></div></div>
+      <div><h4>The payload</h4><div class="v">
+        <p class="said">An appointment was held: Thursday 23 October, 15:40, forty minutes, with Dr Aziz. A confirmation was sent to the patient.</p>
+      </div></div>
+    </div>
+
+    <div class="decide">
+      <a class="btn" href="#">This was wrong</a>
+      <a class="btn ghost" href="#">Back to Activity</a>
+    </div>
+
+    <div class="susp">
+      <a href="#">Change the suspension</a>
+      It is currently suspended for acting only. You can suspend answering too, or lift it entirely.
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key screen — One interaction</title>
+<style>
+/* ===========================================================
+   KEY SCREEN 2 — THE INTERACTION VIEWER
+   Foundation: Ledger. Carry-over target: Almanac explained wrong
+   behaviour better; that clarity lands here in Ledger's language.
+
+   GOVERNED BY
+   DESIGN.md      — Components (Interaction viewer, Suspend);
+                    Colors (Surface and text: surface.sunken for the
+                    customer's email; Divergence, diff and action);
+                    Typography; Layout & Spacing (Hairlines not cards,
+                    The sequencing prohibition is a layout rule);
+                    Elevation & Depth; Do's and Don'ts
+   EXPERIENCE.md  — Component Patterns (Interaction viewer: three
+                    parts and one action, interaction label, no
+                    generated explanations, the internal record is
+                    not the layout; Divergence list: class framing;
+                    Suspend); Voice and Tone (closed vocabulary);
+                    Responsive & Platform (Application layout: Run,
+                    detail pane); Key Flows / Flow 3 (Permitted,
+                    confident and wrong), Flow 5 (Suspend);
+                    Accessibility Floor
+
+   Three parts, in plain operator terms: the customer's email
+   (verbatim), the Agent's reply (verbatim), what this reply was
+   based on (quoted rules and material, linked into Understanding).
+   Then "This was wrong", with Suspend reachable. Every word is
+   recorded material or a fixed template sentence filled with
+   record data. No pipeline, trace, numbering or arrows.
+   Business: brewery. Case: permitted, confident and wrong.
+   Second state: suspended, acting only.
+   =========================================================== */
+
+:root{
+  --page:#F7F4ED; --raised:#FFFDF8; --sunken:#EFEAE0;
+  --hair:#D9D2C4; --strong:#8C8372;
+  --ink:#221F19; --ink2:#5C5447; --ink3:#756C5C;
+  --est:#3F4A3A; --notest:#7A3A12; --chg:#1E4A6B; --aff:#46637A;
+  --susp:#6B2B2B; --plat:#4A4458;
+  --serif:Georgia,"Iowan Old Style","Times New Roman",Times,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E7E2D7;color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 16px 72px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+
+.caption{background:var(--raised);border:1px solid var(--hair);border-left:4px solid var(--strong);padding:18px 24px;margin-bottom:28px}
+.caption h1{font-size:21px;margin:0 0 6px;letter-spacing:.02em;font-weight:400}
+.caption p{margin:0;font-size:16px;color:var(--ink2);max-width:76ch}
+
+.browser{border:1px solid #C9C2B2;background:var(--raised);margin-bottom:34px}
+.chrome{display:flex;align-items:center;gap:10px;background:#EAE4D8;border-bottom:1px solid var(--hair);padding:9px 14px}
+.dot{width:10px;height:10px;border:1px solid var(--strong);border-radius:50%}
+.addr{flex:1;font-family:var(--sans);font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--hair);padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--hair);gap:16px;flex-wrap:wrap}
+.mark{font-size:19px;letter-spacing:.06em}
+.mark span{color:var(--ink3);letter-spacing:.14em;font-size:12px;font-family:var(--sans);text-transform:uppercase;margin-left:12px}
+.places{font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.places b{color:var(--ink);border-bottom:2px solid var(--strong);padding-bottom:3px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:22px}
+
+.sheet{padding:30px 34px 42px;background:var(--page)}
+.panelhead{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 6px}
+.label{font-size:23px;font-weight:400;margin:0 0 4px;max-width:46ch}
+.received{font-family:var(--sans);font-size:13px;color:var(--ink2);margin:0 0 22px;letter-spacing:.02em}
+
+.framing{border:1px solid var(--strong);border-left:4px solid var(--notest);background:var(--raised);padding:14px 20px;margin:0 0 30px;max-width:84ch}
+.framing strong{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:4px;color:var(--notest)}
+.framing p{margin:0;font-size:16px;color:var(--ink)}
+.framing p + p{margin-top:6px;color:var(--ink2);font-size:15px}
+.framing.susp{border-left:4px double var(--susp)}
+.framing.susp strong{color:var(--susp)}
+
+.part{border-top:1px solid var(--strong);padding:20px 0 24px;max-width:76ch}
+.part > h3{font-size:19px;font-weight:400;margin:0 0 10px}
+.part p{margin:0 0 10px}
+.part p:last-child{margin-bottom:0}
+.mailmeta{font-family:var(--sans);font-size:12px;color:var(--ink3);letter-spacing:.03em;margin:0 0 8px}
+.email{background:var(--sunken);border-left:2px solid var(--strong);padding:12px 18px}
+.email p,.reply p{font-size:16px}
+.reply{border-left:2px solid var(--hair);padding:4px 18px}
+.basis{list-style:none;margin:0;padding:0}
+.basis li{border-top:1px solid var(--hair);padding:12px 0}
+.basis li:first-child{border-top:0;padding-top:0}
+.basis .src{font-family:var(--sans);font-size:12px;color:var(--ink3);letter-spacing:.03em;display:block;margin-bottom:4px}
+.basis blockquote{margin:0 0 6px;background:var(--sunken);border-left:2px solid var(--strong);padding:8px 16px;font-size:16px}
+.basis a{font-family:var(--sans);font-size:13px;color:var(--chg);text-decoration:underline;text-underline-offset:3px}
+.fixed{font-size:15px;color:var(--ink2);margin-top:12px}
+
+.decide{display:flex;gap:18px;align-items:center;margin-top:28px;flex-wrap:wrap}
+.btn{font-family:var(--sans);font-size:14px;padding:11px 22px;border:1px solid var(--ink);background:var(--ink);color:var(--raised);text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--strong)}
+.btn.suspend{background:transparent;color:var(--susp);border:2px solid var(--susp)}
+.afterword{font-size:15px;color:var(--ink2);margin:16px 0 0;max-width:76ch}
+
+.statelabel{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--strong)}
+
+@media (max-width:900px){
+  .wrap{padding:16px}
+  .sheet{padding:22px 16px 30px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="caption">
+  <h1>Key screen — one interaction</h1>
+  <p>Opened only from an item in Activity. It answers one question: what the customer asked, what the Agent replied, and what that reply was based on. Everything shown is recorded material, or a fixed sentence filled in from the record.</p>
+</div>
+
+<p class="statelabel">State one — permitted, confident, and wrong</p>
+
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / activity / interaction</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Northgate Brewing Co.</span></div>
+    <nav class="places"><a href="#">Understanding</a><b>Activity</b></nav>
+  </div>
+
+  <div class="sheet">
+    <p class="panelhead">Interaction</p>
+    <h2 class="label">Private event, Saturday 14 Nov</h2>
+    <p class="received">Private event, Saturday 14 Nov · received 12 Oct, 09:41</p>
+
+    <div class="framing">
+      <strong>Your specification got this wrong</strong>
+      <p>Your specification got this wrong. Nothing was refused and nothing failed.</p>
+      <p>Recorded as wrong by a person on 12 Oct, 11:05.</p>
+    </div>
+
+    <section class="part" aria-label="The customer's email">
+      <h3>The customer&rsquo;s email</h3>
+      <p class="mailmeta">From Hannah Price · Subject: Private event, Saturday 14 Nov · 12 Oct, 09:41</p>
+      <div class="email">
+        <p>Hello,</p>
+        <p>We&rsquo;re hoping to book a private event for about forty people on Saturday 14 November, from around seven in the evening. Is the back room free, and what would we need to do to secure it?</p>
+        <p>Thanks, Hannah</p>
+      </div>
+    </section>
+
+    <section class="part" aria-label="The Agent's reply">
+      <h3>The Agent&rsquo;s reply</h3>
+      <p class="mailmeta">Sent 12 Oct, 09:42</p>
+      <div class="reply">
+        <p>Hi Hannah,</p>
+        <p>Yes, the back room is available for forty people on Saturday 14 November from seven. I&rsquo;ve held the date for you for seven days. To confirm it, we ask for a deposit of one quarter of the room fee.</p>
+        <p>Northgate Brewing Co.</p>
+      </div>
+    </section>
+
+    <section class="part" aria-label="What this reply was based on">
+      <h3>What this reply was based on</h3>
+      <ul class="basis">
+        <li>
+          <span class="src">Your specification · What it may and may not do</span>
+          <blockquote>&ldquo;Private events may be accepted when capacity and availability allow.&rdquo;</blockquote>
+          <a href="#">Where this lives in Understanding: What it may and may not do</a>
+        </li>
+        <li>
+          <span class="src">Your material · Taproom calendar, as uploaded 2 Oct</span>
+          <blockquote>&ldquo;Back room: free, Sat 14 Nov, from 18:00.&rdquo;</blockquote>
+          <a href="#">Where this lives in Understanding: What it knows</a>
+        </li>
+        <li>
+          <span class="src">Your material · 2026 events pack, as uploaded 2 Oct</span>
+          <blockquote>&ldquo;Back room: licensed for up to sixty guests. Deposit: one quarter of the room fee.&rdquo;</blockquote>
+          <a href="#">Where this lives in Understanding: What it knows</a>
+        </li>
+      </ul>
+      <p class="fixed">This reply drew only on your specification and your material. The Agent reported holding the date. A hold for 14 November is recorded in the taproom calendar.</p>
+    </section>
+
+    <div class="decide">
+      <a class="btn" href="#">This was wrong</a>
+      <a class="btn suspend" href="#">Suspend the Agent</a>
+      <a class="btn ghost" href="#">Back to Activity</a>
+    </div>
+    <p class="afterword">&ldquo;This was wrong&rdquo; opens the Builder conversation with this interaction in front of it. Suspending is reversible whenever you want.</p>
+  </div>
+</div>
+
+<p class="statelabel">State two — the same viewer while the Agent is suspended for acting only</p>
+
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / activity / interaction</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Northgate Brewing Co.</span></div>
+    <nav class="places"><a href="#">Understanding</a><b>Activity</b></nav>
+  </div>
+
+  <div class="sheet">
+    <p class="panelhead">Interaction</p>
+    <h2 class="label">Leaving do, Friday 21 Nov</h2>
+    <p class="received">Leaving do, Friday 21 Nov · received 13 Oct, 09:17</p>
+
+    <div class="framing susp">
+      <strong>Suspended, answering only</strong>
+      <p>The Agent is suspended from acting. It is still replying.</p>
+      <p>Suspended by you on 13 Oct, 08:55.</p>
+    </div>
+
+    <section class="part" aria-label="The customer's email">
+      <h3>The customer&rsquo;s email</h3>
+      <p class="mailmeta">From Tom Ellery · Subject: Leaving do, Friday 21 Nov · 13 Oct, 09:17</p>
+      <div class="email">
+        <p>Hi there,</p>
+        <p>Twenty-five of us for a leaving do, Friday the 21st, from about six. Can you hold the back room for us?</p>
+        <p>Tom</p>
+      </div>
+    </section>
+
+    <section class="part" aria-label="The Agent's reply">
+      <h3>The Agent&rsquo;s reply</h3>
+      <p class="mailmeta">Sent 13 Oct, 09:18</p>
+      <div class="reply">
+        <p>Hi Tom,</p>
+        <p>The back room looks free for twenty-five on Friday 21 November from six. I haven&rsquo;t been able to hold it, so someone from the brewery will confirm with you directly.</p>
+        <p>Northgate Brewing Co.</p>
+      </div>
+    </section>
+
+    <section class="part" aria-label="What this reply was based on">
+      <h3>What this reply was based on</h3>
+      <ul class="basis">
+        <li>
+          <span class="src">Your specification · What it may and may not do</span>
+          <blockquote>&ldquo;Private events may be accepted when capacity and availability allow.&rdquo;</blockquote>
+          <a href="#">Where this lives in Understanding: What it may and may not do</a>
+        </li>
+        <li>
+          <span class="src">Your material · Taproom calendar, as uploaded 2 Oct</span>
+          <blockquote>&ldquo;Back room: free, Fri 21 Nov, from 18:00.&rdquo;</blockquote>
+          <a href="#">Where this lives in Understanding: What it knows</a>
+        </li>
+      </ul>
+      <p class="fixed">This reply drew only on your specification and your material. No hold was placed, because acting is suspended. Nothing is recorded in the taproom calendar for 21 November.</p>
+    </section>
+
+    <div class="decide">
+      <a class="btn" href="#">This was wrong</a>
+      <a class="btn suspend" href="#">Let the Agent act again</a>
+      <a class="btn ghost" href="#">Back to Activity</a>
+    </div>
+    <p class="afterword">The Agent is answering either way. Letting it act again is reversible whenever you want.</p>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

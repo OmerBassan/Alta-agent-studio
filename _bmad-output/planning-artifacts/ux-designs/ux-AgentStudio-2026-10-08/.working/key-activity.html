@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key screen — Activity, desktop and phone</title>
+<style>
+/* ===========================================================
+   KEY SCREEN 4 — ACTIVITY, WITH THE INTERACTION VIEWER BESIDE IT
+   Foundation: Ledger. Desktop (list pane + detail pane) and a
+   390px phone (full-screen list), side by side.
+
+   GOVERNED BY
+   DESIGN.md      — Components (Divergence list: class, interaction
+                    label and a one-line request only, no counts,
+                    severity marks, badges, charts or filters;
+                    Interaction viewer; Suspend); Colors (Divergence,
+                    diff and action: businessRefusal shares the
+                    established ink-green deliberately; action.suspend
+                    outlined, never filled); Contrast floor (the three
+                    classes are kinds, never a ramp); Layout & Spacing
+                    (Application layout, Responsive)
+   EXPERIENCE.md  — Component Patterns (Divergence list: V1 minimum,
+                    grouped under the three class framings, newest
+                    first within each group; Interaction viewer: three
+                    parts and one action, interaction label with the
+                    "Customer email · {received}" fallback; Suspend);
+                    Responsive & Platform (Application layout: Run,
+                    desktop is a list pane beside a detail pane, each
+                    scrolling independently under a persistent pane
+                    heading; Run, mobile is a full-screen list with
+                    Suspend reachable without scrolling);
+                    Accessibility Floor (never colour alone)
+
+   Businesses: a gym and a dental practice. Classes are told apart by
+   label plus left-rule shape: solid (specification got it wrong),
+   double (your rules said no), dashed (our side failed).
+   =========================================================== */
+
+:root{
+  --page:#F7F4ED; --raised:#FFFDF8; --sunken:#EFEAE0;
+  --hair:#D9D2C4; --strong:#8C8372;
+  --ink:#221F19; --ink2:#5C5447; --ink3:#756C5C;
+  --est:#3F4A3A; --notest:#7A3A12; --chg:#1E4A6B; --aff:#46637A;
+  --susp:#6B2B2B; --plat:#4A4458;
+  --serif:Georgia,"Iowan Old Style","Times New Roman",Times,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E7E2D7;color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1560px;margin:0 auto;padding:28px 16px 72px}
+a:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+
+.caption{background:var(--raised);border:1px solid var(--hair);border-left:4px solid var(--strong);padding:18px 24px;margin-bottom:28px}
+.caption h1{font-size:21px;margin:0 0 6px;letter-spacing:.02em;font-weight:400}
+.caption p{margin:0;font-size:16px;color:var(--ink2);max-width:80ch}
+
+.pair{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:32px;align-items:start}
+.framelabel{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--strong)}
+
+.browser{border:1px solid #C9C2B2;background:var(--raised)}
+.chrome{display:flex;align-items:center;gap:10px;background:#EAE4D8;border-bottom:1px solid var(--hair);padding:9px 14px}
+.dot{width:10px;height:10px;border:1px solid var(--strong);border-radius:50%}
+.addr{flex:1;font-family:var(--sans);font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--hair);padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:16px 28px;border-bottom:1px solid var(--hair);gap:16px;flex-wrap:wrap}
+.mark{font-size:19px;letter-spacing:.06em}
+.mark span{color:var(--ink3);letter-spacing:.14em;font-size:12px;font-family:var(--sans);text-transform:uppercase;margin-left:12px}
+.places{font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.places b{color:var(--ink);border-bottom:2px solid var(--strong);padding-bottom:3px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:22px}
+
+/* ---------- Run, desktop: two independently scrolling panes ---------- */
+.run{display:grid;grid-template-columns:minmax(300px,0.9fr) minmax(0,1.1fr);height:760px;background:var(--page)}
+.pane{overflow-y:auto;min-width:0}
+.pane + .pane{border-left:1px solid var(--hair)}
+.panehead{position:sticky;top:0;z-index:1;background:var(--page);border-bottom:1px solid var(--strong);padding:12px 22px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.panehead p{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);margin:0}
+.panebody{padding:18px 22px 32px}
+
+.suspend{font-family:var(--sans);font-size:13px;color:var(--susp);border:2px solid var(--susp);background:transparent;padding:6px 12px;text-decoration:none;display:inline-block;white-space:nowrap}
+
+/* ---------- the divergence list ---------- */
+.group{margin:0 0 28px}
+.group > h3{font-size:17px;font-weight:400;margin:0;padding:2px 0 2px 12px}
+.group > p.kind{font-family:var(--sans);font-size:12px;color:var(--ink2);margin:0 0 8px;padding-left:15px}
+.defect > h3{border-left:3px solid var(--notest);color:var(--notest)}
+.refusal > h3{border-left:4px double var(--est);color:var(--est)}
+.platform > h3{border-left:3px dashed var(--plat);color:var(--plat)}
+
+.items{list-style:none;margin:0;padding:0}
+.items li{border-bottom:1px solid var(--hair)}
+.items a{display:block;padding:10px 0 10px 14px;color:var(--ink);text-decoration:none;min-height:44px}
+.defect .items a{border-left:3px solid var(--notest)}
+.refusal .items a{border-left:4px double var(--est)}
+.platform .items a{border-left:3px dashed var(--plat)}
+.items .lbl{display:block;font-size:16px;line-height:1.5}
+.items .req{display:block;font-size:14px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.6}
+.items a[aria-current="true"]{background:var(--sunken)}
+.items a[aria-current="true"] .lbl::before{content:"Open · ";font-family:var(--sans);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink2)}
+
+/* ---------- the open interaction (three-part viewer, brief) ---------- */
+.ilabel{font-size:21px;font-weight:400;margin:0 0 2px}
+.received{font-family:var(--sans);font-size:13px;color:var(--ink2);margin:0 0 16px}
+.framing{border:1px solid var(--strong);border-left:4px solid var(--notest);background:var(--raised);padding:10px 16px;margin:0 0 22px}
+.framing strong{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;display:block;color:var(--notest)}
+.framing p{margin:0;font-size:15px}
+.part{border-top:1px solid var(--strong);padding:14px 0 18px}
+.part > h4{font-size:17px;font-weight:400;margin:0 0 8px}
+.part p{margin:0 0 8px;font-size:15px}
+.part p:last-child{margin-bottom:0}
+.email{background:var(--sunken);border-left:2px solid var(--strong);padding:10px 16px}
+.reply{border-left:2px solid var(--hair);padding:2px 16px}
+.src{font-family:var(--sans);font-size:12px;color:var(--ink3);display:block;margin-bottom:2px}
+blockquote{margin:0 0 4px;background:var(--sunken);border-left:2px solid var(--strong);padding:6px 14px;font-size:15px}
+.where{font-family:var(--sans);font-size:13px;color:var(--chg);text-decoration:underline;text-underline-offset:3px}
+.basis{list-style:none;margin:0;padding:0}
+.basis li{padding:0 0 12px}
+.decide{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.btn{font-family:var(--sans);font-size:14px;padding:10px 20px;border:1px solid var(--ink);background:var(--ink);color:var(--raised);text-decoration:none;display:inline-block}
+
+/* ---------- phone ---------- */
+.phone{width:430px;border:1px solid #C9C2B2;background:#EAE4D8;padding:20px}
+.screen{width:390px;margin:0 auto;background:var(--page);border:1px solid var(--strong)}
+.statusbar{display:flex;justify-content:space-between;font-family:var(--sans);font-size:11px;color:var(--ink2);padding:6px 16px;border-bottom:1px solid var(--hair);background:#EAE4D8;letter-spacing:.04em}
+.mtop{position:sticky;top:0;background:var(--page);padding:12px 16px;border-bottom:1px solid var(--strong);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.mtop .mark{font-size:17px;letter-spacing:.04em}
+.mtop .mark span{display:block;margin:0;font-size:11px;letter-spacing:.12em}
+.mtop .suspend{padding:10px 12px;font-size:13px}
+.mbody{padding:16px 16px 26px}
+
+@media (max-width:1320px){
+  .pair{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .run{grid-template-columns:1fr;height:auto}
+  .pane{overflow:visible}
+  .pane + .pane{border-left:0;border-top:1px solid var(--hair)}
+}
+@media (max-width:460px){
+  .wrap{padding:16px}
+  .phone{width:100%;padding:0;border:0;background:transparent}
+  .screen{width:100%}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="caption">
+  <h1>Key screen — Activity, on a desk and in a hand</h1>
+  <p>Divergences only, under three kinds that are not degrees of one thing. Each item shows its kind, which email it was, and what the customer asked. On a desk the open interaction sits beside the list; on a phone the list is the whole screen, and Suspend is always at the top.</p>
+</div>
+
+<div class="pair">
+
+  <!-- ===================== DESKTOP ===================== -->
+  <div>
+    <p class="framelabel">Desktop — list pane beside the open interaction</p>
+    <div class="browser">
+      <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+        <span class="addr">studio.alta.example / activity</span></div>
+
+      <div class="appbar">
+        <div class="mark">Alta Agent Studio <span>Fernbank Dental &amp; Fernbank Fitness</span></div>
+        <nav class="places"><a href="#">Understanding</a><b>Activity</b></nav>
+      </div>
+
+      <div class="run">
+        <!-- list pane -->
+        <section class="pane" aria-label="Activity">
+          <div class="panehead"><p>Activity</p><a class="suspend" href="#">Suspend the Agent</a></div>
+          <div class="panebody">
+
+            <section class="group defect">
+              <h3>Your specification got this wrong</h3>
+              <p class="kind">Yours to correct.</p>
+              <ul class="items">
+                <li><a href="#"><span class="lbl">Hygienist appointment for my son · received 8 Oct, 11:22</span><span class="req">Could I book my nine-year-old in with the hygienist next week? Any afternoon works for us.</span></a></li>
+                <li><a href="#" aria-current="true"><span class="lbl">Evening membership · received 7 Oct, 19:04</span><span class="req">Hi, how much is a monthly membership if I only come in on weekday evenings after work?</span></a></li>
+                <li><a href="#"><span class="lbl">Appointment next week · received 6 Oct, 09:48</span><span class="req">I&rsquo;d like to see someone next week if possible. What appointments do you have free?</span></a></li>
+              </ul>
+            </section>
+
+            <section class="group refusal">
+              <h3>Your rules said no</h3>
+              <p class="kind">Correct behaviour. Your rules held.</p>
+              <ul class="items">
+                <li><a href="#"><span class="lbl">Fixed price for an implant? · received 10 Oct, 15:55</span><span class="req">Can you tell me what an implant costs? I&rsquo;d like a fixed price before I come in for anything.</span></a></li>
+                <li><a href="#"><span class="lbl">Customer email · received 9 Oct, 14:10</span><span class="req">I have a heart condition. Is personal training suitable for me, and who would I be training with?</span></a></li>
+                <li><a href="#"><span class="lbl">Freezing my membership · received 9 Oct, 08:31</span><span class="req">I&rsquo;m going travelling and need to freeze my membership for four months from November.</span></a></li>
+              </ul>
+            </section>
+
+            <section class="group platform">
+              <h3>Something on our side failed</h3>
+              <p class="kind">Not your fault.</p>
+              <ul class="items">
+                <li><a href="#"><span class="lbl">Replacing a filling · received 10 Oct, 16:40</span><span class="req">Can I book in to have an old filling replaced, ideally on Thursday afternoon?</span></a></li>
+                <li><a href="#"><span class="lbl">Saturday class times · received 10 Oct, 07:12</span><span class="req">What time is the Saturday morning spin class this week, and do I need to book?</span></a></li>
+              </ul>
+            </section>
+
+          </div>
+        </section>
+
+        <!-- detail pane -->
+        <section class="pane" aria-label="Interaction">
+          <div class="panehead"><p>Interaction</p></div>
+          <div class="panebody">
+            <h3 class="ilabel">Evening membership</h3>
+            <p class="received">Evening membership · received 7 Oct, 19:04 · Fernbank Fitness</p>
+
+            <div class="framing">
+              <strong>Your specification got this wrong</strong>
+              <p>Nothing was refused and nothing failed.</p>
+            </div>
+
+            <section class="part">
+              <h4>The customer&rsquo;s email</h4>
+              <div class="email">
+                <p>Hi, how much is a monthly membership if I only come in on weekday evenings after work? Usually about half six. Thanks, Priya</p>
+              </div>
+            </section>
+
+            <section class="part">
+              <h4>The Agent&rsquo;s reply</h4>
+              <div class="reply">
+                <p>Hi Priya, our off-peak membership would suit you. It&rsquo;s twenty-nine pounds a month and covers weekday evenings. Fernbank Fitness</p>
+              </div>
+            </section>
+
+            <section class="part">
+              <h4>What this reply was based on</h4>
+              <ul class="basis">
+                <li>
+                  <span class="src">Your specification · How it operates</span>
+                  <blockquote>&ldquo;Off-peak membership covers weekdays and weekday evenings.&rdquo;</blockquote>
+                  <a class="where" href="#">Where this lives in Understanding: How it operates</a>
+                </li>
+                <li>
+                  <span class="src">Your material · Membership price list, as uploaded 1 Oct</span>
+                  <blockquote>&ldquo;Off-peak monthly: &pound;29.&rdquo;</blockquote>
+                  <a class="where" href="#">Where this lives in Understanding: What it knows</a>
+                </li>
+              </ul>
+              <div class="decide">
+                <a class="btn" href="#">This was wrong</a>
+                <a class="suspend" href="#">Suspend the Agent</a>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PHONE ===================== -->
+  <div>
+    <p class="framelabel">Phone, 390 wide — full-screen list, Suspend at the top</p>
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>Fernbank</span><span>78%</span></div>
+
+        <div class="mtop">
+          <div class="mark">Activity <span>Fernbank Dental &amp; Fitness</span></div>
+          <a class="suspend" href="#">Suspend the Agent</a>
+        </div>
+
+        <div class="mbody">
+          <section class="group defect">
+            <h3>Your specification got this wrong</h3>
+            <p class="kind">Yours to correct.</p>
+            <ul class="items">
+              <li><a href="#"><span class="lbl">Hygienist appointment for my son · received 8 Oct, 11:22</span><span class="req">Could I book my nine-year-old in with the hygienist next week? Any afternoon works for us.</span></a></li>
+              <li><a href="#"><span class="lbl">Evening membership · received 7 Oct, 19:04</span><span class="req">Hi, how much is a monthly membership if I only come in on weekday evenings after work?</span></a></li>
+              <li><a href="#"><span class="lbl">Appointment next week · received 6 Oct, 09:48</span><span class="req">I&rsquo;d like to see someone next week if possible. What appointments do you have free?</span></a></li>
+            </ul>
+          </section>
+
+          <section class="group refusal">
+            <h3>Your rules said no</h3>
+            <p class="kind">Correct behaviour. Your rules held.</p>
+            <ul class="items">
+              <li><a href="#"><span class="lbl">Fixed price for an implant? · received 10 Oct, 15:55</span><span class="req">Can you tell me what an implant costs? I&rsquo;d like a fixed price before I come in for anything.</span></a></li>
+              <li><a href="#"><span class="lbl">Customer email · received 9 Oct, 14:10</span><span class="req">I have a heart condition. Is personal training suitable for me, and who would I be training with?</span></a></li>
+              <li><a href="#"><span class="lbl">Freezing my membership · received 9 Oct, 08:31</span><span class="req">I&rsquo;m going travelling and need to freeze my membership for four months from November.</span></a></li>
+            </ul>
+          </section>
+
+          <section class="group platform">
+            <h3>Something on our side failed</h3>
+            <p class="kind">Not your fault.</p>
+            <ul class="items">
+              <li><a href="#"><span class="lbl">Replacing a filling · received 10 Oct, 16:40</span><span class="req">Can I book in to have an old filling replaced, ideally on Thursday afternoon?</span></a></li>
+              <li><a href="#"><span class="lbl">Saturday class times · received 10 Oct, 07:12</span><span class="req">What time is the Saturday morning spin class this week, and do I need to book?</span></a></li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+</body>
+</html>

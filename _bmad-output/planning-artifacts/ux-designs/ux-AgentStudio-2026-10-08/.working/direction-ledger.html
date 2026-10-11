@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction — Ledger</title>
+<style>
+/* ===========================================================
+   DIRECTION 1 — "LEDGER"
+   Register: the printed record. Editorial serif, warm paper,
+   hairline rules, zero shadow. Reads as a document an operator
+   would sign, not an application they would operate.
+
+   COLOR TOKENS (lift these)
+   --------------------------------------------------------
+   surface.page        #F7F4ED   warm paper
+   surface.raised      #FFFDF8   conversation sheet
+   surface.sunken      #EFEAE0   quoted material
+   border.hairline     #D9D2C4   1px rules, 3.0:1 on page
+   border.strong       #8C8372   emphasis rules, 4.6:1
+   text.body           #221F19   16.9:1 on page
+   text.secondary      #5C5447   7.2:1 on page
+   text.quiet          #756C5C   5.0:1 on page
+
+   state.established       #3F4A3A  ink-green   8.9:1
+   state.notEstablished    #7A3A12  burnt sienna 6.6:1 + dashed bracket + tinted band
+   state.changed           #1E4A6B  record blue 7.6:1 + solid left rule + underline
+   state.affected          #46637A  5.0:1 + dotted left rule + italic
+
+   divergence.specDefect      #7A3A12
+   divergence.businessRefusal #3F4A3A
+   divergence.platformError   #4A4458
+   diff.before  #5C5447 (marked by its label, never by strike-through)
+   diff.after   #221F19
+   attention.escalation #1E4A6B
+   action.suspend       #6B2B2B  6.9:1, outlined and never filled
+   =========================================================== */
+
+:root{
+  --page:#F7F4ED; --raised:#FFFDF8; --sunken:#EFEAE0;
+  --hair:#D9D2C4; --strong:#8C8372;
+  --ink:#221F19; --ink2:#5C5447; --ink3:#756C5C;
+  --est:#3F4A3A; --notest:#7A3A12; --chg:#1E4A6B; --aff:#46637A;
+  --susp:#6B2B2B;
+  --serif:Georgia,"Iowan Old Style","Times New Roman",Times,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E7E2D7;color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 16px 72px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+
+.rationale{background:var(--raised);border:1px solid var(--hair);border-left:4px solid var(--strong);padding:20px 24px;margin-bottom:28px}
+.rationale h1{font-size:21px;margin:0 0 8px;letter-spacing:.02em;font-weight:400}
+.rationale p{margin:0;font-size:16px;color:var(--ink2);max-width:76ch}
+
+.browser{border:1px solid #C9C2B2;background:var(--raised);margin-bottom:34px}
+.chrome{display:flex;align-items:center;gap:10px;background:#EAE4D8;border-bottom:1px solid var(--hair);padding:9px 14px}
+.dot{width:10px;height:10px;border:1px solid var(--strong);border-radius:50%}
+.addr{flex:1;font-family:var(--sans);font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--hair);padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--hair);gap:16px;flex-wrap:wrap}
+.mark{font-size:19px;letter-spacing:.06em}
+.mark span{color:var(--ink3);letter-spacing:.14em;font-size:12px;font-family:var(--sans);text-transform:uppercase;margin-left:12px}
+.places{font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.places b{color:var(--ink);border-bottom:2px solid var(--strong);padding-bottom:3px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:22px}
+
+.hero{display:grid;grid-template-columns:1fr 1.12fr}
+.hero > *{padding:30px 34px 40px}
+.hero > .doc{border-left:1px solid var(--hair);background:var(--page)}
+
+.panelhead{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 4px}
+.origin{font-size:15px;color:var(--ink2);font-style:italic;margin:0 0 26px}
+.turn{margin:0 0 24px;max-width:58ch}
+.who{font-family:var(--sans);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
+.turn p{margin:0 0 10px}
+.turn.op p{border-left:2px solid var(--strong);padding-left:16px}
+.thinking{font-family:var(--sans);font-size:13px;color:var(--ink2);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:10px 0;max-width:58ch}
+.composer{border-top:1px solid var(--strong);margin-top:30px;padding-top:12px;font-size:16px;color:var(--ink3);font-style:italic}
+
+.frame{border:1px solid var(--strong);background:var(--sunken);padding:14px 18px;margin:0 0 30px}
+.frame strong{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:4px}
+.frame p{margin:0;font-size:15px;color:var(--ink2)}
+.biz{font-size:14px;color:var(--ink2);margin:0 0 26px;font-family:var(--sans);letter-spacing:.03em}
+
+.sec{border-top:1px solid var(--hair);padding-top:20px;margin-top:26px}
+.sec:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.sec h3{font-size:19px;font-weight:400;letter-spacing:.015em;margin:0 0 14px}
+.item{max-width:62ch;margin:0 0 16px;padding-left:14px;border-left:1px solid var(--hair)}
+.item p{margin:0 0 5px}
+.item.s-chg{border-left:3px solid var(--chg)}
+.item.s-aff{border-left:1px dotted var(--aff)}
+.item.s-not{border-left:1px dashed var(--notest);background:#FBF1E8;padding:4px 0 6px 14px}
+
+.st{font-family:var(--sans);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;display:inline-block}
+.st.est{color:var(--est)}
+.st.chg{color:var(--chg);border-bottom:2px solid var(--chg)}
+.st.aff{color:var(--aff);font-style:italic;border-bottom:1px dotted var(--aff)}
+.st.not{color:var(--notest);border:1px dashed var(--notest);padding:2px 7px;font-weight:700}
+.st.not::before{content:"[ "}
+.st.not::after{content:" ]"}
+.note{font-size:15px;color:var(--ink3);font-style:italic}
+
+.intake{border:1px solid var(--hair);background:var(--raised);padding:16px 18px;margin:28px 0 0}
+.intake h4{font-family:var(--sans);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;color:var(--ink3)}
+.intake dl{margin:0;font-size:15px}
+.intake dt{font-family:var(--sans);font-size:12px;letter-spacing:.06em;color:var(--ink);margin-top:11px}
+.intake dd{margin:2px 0 0;color:var(--ink2)}
+.bar{display:block;height:7px;background:var(--sunken);border:1px solid var(--strong);margin-top:7px;max-width:260px}
+.bar i{display:block;height:100%;width:62%;background:repeating-linear-gradient(135deg,var(--strong) 0 4px,transparent 4px 8px)}
+
+.sheet{padding:30px 34px 40px}
+.sheet > h2{font-size:23px;font-weight:400;margin:0 0 6px}
+.lede{font-size:16px;color:var(--ink2);margin:0 0 28px;max-width:72ch}
+.diff{border-top:1px solid var(--strong);margin:0}
+.row{border-bottom:1px solid var(--hair);padding:20px 0;display:grid;grid-template-columns:210px 1fr;gap:28px}
+.row dt{font-family:var(--sans);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin:0}
+.row dd{margin:0;max-width:66ch}
+.row.before dd,.row.before dt{color:var(--ink2)}
+.row.after dd{font-size:18px}
+.row.after{background:var(--raised)}
+.row ul{margin:0;padding-left:0;list-style:none}
+.row li{padding:6px 0 6px 14px;border-left:1px dotted var(--aff)}
+.decide{display:flex;gap:18px;align-items:center;margin-top:28px;flex-wrap:wrap}
+.btn{font-family:var(--sans);font-size:14px;padding:11px 22px;border:1px solid var(--ink);background:var(--ink);color:var(--raised);text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--strong)}
+.afterword{font-size:15px;color:var(--ink2);margin:22px 0 0;max-width:72ch;font-style:italic}
+.susp{margin-top:34px;border-top:1px solid var(--hair);padding-top:16px;font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.susp a{color:var(--susp);border:1px solid var(--susp);padding:8px 16px;text-decoration:none;margin-right:14px;display:inline-block}
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .hero > .doc{border-left:0;border-top:1px solid var(--hair)}
+  .row{grid-template-columns:1fr;gap:8px}
+  .wrap{padding:16px}
+  .hero > *,.sheet{padding:22px 16px 28px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="rationale">
+  <h1>Direction 1 — Ledger</h1>
+  <p>The personality is <em>the printed record</em>: an editorial serif on warm paper, hairline rules in place of cards, and no shadow anywhere. It earns trust by looking like something already written down and kept, which makes the Understanding read as the operator's own document rather than an application's output. The trade-off it accepts: at this reading size less fits on screen than in a denser direction, and its deliberate quietness leaves little visual headroom for a moment that genuinely needs to claim attention.</p>
+</div>
+
+<!-- ======================= HERO ======================= -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Northgate Brewing Co.</span></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="hero">
+    <section aria-label="The conversation">
+      <p class="panelhead">The conversation</p>
+      <p class="origin">Opened from <em>How it operates</em> — private events.</p>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>You take private events in the back room. Tell me when you would turn one down even though the room is free.</p>
+      </div>
+
+      <div class="turn op">
+        <div class="who">You</div>
+        <p>Saturday evening is always regular service. We never give the room over then, even if nobody has booked it.</p>
+      </div>
+
+      <div class="turn">
+        <div class="who">Builder</div>
+        <p>Understood. I have written that as an exception to the capacity rule rather than as a rule of its own, so the two can never disagree.</p>
+        <p>Two things I still have nothing recorded for: who may agree a deposit below your standard amount, and whether the taproom manager's word overrides the booking calendar when they conflict.</p>
+      </div>
+
+      <div class="thinking">Reading your event enquiries from the last quarter for cases this would have changed.</div>
+
+      <div class="composer">Say what you want changed, in your own words…</div>
+    </section>
+
+    <section class="doc" aria-label="What the Builder currently understands">
+      <div class="frame">
+        <strong>What the Builder currently understands</strong>
+        <p>A record of what has been established so far. Nothing here is being edited as you read it, and nothing here is in force until a version has been checked and approved.</p>
+      </div>
+      <p class="biz">Northgate Brewing Co. — taproom, tours and private events.</p>
+
+      <div class="sec">
+        <h3>Your business</h3>
+        <div class="item"><p>An independent brewery with a taproom open Wednesday to Sunday, running brewhouse tours and hosting private events in the back room.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Speaks plainly and without sales language. Never says a beer is pouring when the tank has run dry.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What the Agent handles</h3>
+        <div class="item"><p>Private event enquiries, as far as a provisional date and room. Resolved when a date, a headcount and a deposit arrangement are all recorded.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Tour enquiries, including group sizes and how reachable the brewhouse floor is.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Whether trade and wholesale enquiries belong here at all, or go straight to the sales line.</p><span class="st not">Not established</span> <span class="note">A recorded absence. Nothing will be assumed in its place.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it knows</h3>
+        <div class="item"><p>Your own material: the 2026 events pack, the tap list sheet and the taproom booking calendar. Where the events pack and the calendar disagree, the calendar is taken as correct.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Enquiry details are kept for twelve months and then removed.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>How it operates</h3>
+        <div class="item s-chg"><p>Private events may be accepted when capacity and availability allow, except during Saturday evening service.</p><span class="st chg">Changed</span></div>
+        <div class="item s-aff"><p>The room hire quote, which until now offered Saturday evening as a premium slot.</p><span class="st aff">Affected by this change</span></div>
+        <div class="item"><p>A headcount above sixty is never agreed, because the back room is licensed for sixty.</p><span class="st est">Established</span></div>
+        <div class="item s-not"><p>Who may agree a deposit below the standard quarter of the room fee.</p><span class="st not">Not established</span> <span class="note">A recorded absence, and it stays visible until you settle it.</span></div>
+      </div>
+
+      <div class="sec">
+        <h3>What it may and may not do</h3>
+        <div class="item"><p>It may hold a provisional date for seven days. It may not take payment, and it may not confirm a booking as final.</p><span class="st est">Established</span></div>
+        <div class="item"><p>Anything touching a licence variation or a street closure is handed to a human, with why.</p><span class="st est">Established</span></div>
+        <div class="item"><p>It may not discuss how much anyone drinks, and it may not continue with an enquiry from someone who says they are under eighteen.</p><span class="st est">Established</span></div>
+      </div>
+
+      <div class="intake">
+        <h4>Material being read</h4>
+        <dl>
+          <dt>Events pack 2026.pdf</dt>
+          <dd>Being read now — fourteen of twenty-two pages. Nothing from the unread pages has been used, and nothing has been guessed in its place.
+            <span class="bar"><i></i></span></dd>
+          <dt>Tap list, week 41.xlsx</dt>
+          <dd>Read. Held as your own material, at the version you gave us.</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ SECONDARY: CORRECTION DIFF ============ -->
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding / the change you asked for</span></div>
+  <div class="sheet">
+    <h2>The change you asked for</h2>
+    <p class="lede">Read it in order. What follows is the whole of what would change, and the whole of what would not.</p>
+
+    <dl class="diff">
+      <div class="row before"><dt>Before — the current wording</dt>
+        <dd>Private events may be accepted when capacity and availability allow.</dd></div>
+      <div class="row after"><dt>After — the proposed wording</dt>
+        <dd>Private events may be accepted when capacity and availability allow, except during Saturday evening service.</dd></div>
+      <div class="row"><dt>Also affected</dt>
+        <dd><ul>
+          <li>The room hire quote, which offered Saturday evening as a premium slot. It would stop offering that slot.</li>
+          <li>What good looks like here: the worked case of a forty-person Saturday enquiry, which currently shows the enquiry being accepted.</li>
+        </ul></dd></div>
+      <div class="row"><dt>Unchanged</dt>
+        <dd>Weekday and Sunday private events. The sixty-person limit. The deposit arrangement. Tours. Everything in <em>What it may and may not do</em>.</dd></div>
+    </dl>
+
+    <div class="decide">
+      <a class="btn" href="#">Accept this change</a>
+      <a class="btn ghost" href="#">Push back — that is not quite it</a>
+    </div>
+    <p class="afterword">Accepting produces a new version to be checked and approved. Nothing a customer sees changes at this point.</p>
+
+    <div class="susp">
+      <a href="#">Suspend the Agent</a>
+      Stops it answering, or stops it acting while it carries on answering. Reversible whenever you want.
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

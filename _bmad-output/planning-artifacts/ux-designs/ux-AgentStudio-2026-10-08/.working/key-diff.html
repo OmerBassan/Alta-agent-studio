@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key screen — The change you asked for</title>
+<style>
+/* ===========================================================
+   KEY SCREEN 3 — THE CORRECTION DIFF, THEN THE APPROVAL
+   Foundation: Ledger. Carry-over target: Almanac's stronger
+   correction presentation, in Ledger's language.
+
+   GOVERNED BY
+   DESIGN.md      — Components (Correction diff, Validation result,
+                    Approval, Item state marker); Colors (diff.before
+                    / diff.after, State); Typography (the correction
+                    diff reads as prose; before/after by label and
+                    weight, never strike-through); Elevation & Depth
+                    (rule weight and whitespace, not shadow);
+                    Do's and Don'ts (don't celebrate)
+   EXPERIENCE.md  — Component Patterns (Correction diff, Validation
+                    result, Approval); Interaction Primitives
+                    (Correction is conversational, confirmation is
+                    exact; no destructive action without a visible,
+                    bounded blast radius); State Patterns (Version and
+                    lifecycle states — in-flight interactions keep the
+                    version they started on); Voice and Tone (No
+                    celebration); Key Flows / Flow 2 steps 4–9;
+                    Accessibility Floor (The diff is readable
+                    sequentially); Validation result (only actual
+                    findings, each marked blocking / not blocking
+                    with a non-colour cue, nothing hypothetical);
+                    Responsive & Platform (Application layout).
+                    Interaction viewer: the correction this diff
+                    answers was opened from it ("This was wrong").
+
+   Business: brewery. Verbatim operator correction, before and after.
+   Second state: the validation result and the approval that follows.
+   =========================================================== */
+
+:root{
+  --page:#F7F4ED; --raised:#FFFDF8; --sunken:#EFEAE0;
+  --hair:#D9D2C4; --strong:#8C8372;
+  --ink:#221F19; --ink2:#5C5447; --ink3:#756C5C;
+  --est:#3F4A3A; --notest:#7A3A12; --chg:#1E4A6B; --aff:#46637A;
+  --susp:#6B2B2B;
+  --serif:Georgia,"Iowan Old Style","Times New Roman",Times,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#E7E2D7;color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:28px 16px 72px}
+a:focus-visible,.btn:focus-visible{outline:2px solid var(--chg);outline-offset:2px}
+
+.caption{background:var(--raised);border:1px solid var(--hair);border-left:4px solid var(--strong);padding:18px 24px;margin-bottom:28px}
+.caption h1{font-size:21px;margin:0 0 6px;letter-spacing:.02em;font-weight:400}
+.caption p{margin:0;font-size:16px;color:var(--ink2);max-width:76ch}
+
+.browser{border:1px solid #C9C2B2;background:var(--raised);margin-bottom:34px}
+.chrome{display:flex;align-items:center;gap:10px;background:#EAE4D8;border-bottom:1px solid var(--hair);padding:9px 14px}
+.dot{width:10px;height:10px;border:1px solid var(--strong);border-radius:50%}
+.addr{flex:1;font-family:var(--sans);font-size:12px;color:var(--ink2);background:var(--raised);border:1px solid var(--hair);padding:4px 10px}
+
+.appbar{display:flex;align-items:baseline;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--hair);gap:16px;flex-wrap:wrap}
+.mark{font-size:19px;letter-spacing:.06em}
+.mark span{color:var(--ink3);letter-spacing:.14em;font-size:12px;font-family:var(--sans);text-transform:uppercase;margin-left:12px}
+.places{font-family:var(--sans);font-size:13px;color:var(--ink2)}
+.places b{color:var(--ink);border-bottom:2px solid var(--strong);padding-bottom:3px}
+.places a{color:var(--ink2);text-decoration:none;margin-left:22px}
+
+.sheet{padding:30px 34px 44px;background:var(--page)}
+.panelhead{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 6px}
+.sheet h2{font-size:23px;font-weight:400;margin:0 0 6px}
+.lede{font-size:16px;color:var(--ink2);margin:0 0 30px;max-width:74ch}
+.origin{font-size:15px;color:var(--ink2);font-style:italic;margin:0 0 24px}
+
+.said{border:1px solid var(--strong);background:var(--sunken);padding:18px 22px;margin:0 0 36px;max-width:80ch}
+.said strong{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:8px;color:var(--ink3)}
+.said p{margin:0;font-size:19px;line-height:1.7}
+.said .by{font-family:var(--sans);font-size:12px;color:var(--ink3);margin-top:10px;letter-spacing:.04em}
+
+.diff{border-top:2px solid var(--strong);margin:0}
+.row{border-bottom:1px solid var(--hair);padding:24px 0;display:grid;grid-template-columns:230px 1fr;gap:30px}
+.row dt{font-family:var(--sans);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin:0}
+.row dd{margin:0;max-width:68ch}
+.row .said-plain{font-size:15px;color:var(--ink3);font-style:italic;margin-top:8px}
+.row.before dt{color:var(--ink2)}
+.row.before dd{color:var(--ink2)}
+.row.after{background:var(--raised);border-bottom:2px solid var(--strong);padding-left:0}
+.row.after dt{color:var(--ink)}
+.row.after dd{font-size:19px;color:var(--ink);font-weight:700}
+.row.after dd em{font-weight:700;font-style:normal;border-bottom:2px solid var(--chg)}
+.row ul{margin:0;padding-left:0;list-style:none}
+.row li{padding:7px 0 7px 14px;border-left:1px dotted var(--aff)}
+.row li b{font-weight:400;font-style:italic;color:var(--aff);font-family:var(--sans);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;display:block;border-bottom:1px dotted var(--aff);width:max-content;margin-top:4px}
+.row.unchanged dd{color:var(--ink)}
+.row.unchanged ul li{border-left:1px solid var(--hair)}
+
+.decide{display:flex;gap:18px;align-items:center;margin-top:32px;flex-wrap:wrap}
+.btn{font-family:var(--sans);font-size:14px;padding:11px 22px;border:1px solid var(--ink);background:var(--ink);color:var(--raised);text-decoration:none;display:inline-block}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--strong)}
+.afterword{font-size:15px;color:var(--ink2);margin:20px 0 0;max-width:76ch;font-style:italic}
+
+/* validation + approval */
+.gate{border-top:2px solid var(--strong);margin:0 0 4px}
+.gateline{border-bottom:1px solid var(--hair);padding:18px 0;display:grid;grid-template-columns:230px 1fr;gap:30px}
+.gateline h4{font-family:var(--sans);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin:0;font-weight:400}
+.gateline > div{max-width:70ch}
+.gateline p{margin:0 0 8px}
+.gateline p:last-child{margin-bottom:0}
+.flag{font-family:var(--sans);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;display:inline-block;font-weight:700}
+.flag.warn{color:var(--notest);border:1px dashed var(--notest);padding:2px 7px}
+.flag.warn::before{content:"[ "}
+.flag.warn::after{content:" ]"}
+.count{font-family:var(--sans);font-size:13px;color:var(--ink2);margin:0 0 14px;letter-spacing:.02em}
+.where{font-family:var(--sans);font-size:13px;color:var(--ink3)}
+.where a{color:var(--chg);text-decoration:underline;text-underline-offset:3px}
+
+.approve{border:1px solid var(--strong);border-left:4px solid var(--strong);background:var(--raised);padding:22px 26px;margin:34px 0 0;max-width:84ch}
+.approve h3{font-size:19px;font-weight:400;margin:0 0 10px}
+.approve p{margin:0 0 12px;color:var(--ink2);font-size:16px}
+.approve p.own{color:var(--ink)}
+.approve p:last-of-type{margin-bottom:0}
+.propagation{border-top:1px solid var(--hair);margin-top:18px;padding-top:14px;font-size:15px;color:var(--ink2)}
+.attrib{font-family:var(--sans);font-size:12px;color:var(--ink3);margin-top:14px;letter-spacing:.04em}
+
+.statelabel{font-family:var(--sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--strong)}
+
+@media (max-width:900px){
+  .row,.gateline{grid-template-columns:1fr;gap:8px}
+  .wrap{padding:16px}
+  .sheet{padding:22px 16px 30px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="caption">
+  <h1>Key screen — the correction</h1>
+  <p>Your words, then the exact change they produce. Read it straight down: what the wording is now, what it would become, what else that touches, and what it leaves alone. The last of those is the point — the change is bounded, and you can see where it stops.</p>
+</div>
+
+<p class="statelabel">State one — the change you asked for</p>
+
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding / the change you asked for</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Northgate Brewing Co.</span></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="sheet">
+    <p class="panelhead">The change you asked for</p>
+    <h2>One rule, reworded</h2>
+    <p class="lede">Read it in order. What follows is the whole of what would change, and the whole of what would not.</p>
+    <p class="origin">From the interaction where a customer was told they could hold a private event for forty people on a Saturday evening.</p>
+
+    <div class="said">
+      <strong>What you said</strong>
+      <p>&ldquo;We don't take private events on Saturday evenings. Those hours are always regular service, even when we have capacity.&rdquo;</p>
+      <p class="by">In your own words, Monday 13 October</p>
+    </div>
+
+    <dl class="diff">
+      <div class="row before">
+        <dt>Before — the wording in force now</dt>
+        <dd>Private events may be accepted when capacity and availability allow.
+          <p class="said-plain">This is the current wording. It is shown as it stands, not crossed out, because it is in force until you decide otherwise.</p></dd>
+      </div>
+
+      <div class="row after">
+        <dt>After — the proposed wording</dt>
+        <dd>Private events may be accepted when capacity and availability allow, <em>except during Saturday evening service</em>.</dd>
+      </div>
+
+      <div class="row">
+        <dt>Also affected</dt>
+        <dd><ul>
+          <li>The event-booking rule, which decides whether an enquiry may be accepted at all. It would carry the Saturday evening exception too, so the two can never disagree.
+            <b>Affected by this change</b></li>
+          <li>What good looks like here: the worked case of a forty-person Saturday enquiry, which currently shows the enquiry being accepted. It would show it being turned down, with the reason given.
+            <b>Affected by this change</b></li>
+        </ul></dd>
+      </div>
+
+      <div class="row unchanged">
+        <dt>Unchanged</dt>
+        <dd>Everything else stays exactly as it is:
+          <ul>
+            <li>Weekday and Sunday private events, including their availability and pricing.</li>
+            <li>The sixty-person limit on the back room.</li>
+            <li>The deposit arrangement and the seven-day provisional hold.</li>
+            <li>Brewhouse tours, in full.</li>
+            <li>Everything in <em>Your business</em>, <em>What it knows</em> and <em>What it may and may not do</em>.</li>
+          </ul>
+        </dd>
+      </div>
+    </dl>
+
+    <div class="decide">
+      <a class="btn" href="#">Accept this change</a>
+      <a class="btn ghost" href="#">Push back — that is not quite it</a>
+    </div>
+    <p class="afterword">Pushing back takes you back to the conversation with this change in front of it, so you can say what is off in your own words. Accepting produces a new version to be checked and approved. Nothing a customer sees changes at this point.</p>
+  </div>
+</div>
+
+<p class="statelabel">State two — what the check found, and your decision</p>
+
+<div class="browser">
+  <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+    <span class="addr">studio.alta.example / understanding / approve this version</span></div>
+
+  <div class="appbar">
+    <div class="mark">Alta Agent Studio <span>Northgate Brewing Co.</span></div>
+    <nav class="places"><b>Understanding</b><a href="#">Activity</a></nav>
+  </div>
+
+  <div class="sheet">
+    <p class="panelhead">Before this version goes live</p>
+    <h2>What the check found</h2>
+    <p class="lede">Every version is checked the same way before it can go live. This is that check, and it is the only one — there is no quicker route past it and no way to publish around it.</p>
+
+    <p class="count">The check returned one finding. It is not blocking, so this version can be approved.</p>
+
+    <div class="gate">
+      <div class="gateline">
+        <h4><span class="flag warn">Not blocking</span></h4>
+        <div>
+          <p>The room hire quote still lists a Saturday evening premium rate. Nothing in this version uses that rate, so no customer will be quoted it, but your material still mentions it.</p>
+          <p>You may change the quote or leave it as it is. Either way, this version can be approved.</p>
+          <p class="where">Concerns: <a href="#">What it knows, the room hire quote</a></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="approve">
+      <h3>Your decision</h3>
+      <p class="own">The check above decides whether this version is valid. Your approval is a different act: you are saying this is how your business works and you are willing for it to be in force.</p>
+      <p>Approving does not mean you have tested the Agent's behaviour or confirmed it is correct. Nobody is asking you to vouch for that, and this surface will never imply you have.</p>
+      <div class="propagation">
+        <strong>One thing to expect.</strong> Conversations already underway with customers will finish on the previous understanding, the way they started. Only conversations that begin after this version is live will follow the new wording. How long that takes depends on how long those conversations run.
+      </div>
+      <div class="decide">
+        <a class="btn" href="#">Approve this version</a>
+        <a class="btn ghost" href="#">Not yet — back to the conversation</a>
+      </div>
+      <p class="attrib">Approval is recorded against your name and the time you gave it. Once a version is live it cannot be edited; a further change produces a further version.</p>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
