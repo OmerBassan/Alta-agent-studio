@@ -26,3 +26,6 @@ sessions.db
 *.db
 _*.json
 .selftest_passed.json
+
+# per-conversation traces (episode_trace.py) — may contain customer details
+traces/

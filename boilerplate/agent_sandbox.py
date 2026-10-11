@@ -24,7 +24,10 @@ import os
 os.environ.setdefault("FAST_ROUTER_ENABLED", "1")
 os.environ.setdefault("RAG_MAX_ITERATIONS", "1")
 
+from pathlib import Path  # noqa: E402
+
 import config  # noqa: E402
+from episode_trace import TraceWriter  # noqa: E402
 from graph import build_pipeline, TURN_RESET  # noqa: E402
 from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
@@ -32,11 +35,12 @@ from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 THREAD_ID = "sandbox"
 
 
-async def _run_turn(graph, cfg: dict, user_text: str) -> str:
+async def _run_turn(graph, cfg: dict, user_text: str, writer: TraceWriter) -> str:
     payload = dict(TURN_RESET)
     payload["user_message"] = user_text
     payload["recent_messages"] = [HumanMessage(content=user_text)]
     state = await graph.ainvoke(payload, config=cfg)
+    writer.write_turn(user_text, state)
     if state.get("__interrupt__"):
         # Matches runtime.py's own admission: no operator console exists to
         # resolve a HITL approval live, on a call OR here — same follow-up
@@ -57,6 +61,11 @@ async def main() -> None:
 
     graph = build_pipeline(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": THREAD_ID}}
+    here = Path(__file__).resolve().parent
+    writer = TraceWriter(out_dir=here / "traces", agent_dir=here, config_module=config,
+                         agent_name=config.AGENT_NAME, thread_id=THREAD_ID, live=live)
+    print(f"(trace: {writer.path} · config {writer.fingerprint['config_sha256'][:12]})")
+    print()
 
     while True:
         try:
@@ -67,7 +76,7 @@ async def main() -> None:
             continue
         if user_text.lower() in ("quit", "exit"):
             break
-        reply = await _run_turn(graph, cfg, user_text)
+        reply = await _run_turn(graph, cfg, user_text, writer)
         print(f"agent> {reply}")
 
 

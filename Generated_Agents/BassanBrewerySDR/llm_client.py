@@ -106,8 +106,31 @@ class LLMClient:
             return await self._structured_via_json_mode(
                 model, response_format, messages, temperature, max_tokens, timeout=remaining)
 
-    async def _structured_via_json_mode(self, model, response_format, messages, temperature, max_tokens,
-                                        timeout: float | None = None):
+    async def _structured_via_json_mode(
+        self,
+        model: str,
+        response_format: Type[BaseModel],
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        timeout: float | None = None,
+    ) -> BaseModel:
+        """Structured output for endpoints without the OpenAI ``.beta.parse`` path.
+
+        This is the provider-agnostic fallback: ``.beta.chat.completions.parse``
+        is an OpenAI-SDK extension, not part of the OpenAI-COMPATIBLE wire
+        protocol, so any other backend (Mistral, Ollama, vLLM, Groq) lands here.
+        It asks for ``response_format={"type": "json_object"}``, appends the
+        JSON Schema as a system instruction, and regex-extracts the outermost
+        object before validating -- models in JSON mode still wrap output in
+        prose or code fences often enough that parsing the raw string is unsafe.
+
+        ``timeout`` carries the REMAINING budget from the caller, so a failed
+        primary attempt plus this fallback cannot stack two full timeouts.
+
+        Raises ``pydantic.ValidationError`` if the payload does not match
+        ``response_format``, and ``asyncio.TimeoutError`` on budget exhaustion.
+        """
         schema_hint = json.dumps(response_format.model_json_schema(), ensure_ascii=False)
         patched = list(messages) + [{
             "role": "system",

@@ -26,6 +26,17 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
+def append_or_reset(old: list | None, new: list | None) -> list:
+    """Reducer for AgentState.trace: an EMPTY list resets (the Shell passes
+    TURN_RESET's ``trace: []`` at the start of every turn); a non-empty list is
+    appended. Nodes only ever emit non-empty lists, so the two cannot collide."""
+    if new is None:
+        return list(old or [])
+    if not new:
+        return []
+    return list(old or []) + list(new)
+
+
 class IntentResult(BaseModel):
     """Intent-detection tier output. Extracts slots opportunistically so a
     single-utterance request can be served in one turn.
@@ -276,3 +287,11 @@ class AgentState(TypedDict, total=False):
     handoff_requested: bool
 
     exit_conversation: bool     # Shell ends the session when True
+
+    # Per-turn execution trace (episode_trace.py persists it).
+    #   writer:    graph.py's node wrapper — one entry per node that ran, in run
+    #              order (sequential nodes only; the reducer appends).
+    #   reader:    the Shell after each turn (TraceWriter) and the eval harness,
+    #              which assert over it instead of over reply wording.
+    #   lifecycle: reset to [] by TURN_RESET at the start of every turn.
+    trace: Annotated[list, append_or_reset]

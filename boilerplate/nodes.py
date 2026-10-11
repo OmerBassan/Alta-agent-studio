@@ -948,10 +948,30 @@ def _ask_for(flow: config.Flow, missing: list) -> str:
     return f"Could you tell me {hint}?"
 
 
+_ISO_DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?")
+
+
+def _speak_value(value):
+    """Slots may carry raw ISO-8601 datetimes (the reliable machine format for
+    a booking tool) — SPOKEN strings can never surface that literally, so
+    render it as a natural phrase before it reaches any template. Non-ISO
+    values pass through untouched."""
+    if not (isinstance(value, str) and _ISO_DT_RE.match(value)):
+        return value
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    hour12 = dt.hour % 12 or 12
+    minute = f":{dt.minute:02d}" if dt.minute else ""
+    ampm = "AM" if dt.hour < 12 else "PM"
+    return f"{dt.strftime('%A, %B')} {dt.day} at {hour12}{minute} {ampm}"
+
+
 def _confirm_question(intent: str, flow: config.Flow, args: dict) -> str:
     if flow.confirm_template:
         try:
-            return flow.confirm_template.format(**args)
+            return flow.confirm_template.format(**{k: _speak_value(v) for k, v in args.items()})
         except (KeyError, IndexError):
             pass
     detail = f" ({', '.join(f'{k}: {v}' for k, v in args.items())})" if args else ""

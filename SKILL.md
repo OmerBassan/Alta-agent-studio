@@ -55,7 +55,7 @@ Also: `integrations/README.md` when the client names a real external system.
   edit `tools.py` (pre-built, edit-proof — wire via `config.py`, never rewrite)
   and do NOT create `README.md`. Engine files (`graph.py`, `nodes.py`,
   `schemas.py`, `llm_client.py`, `rag_subgraph.py`, `compaction.py`,
-  `filler.py`, `selftest.py`) are write-blocked; fixes go upstream in
+  `filler.py`, `selftest.py`, `episode_trace.py`) are write-blocked; fixes go upstream in
   `boilerplate/`, once.
 - **Provider-agnostic (STRICT):** the agent binds NO provider — OpenAI-
   compatible `/v1` by env only; blank key = MOCK mode; swap = `.env` edit.

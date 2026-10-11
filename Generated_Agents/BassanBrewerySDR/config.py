@@ -221,17 +221,18 @@ class Stage:
 
 
 # The ordered sales spine, extracted from the approved playbook:
-#   1. discovery — confirm we've reached the purchasing decision-maker.
-#   1. discovery — confirm you've reached the person who handles purchasing.
-#   2. qualify   — drink mix, renewal timing, monthly volume (lead_profile flow).
-#   3. close     — book fifteen minutes with the account manager (book_meeting flow).
+#   1. qualify — confirm you've reached the person who handles purchasing, then
+#                drink mix, renewal timing, monthly volume (lead_profile flow).
+#   2. close   — book fifteen minutes with the account manager (book_meeting flow).
+# Discovery is folded into qualify rather than given its own proactive Stage:
+# lead_profile already asks the decision-maker question first, and a separate
+# lead-in Stage makes turn 1 unique and the stall detector unreachable
+# (reasoning-log 2026-09-07).
 CALL_ARC: Tuple[Stage, ...] = (
-    Stage(name="discovery",
-          objective="confirm you've reached the person who handles beverage purchasing and why the call matters",
-          nudge="Are you the one who handles beverage purchasing here, or is that someone else on your team?",
-          advance_when={"agent_led_once": True}),
     Stage(name="qualify", flow="lead_profile",
-          objective="capture their drink mix, current renewal timing, and monthly keg volume",
+          objective=("confirm you've reached the person who handles beverage purchasing and why "
+                     "the call matters, then capture their drink mix, current renewal timing, "
+                     "and monthly keg volume"),
           advance_when={"flow_complete": "lead_profile"}),
     Stage(name="close", flow="book_meeting",
           objective="book fifteen minutes with the account manager as the concrete next step",
@@ -748,7 +749,11 @@ MOCK_KNOWLEDGE: Dict[str, str] = {
     "obj_supplier": "Plenty keep their supplier and just try us on one order.",
     "faq_boundaries": "That's something our account manager handles directly on the follow-up call.",
 }
-MOCK_CHITCHAT = "Thanks for chatting! I'm calling about supplying kegs for your venue — is now still okay?"
+# Empty by design: this agent's CALL_ARC is never empty, so the director always
+# supplies its own proactive line on an unrecognized turn. A competing mock
+# filler makes turn 1's reply differ from every identical repeat and leaves
+# the stall detector unreachable (reasoning-log 2026-09-07).
+MOCK_CHITCHAT = ""
 MOCK_CLOSING = "Thanks for your time today — talk soon!"
 
 # Deterministic SYSTEM replies (never model-generated).          [CUSTOMIZE]

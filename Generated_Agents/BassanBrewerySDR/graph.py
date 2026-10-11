@@ -63,7 +63,8 @@ together if a client needs longer plans.
 
 from __future__ import annotations
 
-from typing import Literal
+import inspect
+from typing import Any, Callable, Literal
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -179,27 +180,82 @@ TURN_RESET = {
     "retrieved_context": "", "execution_error": {},
     "tool_call_count": 0, "awaiting_human": False, "fast_routed": False,
     "handoff_requested": False,
+    "trace": [],   # reducer append_or_reset: an empty list resets the per-turn trace
 }
+
+
+# ---------------------------------------------------------------------------
+# Per-turn trace (read by episode_trace.TraceWriter and the eval harness).
+# Each node is wrapped so it appends ONE structured entry describing what it
+# decided, derived from the update it returned — no node body changes, no
+# model call, and the node's own exceptions (including a HITL interrupt)
+# propagate untouched because the entry is built only after a normal return.
+# ---------------------------------------------------------------------------
+def _trace_entry(name: str, state: dict, update: dict) -> dict:
+    entry: dict[str, Any] = {"node": name}
+    if name == "intent_detect":
+        entry.update(intent=update.get("intent"), category=update.get("category"),
+                     slots=update.get("slots"), fast_routed=bool(update.get("fast_routed")),
+                     confirmed_action=(update.get("cold_payload") or {}).get("tool") or None)
+    elif name in ("think", "plan_step"):
+        payload = update.get("cold_payload") or {}
+        confirm = update.get("pending_confirmation") or {}
+        entry.update(tool=payload.get("tool") or confirm.get("tool") or None,
+                     args=payload.get("args") or confirm.get("args") or None,
+                     act=bool(update.get("tool_action_pending")),
+                     awaiting_confirmation=bool(confirm),
+                     awaiting_human=bool(update.get("awaiting_human")))
+    elif name == "hitl_gate":
+        entry.update(approved=bool(update.get("tool_action_pending")))
+    elif name == "tool_exec":
+        result = update.get("tool_result") or {}
+        payload = state.get("cold_payload") or {}
+        entry.update(tool=result.get("tool") or payload.get("tool"), args=payload.get("args"),
+                     ok=not result.get("error"), error=result.get("error"))
+    elif name == "execution_validator":
+        err = update.get("execution_error") or {}
+        entry.update(ok=not err, error=err.get("error"))
+    elif name == "planner":
+        entry.update(steps=len(update.get("plan_steps") or []))
+    elif name in ("agentic_retrieval", "knowledge"):
+        entry.update(retrieved_chars=len(update.get("retrieved_context") or ""))
+    elif name == "validator":
+        entry.update(final_response=update.get("final_response"),
+                     stall_count=update.get("stall_count"),
+                     handoff_requested=bool(update.get("handoff_requested")))
+    return entry
+
+
+def _traced(name: str, fn: Callable) -> Callable:
+    async def node(state):
+        update = fn(state)
+        if inspect.isawaitable(update):
+            update = await update
+        update = dict(update or {})
+        update["trace"] = [_trace_entry(name, state, update)]
+        return update
+    node.__name__ = getattr(fn, "__name__", name)
+    return node
 
 
 def build_pipeline(checkpointer=None):
     b = StateGraph(AgentState)
 
-    b.add_node("intent_detect", intent_detect_node)
-    b.add_node("knowledge", knowledge_node)
-    b.add_node("agentic_retrieval", agentic_retrieval_node)
-    b.add_node("chitchat", chitchat_node)
-    b.add_node("closing", closing_node)
-    b.add_node("system", system_node)
-    b.add_node("planner", planner_node)
-    b.add_node("plan_step", plan_step_node)
-    b.add_node("think", think_node)
-    b.add_node("hitl_gate", hitl_gate_node)
-    b.add_node("tool_exec", tool_exec_node)
-    b.add_node("execution_validator", execution_validator_node)
-    b.add_node("failure", failure_node)
-    b.add_node("enrichment", enrichment_node)
-    b.add_node("validator", validator_node)
+    b.add_node("intent_detect", _traced("intent_detect", intent_detect_node))
+    b.add_node("knowledge", _traced("knowledge", knowledge_node))
+    b.add_node("agentic_retrieval", _traced("agentic_retrieval", agentic_retrieval_node))
+    b.add_node("chitchat", _traced("chitchat", chitchat_node))
+    b.add_node("closing", _traced("closing", closing_node))
+    b.add_node("system", _traced("system", system_node))
+    b.add_node("planner", _traced("planner", planner_node))
+    b.add_node("plan_step", _traced("plan_step", plan_step_node))
+    b.add_node("think", _traced("think", think_node))
+    b.add_node("hitl_gate", _traced("hitl_gate", hitl_gate_node))
+    b.add_node("tool_exec", _traced("tool_exec", tool_exec_node))
+    b.add_node("execution_validator", _traced("execution_validator", execution_validator_node))
+    b.add_node("failure", _traced("failure", failure_node))
+    b.add_node("enrichment", _traced("enrichment", enrichment_node))
+    b.add_node("validator", _traced("validator", validator_node))
 
     b.add_edge(START, "intent_detect")
     b.add_conditional_edges("intent_detect", route_by_intent, {

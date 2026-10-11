@@ -79,7 +79,7 @@ import prompts
 import tools
 from llm_client import llm_client, INTENT_MODEL, ANSWER_MODEL, ENRICH_MODEL
 from rag_subgraph import rag_subgraph
-from schemas import EnrichVerdict, IntentResult, PlanResult, PlanStep, ThinkDecision
+from schemas import AgentState, EnrichVerdict, IntentResult, PlanResult, PlanStep, ThinkDecision
 
 logger = logging.getLogger(__name__)
 
@@ -948,10 +948,30 @@ def _ask_for(flow: config.Flow, missing: list) -> str:
     return f"Could you tell me {hint}?"
 
 
+_ISO_DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?")
+
+
+def _speak_value(value):
+    """Slots may carry raw ISO-8601 datetimes (the reliable machine format for
+    a booking tool) — SPOKEN strings can never surface that literally, so
+    render it as a natural phrase before it reaches any template. Non-ISO
+    values pass through untouched."""
+    if not (isinstance(value, str) and _ISO_DT_RE.match(value)):
+        return value
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    hour12 = dt.hour % 12 or 12
+    minute = f":{dt.minute:02d}" if dt.minute else ""
+    ampm = "AM" if dt.hour < 12 else "PM"
+    return f"{dt.strftime('%A, %B')} {dt.day} at {hour12}{minute} {ampm}"
+
+
 def _confirm_question(intent: str, flow: config.Flow, args: dict) -> str:
     if flow.confirm_template:
         try:
-            return flow.confirm_template.format(**args)
+            return flow.confirm_template.format(**{k: _speak_value(v) for k, v in args.items()})
         except (KeyError, IndexError):
             pass
     detail = f" ({', '.join(f'{k}: {v}' for k, v in args.items())})" if args else ""
@@ -1625,7 +1645,29 @@ def _tiedown(text: str, state, director_moved: bool) -> str | None:
     return candidate
 
 
-def validator_node(state) -> dict:
+def validator_node(state: AgentState) -> dict:
+    """The only door to the user: every reply leaves the graph through here.
+
+    Five deterministic gates run in a load-bearing order, all zero-model:
+
+      1. objection gate  -- records push-back and, on the call's first one,
+                            claims this turn's question slot with the ISOLATE.
+                            FIRST because its outcome decides whether the
+                            director may speak an agenda move at all.
+      2. director        -- advances the CALL_ARC cursor and appends the next
+                            proactive move while the agent still has the floor.
+      3. summary         -- folds this turn's structured state into the lead
+                            record (config.SUMMARY_TEMPLATE).
+      4. stall detector  -- escalates to STALL_TEXT when a reply repeats
+                            STALL_THRESHOLD turns in a row.
+      5. tie-down        -- appends a rotating tie-down, dropped if it would
+                            push the reply past config.MAX_REPLY_WORDS.
+
+    Every gate is a no-op on an inbound agent (empty CALL_ARC / OBJECTION_INTENTS
+    / TIEDOWNS), so this node adds nothing to their latency or token budget.
+
+    Returns the partial state update -- never mutates ``state`` in place.
+    """
     # Objection gate (config.OBJECTION_INTENTS): record the push-back and, on the
     # first one of the call, take this turn's question slot with the ISOLATE
     # question. Runs BEFORE the director because its outcome decides whether the

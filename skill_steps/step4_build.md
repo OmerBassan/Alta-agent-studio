@@ -18,8 +18,8 @@
    test to author. If the client provided `test_details`, create a
    `.test_variables.json` file with those details as a flat JSON dictionary.
    Engine files (`graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`,
-   `rag_subgraph.py`, `compaction.py`, `filler.py`, `agent_sandbox.py`) are
-   copied verbatim and write-blocked — never read them, never edit them;
+   `rag_subgraph.py`, `compaction.py`, `filler.py`, `agent_sandbox.py`, `episode_trace.py`) are
+   copied verbatim and write-blocked — never read or edit them;
    engine fixes go upstream in `boilerplate/`, once. The director and the
    objection/tie-down gates are engine code you drive from `config.py`, never
    edit. `agent_sandbox.py` is a text-chat REPL (`python agent_sandbox.py`)

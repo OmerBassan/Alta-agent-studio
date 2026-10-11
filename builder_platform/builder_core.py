@@ -57,7 +57,7 @@ MAX_SELFTEST_RUNS = int(os.environ.get("MAX_SELFTEST_RUNS", "2"))
 ENGINE_FILES = frozenset({
     "graph.py", "nodes.py", "schemas.py", "llm_client.py",
     "rag_subgraph.py", "compaction.py", "filler.py", "selftest.py",
-    "agent_sandbox.py",
+    "agent_sandbox.py", "episode_trace.py",
 })
 
 # Read allowlist roots, relative to REPO_ROOT: what the architect legitimately
