@@ -1,16 +1,33 @@
 # Alta Agent Studio — Project Context
 
-## Mission (home assignment, 3-day build)
+## Mission (ongoing project; began as a 3-day home assignment, shipped and proven)
 
 A platform where a user **chats with an AI builder** that creates and edits a **voice AI assistant** in natural language. The generated assistant calls leads, qualifies them (BANT), and books meetings. Stack: **Claude Agent SDK** (headless, runs the `voice-agent-architect` skill) + **Vapi** (voice transport, custom-LLM mode) + FastAPI platform + thin web UI with a **test-call button**.
 
 The deliverable is the **builder platform**, not any single agent. Never sink time into optimizing an individual generated agent beyond what proves the platform works.
 
+## Current work: the seven-day hardening sprint (read this first)
+
+Branch `harden/seven-day`. This is **channel-agnostic hardening of the existing LangGraph runtime**, driven in MOCK mode (empty `OPENAI_API_KEY`, zero tokens) through `graph.ainvoke`, `boilerplate/agent_sandbox.py`, or `builder_platform/tests/agent_driver.py`. **It is not a voice task**: no Vapi, ngrok, phone, TTS or browser. Do not implement the Architecture Spine's model-in-charge loop.
+
+The sprint's documents, in the order to read them:
+
+| File | What it holds |
+| --- | --- |
+| `SPRINT-CONTRACT.md` | What the user approved: scope, constraints, cut order |
+| `CURRENT-STATE.md` | Verified repository and test state, with evidence |
+| `LATEST-HANDOFF.md` | The next task and how to start it |
+| `DECISION-LOG.md` | Every decision; `APPROVED` only if the user said so, otherwise `PROPOSED` / `OPEN` |
+
+**Precedence:** where a rule below conflicts with the sprint documents, the sprint documents win for sprint work. The voice-only, latency and Vapi rules below govern the voice runtime surfaces (`builder_platform/runtime.py`, `vapi_*`, filler, sanitizer); they do not apply to the sprint's mock-mode work. Three rules bind the sprint without exception: engine files are edited only in `boilerplate/` and re-copied; no LLM vendor SDK or hardcoded provider; `python selftest.py` passes in mock mode for every agent.
+
 ## Hard rules (do not drift)
 
-- **Voice-only.** There is no terminal shell anywhere in the *product surface a caller or recruiter ever sees*. Generated agents are brain-only Python projects; the platform's voice/SSE runtime drives them for a real call. Every user-facing string is written to be SPOKEN (≤20 words, no markdown/lists/URLs, acronyms in pronounceable form, one question per turn). One deliberate, dev-only exception: `boilerplate/agent_sandbox.py` (an engine file, `python agent_sandbox.py`) is a text-chat REPL for a developer to sanity-check a build without Vapi/ngrok/a browser — it is never client-facing, never wired into the voice/SSE runtime, and does not relax the SPOKEN-string rule (the text it prints is the same `final_response` a call would speak).
-- **Latency is correctness.** Dead air on a call is a failure. The cover stack: pre-think filler (`FILLER_THINKING`, first SSE chunk before the graph runs) → per-tool filler banks → sentence-chunked final reply. Never add a model call to the reply path without justifying it against the latency budget.
-- **Wholesale isolation (Lovable/v0 paradigm).** A generated agent is a full copy of `boilerplate/` with ONLY the domain surfaces edited (`config.py`, `tools.py`, `prompts.py`, selftest `SCRIPT`/`HOOK_CHECKS`, `.env`, corpus, README). Engine files (`graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`, `rag_subgraph.py`, `compaction.py`, `filler.py`) are copied verbatim and never edited per agent — engine fixes go upstream in `boilerplate/` once.
+- **Voice-only (voice runtime surfaces).** There is no terminal shell anywhere in the *product surface a caller or recruiter ever sees*. Generated agents are brain-only Python projects; the platform's voice/SSE runtime drives them for a real call. Every user-facing string is written to be SPOKEN (≤20 words, no markdown/lists/URLs, acronyms in pronounceable form, one question per turn). One deliberate, dev-only exception: `boilerplate/agent_sandbox.py` (an engine file, `python agent_sandbox.py`) is a text-chat REPL for a developer to sanity-check a build without Vapi/ngrok/a browser — it is never client-facing, never wired into the voice/SSE runtime, and does not relax the SPOKEN-string rule (the text it prints is the same `final_response` a call would speak).
+- **Latency is correctness (voice runtime).** Dead air on a call is a failure. The cover stack: pre-think filler (`FILLER_THINKING`, first SSE chunk before the graph runs) → per-tool filler banks → sentence-chunked final reply. Never add a model call to the reply path without justifying it against the latency budget.
+- **Wholesale isolation (Lovable/v0 paradigm).** A generated agent is a full copy of `boilerplate/` with ONLY the domain surfaces edited (`config.py`, `tools.py`, `prompts.py`, `.env`, corpus, README). Engine files are copied verbatim and never edited per agent — engine fixes go upstream in `boilerplate/` once. The canonical engine list is `ENGINE_FILES` in `builder_platform/builder_core.py`: `graph.py`, `nodes.py`, `schemas.py`, `llm_client.py`, `rag_subgraph.py`, `compaction.py`, `filler.py`, `selftest.py`, `agent_sandbox.py`, `episode_trace.py`, `authz.py`. `builder_platform/tests/test_engine_drift.py` fails if any agent's copy differs.
+- **`Flow` is defined in each agent's own `config.py`.** An engine change that requires a new `Flow` field (or a new config constant) must tolerate an older config, or every existing agent breaks at startup.
+- **Execution boundary.** A tool runs only as the active flow's declared action; gated flows (`properties`: `state_changing` → user confirm, `liability` → operator approval) also need a one-time platform record bound to the exact payload (`boilerplate/authz.py`). A state-changing outcome is reported only after its read-back in `tools.VERIFIERS` passes.
 - **Provider-agnostic LLM (STRICT).** A generated agent binds NO LLM provider. Its only LLM contract is the OpenAI-compatible `/v1` interface, configured entirely by env (`OPENAI_BASE_URL`/`OPENAI_API_KEY` + `AGENT_INTENT/ANSWER/ENRICH_MODEL`). Never import a vendor SDK, hardcode a provider/base-URL in code, branch on provider, or read a vendor-specific key. Model names are env defaults, never literals in logic. Swapping providers is an `.env` edit — zero code change. Blank key = MOCK mode (what the selftest runs). Full rule: SKILL.md Rules of Engagement.
 - **Selftest is the gate.** No generated agent ships without `python selftest.py` passing in mock mode.
 - **Text needing the pre-TTS sanitizer is a defect.** The sanitizer (`builder_platform/sanitizer.py`) is a backstop, not a license.
@@ -18,17 +35,19 @@ The deliverable is the **builder platform**, not any single agent. Never sink ti
 ## Directory map
 
 | Path | Role | Write policy |
-|---|---|---|
+| --- | --- | --- |
 | `SKILL.md` | The builder's brain, SLIM core: `voice-agent-architect` (indexes `skill_steps/`; read-schedule table inside) | Edit deliberately; it steers all generations |
-| `skill_steps/` | Per-phase skill files (step1_discovery → step4_build), each read EXACTLY ONCE at its moment — the token-diet split of the old monolith | Edit deliberately; budgets are pytest-enforced |
-| `boilerplate/` | Tested engine + domain-surface template, copied wholesale per agent | Engine improvements ONLY here, never per agent |
+| `skill_steps/` | Per-phase skill files (step1_discovery → step4_build), each read EXACTLY ONCE at its moment — the token-diet split of the old monolith | Edit deliberately; byte budgets are pytest-enforced (`test_efficiency_round.py`), measured as checked out (CRLF with `core.autocrlf=true`) |
+| `boilerplate/` | Tested engine + domain-surface template (the "Acme Outdoors" demo business), copied wholesale per agent | Engine improvements ONLY here, never per agent |
+| `Generated_Agents/` | Generated agents: `BassanBrewerySDR` (outbound sales; kept passing, not built on) and `BrightSmileDental` (inbound dental front desk) | Domain files only; engine files are re-copied from `boilerplate/` |
+| `builder_platform/` | Vapi adapter (`vapi_adapter.py`, OpenAI-compatible SSE), agent runtime (`runtime.py`), sanitizer, tests; builder/app/UI land here. `builder_core.py` is the shared deterministic engine (paths, write/read policy, instantiate, selftest gate) — single source for both `builder.py` (web platform) and `claude_plugin/` (Claude Code plugin); edit here, never fork | Product code |
+| `builder_platform/tests/` | Platform suite, including the sprint's `test_execution_authz.py`, `test_outcome_verification.py`, `test_dental_agent.py`, the cross-business evaluation `test_cross_business_eval.py` + `eval_scenarios/`, and `agent_driver.py` (runs one agent per subprocess — agents cannot share a process) | Tests |
+| `claude_plugin/` + `.claude-plugin/`, `commands/`, `hooks/` (repo root) | The `/alta-builder:alta-build` Claude Code plugin surface (plugin commands are namespaced by plugin name; the plugin is named `alta-builder` in `.claude-plugin/plugin.json`): bundled MCP server + guard hook wrapping the same `builder_core.py` functions, native-terminal UX (no `alta:ask` cards), output lands in the invoker's cwd | Edit `claude_plugin/`; never fork skill/engine content — it reads `SKILL.md`/`boilerplate/`/etc. from the same repo root. The MCP server is declared INLINE in `.claude-plugin/plugin.json`; never add a root `.mcp.json` — that path is also the project-scope MCP location, so this repo (its own plugin root) would load it twice, and the project-scope loader leaves `${CLAUDE_PLUGIN_ROOT}` unsubstituted |
 | `references/` | Architecture theory the skill consults | Read-only |
 | `integrations/` | Validated copy-adapt recipes (calendar, CRM…) | Read-write catalog; recipes copy-adapted, never imported |
-| `builder_platform/` | Vapi adapter (`vapi_adapter.py`, OpenAI-compatible SSE), agent runtime (`runtime.py`), sanitizer, tests; builder/app/UI land here. `builder_core.py` is the shared deterministic engine (paths, write/read policy, instantiate, selftest gate) — single source for both `builder.py` (web platform) and `claude_plugin/` (Claude Code plugin); edit here, never fork | Product code |
-| `claude_plugin/` + `.claude-plugin/`, `commands/`, `hooks/` (repo root) | The `/alta-builder:alta-build` Claude Code plugin surface (plugin commands are namespaced by plugin name; the plugin is named `alta-builder` in `.claude-plugin/plugin.json`): bundled MCP server + guard hook wrapping the same `builder_core.py` functions, native-terminal UX (no `alta:ask` cards), output lands in the invoker's cwd | Edit `claude_plugin/`; never fork skill/engine content — it reads `SKILL.md`/`boilerplate/`/etc. from the same repo root. The MCP server is declared INLINE in `.claude-plugin/plugin.json`; never add a root `.mcp.json` — that path is also the project-scope MCP location, so this repo (its own plugin root) would load it twice, and the project-scope loader leaves `${CLAUDE_PLUGIN_ROOT}` unsubstituted |
-| `Generated_Agents/` | Output directory for skill generations; holds the checked-in example agent | Created by the skill |
+| `_bmad/`, `_bmad-output/`, `.claude/skills/bmad-*` | BMAD method install and its planning artifacts (Brief, PRD, Architecture Spine, UX spines, the voice-product SPEC) | Finalized planning documents: do not rewrite |
 
-## Architecture (proven on a real call, 2026-07-15)
+## Architecture of the voice runtime (proven on a real call, 2026-07-15)
 
 Vapi (custom-LLM) → ngrok → `builder_platform/vapi_adapter.py` (`POST /v1/chat/completions`, strict OpenAI SSE, `x-vapi-secret` auth) → `builder_platform/runtime.py` (loads one generated agent via `sys.path` + `build_pipeline(MemorySaver)`; `call.id → thread_id`; filler→SSE asyncio.Queue with try/finally sentinel + timeout apology; dedupe guard for corrected-transcript re-sends; buffered pre-TTS sanitizer). Subprocess-per-agent: regenerating an agent restarts the runtime process, never re-imports (module-name collision trap).
 
@@ -36,10 +55,16 @@ Known Vapi trap (cost a day): an assistant `firstMessage` of a single space wedg
 
 ## Verification
 
-- Platform: `python -m pytest builder_platform/tests/` (must stay green).
-- Generated agents: their own `selftest.py`, exit 0, enforced after every generation/edit.
-- Voice: a real Vapi flight call at the end of every working half-day.
+Current counts live in `CURRENT-STATE.md`; do not copy numbers here (they go stale).
+
+- Platform: `python -m pytest builder_platform/tests -q` (must stay green). Plugin: `python -m pytest claude_plugin/tests -q`.
+- Cross-business evaluation (mock mode): `python -m pytest builder_platform/tests/test_cross_business_eval.py -v`.
+- Every agent: `python selftest.py` in `boilerplate/`, `Generated_Agents/BassanBrewerySDR/`, `Generated_Agents/BrightSmileDental/` — exit 0.
+- A green run in this working tree is not proof for a fresh clone: line endings differ on checkout. Before claiming a commit is green, run the suite on a clean checkout (`git worktree add`).
+- Voice runtime changes only: a real Vapi flight call.
 
 ## Plan
 
-The 3-day plan lives at `~/.claude/plans/continue-and-plan-first-resilient-tide.md`; task order in `TASKS.MD`. Current position: Phase 1 cleanup done → next is Day 2 AM, `builder_platform/builder.py` (Agent SDK headless wrapper + write-allowlist permission hook + selftest subprocess gate).
+Sprint work: see `SPRINT-CONTRACT.md` and `LATEST-HANDOFF.md`. The shipped voice system's spec of record is `_bmad-output/specs/spec-alta-agent-studio/` (SPEC.md + brownfield.md; `.memlog.md` is its append-only decision log).
+
+Outside the sprint, work is improvement-driven rather than milestone-driven. The standing rule for it: a named optimization is a hypothesis about this codebase, not a spec — grep for the mechanism it targets and confirm it exists on the hot path here before implementing, and never add a model call to the reply path in the name of latency. See `~/.claude/reasoning-log/2026-07-23_context-latency-asks-must-be-audited-against-engine-shape.md`.
