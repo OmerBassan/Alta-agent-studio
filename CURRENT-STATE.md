@@ -59,6 +59,7 @@ Per-turn expectations on trace properties, never wording: `intent`, `tools_run`,
 - **Selftests** never exercise the operator gate (`RESUME_APPROVE` is unused); the dental selftest warns that `visit_type` has no `HOOK_CHECK` (they live in the shared engine `selftest.py`).
 - **Mock mode only;** urgent-symptom detection is a keyword list.
 - **Commit messages that cannot be changed without rewriting history:** `43e5fed` says 203 tests (it was 204); `b6c7800` says the drift test covers "all three agents" (it covers the two generated agents against `boilerplate/`).
+- **Windows path length:** the longest tracked path is 110 characters (`_bmad-output/planning-artifacts/architecture/…/reviews/review-adversarial.md`). A checkout whose root folder is longer than about 150 characters fails with "Filename too long" unless `git config core.longpaths true` is set. The current folder (`C:/Users/Omer Bassan/Desktop/Projects/AgentStudio`, 50 characters) is fine. The fresh-checkout proof of `c9a56d8` was run with `core.longpaths` enabled: 287 platform, 12 plugin, three selftests PASSED.
 - **Dangling references:** `ARCHITECTURE.md` was deleted (DL-027); the finalized voice-era documents under `_bmad-output/specs/spec-alta-agent-studio/` still list it as a companion. Recover with `git show b6c7800:ARCHITECTURE.md`.
 
 ## 5. Next task
