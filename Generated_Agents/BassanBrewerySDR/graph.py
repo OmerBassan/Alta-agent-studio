@@ -86,6 +86,7 @@ from langgraph.graph import END, START, StateGraph
 import authz
 import config
 from episode_trace import config_fingerprint
+from llm_client import close_call_log, open_call_log
 from schemas import AgentState
 from nodes import (
     intent_detect_node, knowledge_node, agentic_retrieval_node, chitchat_node,
@@ -207,6 +208,9 @@ TURN_RESET = {
 # decided, derived from the update it returned — no node body changes, no
 # model call, and the node's own exceptions (including a HITL interrupt)
 # propagate untouched because the entry is built only after a normal return.
+# Live model calls made while the node ran are attached as `model_calls`, with
+# `degraded: true` when any of them failed (the node then answered from its
+# heuristic fallback). Mock mode makes no calls, so neither key appears.
 # ---------------------------------------------------------------------------
 def _trace_entry(name: str, state: dict, update: dict) -> dict:
     entry: dict[str, Any] = {"node": name}
@@ -263,11 +267,19 @@ def _traced(name: str, fn: Callable, ledger: authz.AuthorizationLedger) -> Calla
             kwargs["thread_id"] = str((config.get("configurable") or {}).get("thread_id") or "")
         if wants_ledger:
             kwargs["ledger"] = ledger
-        update = fn(state, **kwargs)
-        if inspect.isawaitable(update):
-            update = await update
+        calls, token = open_call_log()
+        try:
+            update = fn(state, **kwargs)
+            if inspect.isawaitable(update):
+                update = await update
+        finally:
+            close_call_log(token)
         update = dict(update or {})
-        update["trace"] = [_trace_entry(name, state, update)]
+        entry = _trace_entry(name, state, update)
+        if calls:
+            entry["model_calls"] = calls
+            entry["degraded"] = any(not c["ok"] for c in calls)
+        update["trace"] = [entry]
         return update
     node.__name__ = getattr(fn, "__name__", name)
     return node
