@@ -1,0 +1,4004 @@
+{
+ "model": "gpt-6-luna",
+ "scenario_set": "live_scenarios",
+ "runs_requested": 3,
+ "probe": false,
+ "token_param": "max_completion_tokens",
+ "reasoning_effort": "none",
+ "max_cost_usd": 0.15,
+ "price_in_per_m": 0.1,
+ "price_out_per_m": 0.5,
+ "spent_usd": 0.0253345,
+ "stopped_by_budget": false,
+ "replies": [
+  {
+   "rep": 1,
+   "business": "acme",
+   "scenario_ids": [
+    "PA1-booking-asked-differently",
+    "PA2-refund-asked-differently",
+    "PA3-order-asked-differently",
+    "PA4-person-asked-differently",
+    "PA5-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "could you fit me in at the downtown store tomorrow around 3 in the afternoon?",
+       "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "Downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 979,
+           "output_tokens": 61,
+           "input_chars": 2890,
+           "latency_ms": 5196.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 787,
+           "output_tokens": 34,
+           "input_chars": 2115,
+           "latency_ms": 2307.8,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_fitting",
+        "tool": "book_appointment",
+        "args": {
+         "branch": "downtown",
+         "slot_iso": "2026-10-13T15:00:00"
+        },
+        "question": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_fitting",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_appointment"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_appointment record FIT-00001 found for ('downtown', '2026-10-13T15:00:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 676,
+           "output_tokens": 55,
+           "input_chars": 1240,
+           "latency_ms": 1360.9
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "FIT-00001"
+       },
+       "tool_calls": [
+        [
+         "book_appointment",
+         {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this jacket fell apart after two washes, I'd like my money back for AC-12345",
+       "final_response": "",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "request_refund",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 981,
+           "output_tokens": 40,
+           "input_chars": 2888,
+           "latency_ms": 2964.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "issue_refund",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": false,
+         "awaiting_confirmation": false,
+         "awaiting_human": true,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 764,
+           "output_tokens": 26,
+           "input_chars": 2033,
+           "latency_ms": 2064.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": true,
+       "interrupt": {
+        "type": "hitl_approval",
+        "intent": "request_refund",
+        "tool": "issue_refund",
+        "args": {
+         "order_id": "AC-12345"
+        },
+        "offer_id": "07e40668674a4abbaa4219b0b9045383"
+       }
+      }
+     ],
+     [
+      {
+       "message": "any news on package AC-12345? it has been a week",
+       "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "order_status",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 42,
+           "input_chars": 2832,
+           "latency_ms": 3270.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 753,
+           "output_tokens": 44,
+           "input_chars": 1966,
+           "latency_ms": 1947.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 642,
+           "output_tokens": 35,
+           "input_chars": 1156,
+           "latency_ms": 1432.6
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "order_id": "AC-12345"
+       },
+       "tool_calls": [
+        [
+         "lookup_order",
+         {
+          "order_id": "AC-12345"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this is going nowhere, I want someone on your team to take over",
+       "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 38,
+           "input_chars": 2862,
+           "latency_ms": 2873.7,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "what time do you open on saturdays?",
+       "final_response": "All branches open at 9:00 AM on Saturdays. Can I help with anything else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 963,
+           "output_tokens": 38,
+           "input_chars": 2806,
+           "latency_ms": 1473.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 209,
+           "output_tokens": 22,
+           "input_chars": 828,
+           "latency_ms": 1049.1
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All branches open at 9:00 AM on Saturdays. Can I help with anything else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_appointment",
+     "issue_refund",
+     "lookup_order",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_appointment",
+     "issue_refund"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "aa930f60f38db93159a64f08f1ec05c274fd5cf888bf64f9b4e7d8e555f20836",
+    "spend": {
+     "input_tokens": 15500,
+     "output_tokens": 3635,
+     "estimated_calls": 8,
+     "cost_usd": 0.0033675,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 1,
+   "business": "brewery",
+   "scenario_ids": [
+    "PB1-call-asked-differently",
+    "PB2-refund-no-authority",
+    "PB3-email-asked-differently",
+    "PB4-person-asked-differently"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "any chance we could hop on a quick call tomorrow at 3pm?",
+       "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "tomorrow at 3pm",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1133,
+           "output_tokens": 56,
+           "input_chars": 3605,
+           "latency_ms": 3692.7,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 995,
+           "output_tokens": 39,
+           "input_chars": 3236,
+           "latency_ms": 1790.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_meeting",
+        "tool": "book_sales_call",
+        "args": {
+         "slot_iso": "2026-10-13T15:00:00+03:00",
+         "email": "lead@example.com"
+        },
+        "question": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?"
+       },
+       "pending_intent": "book_meeting",
+       "session_facts": {
+        "email": "lead@example.com"
+       },
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_sales_call"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_sales_call record BB-00001 found for ('2026-10-13T15:00:00+03:00', 'lead@example.com')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 682,
+           "output_tokens": 58,
+           "input_chars": 1251,
+           "latency_ms": 1883.4
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "confirmation": "BB-00001"
+       },
+       "tool_calls": [
+        [
+         "book_sales_call",
+         {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "please refund me for order AC-12345",
+       "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply for your venue. Are you the person who handles beverage purchasing? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_boundaries",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 36,
+           "input_chars": 3448,
+           "latency_ms": 4048.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 481,
+           "output_tokens": 33,
+           "input_chars": 2247,
+           "latency_ms": 1310.6
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply for your venue. Are you the person who handles beverage purchasing? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "shoot me the details by email please",
+       "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "send_followup",
+         "category": "FLOW",
+         "slots": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1117,
+           "output_tokens": 48,
+           "input_chars": 3565,
+           "latency_ms": 2355.2,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 955,
+           "output_tokens": 28,
+           "input_chars": 3096,
+           "latency_ms": 1477.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 633,
+           "output_tokens": 30,
+           "input_chars": 1148,
+           "latency_ms": 2038.0
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "sent": "True"
+       },
+       "tool_calls": [
+        [
+         "send_email",
+         {
+          "email": "lead@example.com",
+          "body": "details"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I'd rather talk to somebody from your team directly",
+       "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 37,
+           "input_chars": 3480,
+           "latency_ms": 1895.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_sales_call",
+     "capture_lead_profile",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_sales_call"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "c905b428062a10157f4ca5615f523c5aefb8b8eb32accf1cc016ca1dd25c95a9",
+    "spend": {
+     "input_tokens": 15000,
+     "output_tokens": 2765,
+     "estimated_calls": 6,
+     "cost_usd": 0.0028825000000000005,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 1,
+   "business": "dental",
+   "scenario_ids": [
+    "PD1-visit-asked-differently",
+    "PD2-urgent-without-keywords",
+    "PD3-billing-asked-differently",
+    "PD4-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "can I get a checkup tomorrow at 3pm?",
+       "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "tomorrow at 3pm"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 932,
+           "output_tokens": 55,
+           "input_chars": 2713,
+           "latency_ms": 4485.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 843,
+           "output_tokens": 65,
+           "input_chars": 2365,
+           "latency_ms": 2066.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_visit",
+        "tool": "book_dental_visit",
+        "args": {
+         "visit_type": "checkup",
+         "slot_iso": "2026-10-13T15:00:00+03:00"
+        },
+        "question": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_visit",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 (confirmation BSD-00001). Please arrive ten minutes early. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_dental_visit"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_dental_visit record BSD-00001 found for ('checkup', '2026-10-13T15:00:00+03:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 680,
+           "output_tokens": 56,
+           "input_chars": 1234,
+           "latency_ms": 1560.9
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 (confirmation BSD-00001). Please arrive ten minutes early. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "BSD-00001"
+       },
+       "tool_calls": [
+        [
+         "book_dental_visit",
+         {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "my jaw is throbbing and my cheek has ballooned up since last night",
+       "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 940,
+           "output_tokens": 43,
+           "input_chars": 2773,
+           "latency_ms": 1964.8,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I was overcharged and I need my money back",
+       "final_response": "I’m sorry, but I can’t change bills or issue refunds; please contact our front desk team. Can I help with anything else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_billing",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 928,
+           "output_tokens": 48,
+           "input_chars": 2725,
+           "latency_ms": 1762.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 280,
+           "output_tokens": 31,
+           "input_chars": 1169,
+           "latency_ms": 1635.2
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I’m sorry, but I can’t change bills or issue refunds; please contact our front desk team. Can I help with anything else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "are you open on weekends?",
+       "final_response": "We’re closed Saturday and Sunday. I can help with anything else about our practice.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 920,
+           "output_tokens": 38,
+           "input_chars": 2691,
+           "latency_ms": 1900.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 272,
+           "output_tokens": 20,
+           "input_chars": 1135,
+           "latency_ms": 1380.5
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "We’re closed Saturday and Sunday. I can help with anything else about our practice.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_dental_visit",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_dental_visit"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "5444b6231c558a5e1236bd1969d2863d768bb39cb72758d5fabb71cfae1d37d1",
+    "spend": {
+     "input_tokens": 10220,
+     "output_tokens": 2356,
+     "estimated_calls": 5,
+     "cost_usd": 0.0022,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 2,
+   "business": "acme",
+   "scenario_ids": [
+    "PA1-booking-asked-differently",
+    "PA2-refund-asked-differently",
+    "PA3-order-asked-differently",
+    "PA4-person-asked-differently",
+    "PA5-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "could you fit me in at the downtown store tomorrow around 3 in the afternoon?",
+       "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "Downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 979,
+           "output_tokens": 61,
+           "input_chars": 2890,
+           "latency_ms": 6874.2,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 787,
+           "output_tokens": 34,
+           "input_chars": 2115,
+           "latency_ms": 1516.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_fitting",
+        "tool": "book_appointment",
+        "args": {
+         "branch": "downtown",
+         "slot_iso": "2026-10-13T15:00:00"
+        },
+        "question": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_fitting",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_appointment"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_appointment record FIT-00001 found for ('downtown', '2026-10-13T15:00:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 676,
+           "output_tokens": 55,
+           "input_chars": 1240,
+           "latency_ms": 1986.8
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "FIT-00001"
+       },
+       "tool_calls": [
+        [
+         "book_appointment",
+         {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this jacket fell apart after two washes, I'd like my money back for AC-12345",
+       "final_response": "",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "request_refund",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 981,
+           "output_tokens": 40,
+           "input_chars": 2888,
+           "latency_ms": 13308.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "issue_refund",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": false,
+         "awaiting_confirmation": false,
+         "awaiting_human": true,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 764,
+           "output_tokens": 48,
+           "input_chars": 2033,
+           "latency_ms": 3788.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": true,
+       "interrupt": {
+        "type": "hitl_approval",
+        "intent": "request_refund",
+        "tool": "issue_refund",
+        "args": {
+         "order_id": "AC-12345"
+        },
+        "offer_id": "37ed0d614c0e4ebdb1660c350b6930bc"
+       }
+      }
+     ],
+     [
+      {
+       "message": "any news on package AC-12345? it has been a week",
+       "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "order_status",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 47,
+           "input_chars": 2832,
+           "latency_ms": 6576.5,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 753,
+           "output_tokens": 57,
+           "input_chars": 1966,
+           "latency_ms": 2445.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 642,
+           "output_tokens": 35,
+           "input_chars": 1156,
+           "latency_ms": 2249.7
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "order_id": "AC-12345"
+       },
+       "tool_calls": [
+        [
+         "lookup_order",
+         {
+          "order_id": "AC-12345"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this is going nowhere, I want someone on your team to take over",
+       "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 38,
+           "input_chars": 2862,
+           "latency_ms": 8841.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "what time do you open on saturdays?",
+       "final_response": "We open at 9:00 AM on Saturdays. I can help with anything else.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 963,
+           "output_tokens": 38,
+           "input_chars": 2806,
+           "latency_ms": 3813.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 209,
+           "output_tokens": 21,
+           "input_chars": 828,
+           "latency_ms": 1267.3
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "We open at 9:00 AM on Saturdays. I can help with anything else.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_appointment",
+     "issue_refund",
+     "lookup_order",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_appointment",
+     "issue_refund"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "aa930f60f38db93159a64f08f1ec05c274fd5cf888bf64f9b4e7d8e555f20836",
+    "spend": {
+     "input_tokens": 15500,
+     "output_tokens": 3674,
+     "estimated_calls": 8,
+     "cost_usd": 0.0033870000000000003,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 2,
+   "business": "brewery",
+   "scenario_ids": [
+    "PB1-call-asked-differently",
+    "PB2-refund-no-authority",
+    "PB3-email-asked-differently",
+    "PB4-person-asked-differently"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "any chance we could hop on a quick call tomorrow at 3pm?",
+       "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "tomorrow at 3pm",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1133,
+           "output_tokens": 52,
+           "input_chars": 3605,
+           "latency_ms": 3615.2,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 995,
+           "output_tokens": 39,
+           "input_chars": 3236,
+           "latency_ms": 1462.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_meeting",
+        "tool": "book_sales_call",
+        "args": {
+         "slot_iso": "2026-10-13T15:00:00+03:00",
+         "email": "lead@example.com"
+        },
+        "question": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?"
+       },
+       "pending_intent": "book_meeting",
+       "session_facts": {
+        "email": "lead@example.com"
+       },
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_sales_call"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_sales_call record BB-00001 found for ('2026-10-13T15:00:00+03:00', 'lead@example.com')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 682,
+           "output_tokens": 58,
+           "input_chars": 1251,
+           "latency_ms": 1847.3
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "confirmation": "BB-00001"
+       },
+       "tool_calls": [
+        [
+         "book_sales_call",
+         {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "please refund me for order AC-12345",
+       "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply. Are you the person who handles beverage purchasing? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_boundaries",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 40,
+           "input_chars": 3448,
+           "latency_ms": 2025.5,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 481,
+           "output_tokens": 30,
+           "input_chars": 2247,
+           "latency_ms": 2386.0
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply. Are you the person who handles beverage purchasing? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "shoot me the details by email please",
+       "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "send_followup",
+         "category": "FLOW",
+         "slots": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1117,
+           "output_tokens": 48,
+           "input_chars": 3565,
+           "latency_ms": 2138.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 955,
+           "output_tokens": 23,
+           "input_chars": 3096,
+           "latency_ms": 1957.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 633,
+           "output_tokens": 30,
+           "input_chars": 1148,
+           "latency_ms": 1142.0
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "sent": "True"
+       },
+       "tool_calls": [
+        [
+         "send_email",
+         {
+          "email": "lead@example.com",
+          "body": "details"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I'd rather talk to somebody from your team directly",
+       "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 36,
+           "input_chars": 3480,
+           "latency_ms": 3599.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_sales_call",
+     "capture_lead_profile",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_sales_call"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "c905b428062a10157f4ca5615f523c5aefb8b8eb32accf1cc016ca1dd25c95a9",
+    "spend": {
+     "input_tokens": 15000,
+     "output_tokens": 2756,
+     "estimated_calls": 6,
+     "cost_usd": 0.0028780000000000003,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 2,
+   "business": "dental",
+   "scenario_ids": [
+    "PD1-visit-asked-differently",
+    "PD2-urgent-without-keywords",
+    "PD3-billing-asked-differently",
+    "PD4-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "can I get a checkup tomorrow at 3pm?",
+       "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "tomorrow at 3pm"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 932,
+           "output_tokens": 51,
+           "input_chars": 2713,
+           "latency_ms": 3962.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 843,
+           "output_tokens": 44,
+           "input_chars": 2365,
+           "latency_ms": 1943.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_visit",
+        "tool": "book_dental_visit",
+        "args": {
+         "visit_type": "checkup",
+         "slot_iso": "2026-10-13T15:00:00+03:00"
+        },
+        "question": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_visit",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 and BSD-00001. Please arrive ten minutes early. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_dental_visit"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_dental_visit record BSD-00001 found for ('checkup', '2026-10-13T15:00:00+03:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 680,
+           "output_tokens": 54,
+           "input_chars": 1234,
+           "latency_ms": 1375.9
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 and BSD-00001. Please arrive ten minutes early. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "BSD-00001"
+       },
+       "tool_calls": [
+        [
+         "book_dental_visit",
+         {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "my jaw is throbbing and my cheek has ballooned up since last night",
+       "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 940,
+           "output_tokens": 44,
+           "input_chars": 2773,
+           "latency_ms": 2004.7,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I was overcharged and I need my money back",
+       "final_response": "I’m sorry, but I can’t issue refunds or change bills; please contact our front desk team about the overcharge. I can help with anything else.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_billing",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 928,
+           "output_tokens": 40,
+           "input_chars": 2725,
+           "latency_ms": 1799.7,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 280,
+           "output_tokens": 35,
+           "input_chars": 1169,
+           "latency_ms": 2164.5
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I’m sorry, but I can’t issue refunds or change bills; please contact our front desk team about the overcharge. I can help with anything else.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "are you open on weekends?",
+       "final_response": "We’re closed Saturday and Sunday. I can help with anything else about the practice.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 920,
+           "output_tokens": 34,
+           "input_chars": 2691,
+           "latency_ms": 1815.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 272,
+           "output_tokens": 20,
+           "input_chars": 1135,
+           "latency_ms": 1938.3
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "We’re closed Saturday and Sunday. I can help with anything else about the practice.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_dental_visit",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_dental_visit"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "5444b6231c558a5e1236bd1969d2863d768bb39cb72758d5fabb71cfae1d37d1",
+    "spend": {
+     "input_tokens": 10220,
+     "output_tokens": 2322,
+     "estimated_calls": 5,
+     "cost_usd": 0.0021830000000000005,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 3,
+   "business": "acme",
+   "scenario_ids": [
+    "PA1-booking-asked-differently",
+    "PA2-refund-asked-differently",
+    "PA3-order-asked-differently",
+    "PA4-person-asked-differently",
+    "PA5-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "could you fit me in at the downtown store tomorrow around 3 in the afternoon?",
+       "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "Downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 979,
+           "output_tokens": 57,
+           "input_chars": 2890,
+           "latency_ms": 7682.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 787,
+           "output_tokens": 34,
+           "input_chars": 2115,
+           "latency_ms": 1551.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_fitting",
+        "tool": "book_appointment",
+        "args": {
+         "branch": "downtown",
+         "slot_iso": "2026-10-13T15:00:00"
+        },
+        "question": "Just to confirm — book your fitting at the downtown branch for Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_fitting",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_appointment"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_appointment record FIT-00001 found for ('downtown', '2026-10-13T15:00:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 676,
+           "output_tokens": 55,
+           "input_chars": 1240,
+           "latency_ms": 1712.9
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your fitting at Downtown (12 River St) is booked for 2026-10-13T15:00:00 and FIT-00001. You can reschedule any time by booking again. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "FIT-00001"
+       },
+       "tool_calls": [
+        [
+         "book_appointment",
+         {
+          "branch": "downtown",
+          "slot_iso": "2026-10-13T15:00:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this jacket fell apart after two washes, I'd like my money back for AC-12345",
+       "final_response": "",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "request_refund",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 981,
+           "output_tokens": 40,
+           "input_chars": 2888,
+           "latency_ms": 6814.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "issue_refund",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": false,
+         "awaiting_confirmation": false,
+         "awaiting_human": true,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 764,
+           "output_tokens": 26,
+           "input_chars": 2033,
+           "latency_ms": 1641.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": true,
+       "interrupt": {
+        "type": "hitl_approval",
+        "intent": "request_refund",
+        "tool": "issue_refund",
+        "args": {
+         "order_id": "AC-12345"
+        },
+        "offer_id": "1ecbcaea461543de91a3b17841467f26"
+       }
+      }
+     ],
+     [
+      {
+       "message": "any news on package AC-12345? it has been a week",
+       "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "order_status",
+         "category": "FLOW",
+         "slots": {
+          "order_id": "AC-12345"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 42,
+           "input_chars": 2832,
+           "latency_ms": 4692.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 753,
+           "output_tokens": 44,
+           "input_chars": 1966,
+           "latency_ms": 2454.2,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "lookup_order",
+         "args": {
+          "order_id": "AC-12345"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 642,
+           "output_tokens": 35,
+           "input_chars": 1156,
+           "latency_ms": 2188.7
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — shipped and should arrive in about 2 days. What else can I do for you?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "order_id": "AC-12345"
+       },
+       "tool_calls": [
+        [
+         "lookup_order",
+         {
+          "order_id": "AC-12345"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "this is going nowhere, I want someone on your team to take over",
+       "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 973,
+           "output_tokens": 38,
+           "input_chars": 2862,
+           "latency_ms": 8167.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm handing this conversation to a human agent right now; they'll see the full context, so you won't have to repeat yourself. If there's anything you'd like me to note for them, tell me and I'll pass it along.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "what time do you open on saturdays?",
+       "final_response": "We open at 9:00 on Saturdays. Let me know if you need anything else.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 963,
+           "output_tokens": 38,
+           "input_chars": 2806,
+           "latency_ms": 11601.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 209,
+           "output_tokens": 22,
+           "input_chars": 828,
+           "latency_ms": 915.1
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "We open at 9:00 on Saturdays. Let me know if you need anything else.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_appointment",
+     "issue_refund",
+     "lookup_order",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_appointment",
+     "issue_refund"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "aa930f60f38db93159a64f08f1ec05c274fd5cf888bf64f9b4e7d8e555f20836",
+    "spend": {
+     "input_tokens": 15500,
+     "output_tokens": 3631,
+     "estimated_calls": 8,
+     "cost_usd": 0.0033655,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 3,
+   "business": "brewery",
+   "scenario_ids": [
+    "PB1-call-asked-differently",
+    "PB2-refund-no-authority",
+    "PB3-email-asked-differently",
+    "PB4-person-asked-differently"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "any chance we could hop on a quick call tomorrow at 3pm?",
+       "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "tomorrow at 3pm",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1133,
+           "output_tokens": 53,
+           "input_chars": 3605,
+           "latency_ms": 3571.4,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 995,
+           "output_tokens": 39,
+           "input_chars": 3236,
+           "latency_ms": 1321.3,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_meeting",
+        "tool": "book_sales_call",
+        "args": {
+         "slot_iso": "2026-10-13T15:00:00+03:00",
+         "email": "lead@example.com"
+        },
+        "question": "Just to confirm — fifteen minutes with our account manager for Tuesday, October 13 at 3 PM, and I'll send details to lead@example.com. Sound good?"
+       },
+       "pending_intent": "book_meeting",
+       "session_facts": {
+        "email": "lead@example.com"
+       },
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 and BB-00001. Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_sales_call"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_sales_call record BB-00001 found for ('2026-10-13T15:00:00+03:00', 'lead@example.com')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 682,
+           "output_tokens": 56,
+           "input_chars": 1251,
+           "latency_ms": 1628.6
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your call with our account manager is booked for 2026-10-13T15:00:00+03:00 and BB-00001. Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "confirmation": "BB-00001"
+       },
+       "tool_calls": [
+        [
+         "book_sales_call",
+         {
+          "slot_iso": "2026-10-13T15:00:00+03:00",
+          "email": "lead@example.com"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "please refund me for order AC-12345",
+       "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply, and I’d like to confirm who handles your beverage purchasing. Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_boundaries",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 41,
+           "input_chars": 3448,
+           "latency_ms": 2163.5,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 481,
+           "output_tokens": 33,
+           "input_chars": 2247,
+           "latency_ms": 1566.5
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I can’t process refunds on this sales call; I’m calling about reliable keg supply, and I’d like to confirm who handles your beverage purchasing. Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "shoot me the details by email please",
+       "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "send_followup",
+         "category": "FLOW",
+         "slots": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1117,
+           "output_tokens": 48,
+           "input_chars": 3565,
+           "latency_ms": 2209.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "act": true,
+         "awaiting_confirmation": false,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 955,
+           "output_tokens": 28,
+           "input_chars": 3096,
+           "latency_ms": 1949.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "tool_exec",
+         "tool": "send_email",
+         "args": {
+          "email": "lead@example.com",
+          "body": "details"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "unchecked",
+         "verified": null,
+         "evidence": null,
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 633,
+           "output_tokens": 30,
+           "input_chars": 1148,
+           "latency_ms": 1081.5
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "All set — sent and lead@example.com. Anything else you'd like to ask? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "sent": "True"
+       },
+       "tool_calls": [
+        [
+         "send_email",
+         {
+          "email": "lead@example.com",
+          "body": "details"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I'd rather talk to somebody from your team directly",
+       "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 1096,
+           "output_tokens": 37,
+           "input_chars": 3480,
+           "latency_ms": 1753.5,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "Of course — I'm connecting you with our sales lead right now; I'll let them know what you handle and where you're at on renewal, so you won't have to repeat yourself. Anything else to pass along?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_sales_call",
+     "capture_lead_profile",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_sales_call"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "c905b428062a10157f4ca5615f523c5aefb8b8eb32accf1cc016ca1dd25c95a9",
+    "spend": {
+     "input_tokens": 15000,
+     "output_tokens": 2765,
+     "estimated_calls": 6,
+     "cost_usd": 0.0028825000000000005,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 3,
+   "business": "dental",
+   "scenario_ids": [
+    "PD1-visit-asked-differently",
+    "PD2-urgent-without-keywords",
+    "PD3-billing-asked-differently",
+    "PD4-hours-question"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "can I get a checkup tomorrow at 3pm?",
+       "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "tomorrow at 3pm"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 932,
+           "output_tokens": 55,
+           "input_chars": 2713,
+           "latency_ms": 4244.9,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "think",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 843,
+           "output_tokens": 44,
+           "input_chars": 2365,
+           "latency_ms": 2149.5,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'ThinkDecision': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', "
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_visit",
+        "tool": "book_dental_visit",
+        "args": {
+         "visit_type": "checkup",
+         "slot_iso": "2026-10-13T15:00:00+03:00"
+        },
+        "question": "Just to confirm — a checkup visit on Tuesday, October 13 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_visit",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes please",
+       "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 and BSD-00001. Please arrive ten minutes early. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_dental_visit"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_dental_visit record BSD-00001 found for ('checkup', '2026-10-13T15:00:00+03:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "parse",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 680,
+           "output_tokens": 54,
+           "input_chars": 1234,
+           "latency_ms": 1286.7
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "Done — Your checkup visit is booked for 2026-10-13T15:00:00+03:00 and BSD-00001. Please arrive ten minutes early. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "BSD-00001"
+       },
+       "tool_calls": [
+        [
+         "book_dental_visit",
+         {
+          "visit_type": "checkup",
+          "slot_iso": "2026-10-13T15:00:00+03:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "my jaw is throbbing and my cheek has ballooned up since last night",
+       "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "human_handoff",
+         "category": "SYSTEM",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 940,
+           "output_tokens": 46,
+           "input_chars": 2773,
+           "latency_ms": 1800.6,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "system"
+        },
+        {
+         "node": "validator",
+         "final_response": "If you have swelling that affects breathing or swallowing, or bleeding that won't stop, call 911 now. I'm passing you to our team right away.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": true,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "I was overcharged and I need my money back",
+       "final_response": "I’m sorry, but I can’t change bills or issue refunds; please contact our front desk team. Can I help with anything else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_billing",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 928,
+           "output_tokens": 48,
+           "input_chars": 2725,
+           "latency_ms": 1754.1,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 280,
+           "output_tokens": 31,
+           "input_chars": 1169,
+           "latency_ms": 1306.9
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "I’m sorry, but I can’t change bills or issue refunds; please contact our front desk team. Can I help with anything else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ],
+     [
+      {
+       "message": "are you open on weekends?",
+       "final_response": "We’re closed on Saturdays and Sundays. I can help with anything else about our practice.",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "faq_hours",
+         "category": "ANSWER",
+         "slots": {},
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 920,
+           "output_tokens": 34,
+           "input_chars": 2691,
+           "latency_ms": 1805.0,
+           "parse_error": "BadRequestError",
+           "parse_error_message": "Error code: 400 - {'error': {'message': \"Invalid schema for response_format 'IntentResult': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Extra required key 'slots' supplied.\", 'type': 'invalid_request_error', 'param': 'response_format', '"
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "knowledge",
+         "retrieved_chars": 0,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "text",
+           "path": "text",
+           "ok": true,
+           "error": null,
+           "error_message": null,
+           "input_tokens": 272,
+           "output_tokens": 21,
+           "input_chars": 1135,
+           "latency_ms": 1145.5
+          }
+         ],
+         "degraded": false
+        },
+        {
+         "node": "validator",
+         "final_response": "We’re closed on Saturdays and Sundays. I can help with anything else about our practice.",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_dental_visit",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_dental_visit"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "5444b6231c558a5e1236bd1969d2863d768bb39cb72758d5fabb71cfae1d37d1",
+    "spend": {
+     "input_tokens": 10220,
+     "output_tokens": 2333,
+     "estimated_calls": 5,
+     "cost_usd": 0.0021885000000000003,
+     "stopped": false
+    }
+   }
+  }
+ ],
+ "git": "9913278 (uncommitted changes)",
+ "date_utc": "2026-10-12T10:53:41+00:00"
+}

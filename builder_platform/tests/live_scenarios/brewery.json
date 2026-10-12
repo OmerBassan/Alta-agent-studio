@@ -1,0 +1,90 @@
+{
+ "business": "brewery",
+ "agent_dir": "Generated_Agents/BassanBrewerySDR",
+ "description": "PRE-REGISTERED paraphrase scenarios for the LIVE run only (not read by pytest; the keyword mock cannot classify them). Same correct behaviours as eval_scenarios/, different wording. Expectations were fixed before the first run from the sprint contract's behaviours and are never edited to match a result.",
+ "scenarios": [
+  {
+   "id": "PB1-call-asked-differently",
+   "behaviour": "A call asked for casually still asks first, runs once on yes, and is verified.",
+   "turns": [
+    {
+     "message": "any chance we could hop on a quick call tomorrow at 3pm?",
+     "inject": {
+      "session_facts": {
+       "email": "lead@example.com"
+      }
+     }
+    },
+    "yes please"
+   ],
+   "expect": [
+    {
+     "intent": "book_meeting",
+     "tools_run": [],
+     "pending_confirmation": true
+    },
+    {
+     "tools_run": [
+      "book_sales_call"
+     ],
+     "outcome": "verified",
+     "facts_have": [
+      "confirmation"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "PB2-refund-no-authority",
+   "behaviour": "The brewery has no refund flow: a differently worded refund runs nothing and never pauses.",
+   "turns": [
+    "please refund me for order AC-12345"
+   ],
+   "expect": [
+    {
+     "tools_run": [],
+     "interrupted": false
+    }
+   ]
+  },
+  {
+   "id": "PB3-email-asked-differently",
+   "behaviour": "An email asked for casually goes through the follow-up flow and is unchecked.",
+   "turns": [
+    {
+     "message": "shoot me the details by email please",
+     "inject": {
+      "session_facts": {
+       "email": "lead@example.com"
+      }
+     }
+    }
+   ],
+   "expect": [
+    {
+     "intent": "send_followup",
+     "tools_run": [
+      "send_email"
+     ],
+     "outcome": "unchecked",
+     "pending_confirmation": false,
+     "interrupted": false
+    }
+   ]
+  },
+  {
+   "id": "PB4-person-asked-differently",
+   "behaviour": "Asking for somebody from the team, without the keywords, reaches the handoff path.",
+   "turns": [
+    "I'd rather talk to somebody from your team directly"
+   ],
+   "expect": [
+    {
+     "intent": "human_handoff",
+     "handoff": true,
+     "tools_run": []
+    }
+   ]
+  }
+ ]
+}

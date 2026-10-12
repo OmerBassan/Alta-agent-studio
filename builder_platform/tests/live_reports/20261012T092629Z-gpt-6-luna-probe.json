@@ -1,0 +1,589 @@
+{
+ "model": "gpt-6-luna",
+ "runs_requested": 1,
+ "probe": true,
+ "max_cost_usd": 0.05,
+ "price_in_per_m": 0.1,
+ "price_out_per_m": 0.5,
+ "spent_usd": 0.0049689999999999995,
+ "stopped_by_budget": false,
+ "replies": [
+  {
+   "rep": 1,
+   "business": "acme",
+   "scenario_ids": [
+    "A1-booking-confirmed-then-verified"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "I'd like to book a fitting at the Downtown branch tomorrow at 3pm",
+       "final_response": "Just to confirm — book your fitting at the downtown branch for Thursday, January 1 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "downtown",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 2866,
+           "latency_ms": 3838.0,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "think",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 2091,
+           "latency_ms": 1043.6,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — book your fitting at the downtown branch for Thursday, January 1 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_fitting",
+        "tool": "book_appointment",
+        "args": {
+         "branch": "downtown",
+         "slot_iso": "2026-01-01T15:00:00"
+        },
+        "question": "Just to confirm — book your fitting at the downtown branch for Thursday, January 1 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_fitting",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes",
+       "final_response": "Your fitting at Downtown (12 River St) is booked for 2026-01-01T15:00:00 (confirmation FIT-00001). You can reschedule any time by booking again. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_fitting",
+         "category": "FLOW",
+         "slots": {
+          "branch": "downtown",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_appointment"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_appointment",
+         "args": {
+          "branch": "downtown",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_appointment record FIT-00001 found for ('downtown', '2026-01-01T15:00:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 1240,
+           "latency_ms": 998.2,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Your fitting at Downtown (12 River St) is booked for 2026-01-01T15:00:00 (confirmation FIT-00001). You can reschedule any time by booking again. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "FIT-00001"
+       },
+       "tool_calls": [
+        [
+         "book_appointment",
+         {
+          "branch": "downtown",
+          "slot_iso": "2026-01-01T15:00:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_appointment",
+     "issue_refund",
+     "lookup_order",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_appointment",
+     "issue_refund"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "aa930f60f38db93159a64f08f1ec05c274fd5cf888bf64f9b4e7d8e555f20836",
+    "spend": {
+     "input_tokens": 4134,
+     "output_tokens": 2400,
+     "estimated_calls": 6,
+     "cost_usd": 0.0016133999999999999,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 1,
+   "business": "brewery",
+   "scenario_ids": [
+    "B1-meeting-confirmed-then-verified"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "can we book a call tomorrow at 3pm",
+       "final_response": "Just to confirm — fifteen minutes with our account manager for Thursday, January 1 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "2026-01-01T15:00:00",
+          "body": "Thanks for your time today — here's more on Bassan Brewery kegs and pricing for your team to review."
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 3561,
+           "latency_ms": 1360.9,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "think",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-01-01T15:00:00",
+          "email": "lead@example.com"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 3196,
+           "latency_ms": 978.0,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — fifteen minutes with our account manager for Thursday, January 1 at 3 PM, and I'll send details to lead@example.com. Sound good?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_meeting",
+        "tool": "book_sales_call",
+        "args": {
+         "slot_iso": "2026-01-01T15:00:00",
+         "email": "lead@example.com"
+        },
+        "question": "Just to confirm — fifteen minutes with our account manager for Thursday, January 1 at 3 PM, and I'll send details to lead@example.com. Sound good?"
+       },
+       "pending_intent": "book_meeting",
+       "session_facts": {
+        "email": "lead@example.com"
+       },
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes",
+       "final_response": "Your call with our account manager is booked for 2026-01-01T15:00:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_meeting",
+         "category": "FLOW",
+         "slots": {
+          "slot_iso": "2026-01-01T15:00:00",
+          "body": "Thanks for your time today — here's more on Bassan Brewery kegs and pricing for your team to review.",
+          "email": "lead@example.com"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_sales_call"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_sales_call",
+         "args": {
+          "slot_iso": "2026-01-01T15:00:00",
+          "email": "lead@example.com"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_sales_call record BB-00001 found for ('2026-01-01T15:00:00', 'lead@example.com')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 1239,
+           "latency_ms": 514.7,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Your call with our account manager is booked for 2026-01-01T15:00:00 (confirmation BB-00001). Our account manager will call at that time to go over pricing. Anything else before I let you go? Could you tell me are you the one who handles beverage purchasing here, or is that someone else?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": "lead_profile",
+       "session_facts": {
+        "email": "lead@example.com",
+        "confirmation": "BB-00001"
+       },
+       "tool_calls": [
+        [
+         "book_sales_call",
+         {
+          "slot_iso": "2026-01-01T15:00:00",
+          "email": "lead@example.com"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_sales_call",
+     "capture_lead_profile",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_sales_call"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "c905b428062a10157f4ca5615f523c5aefb8b8eb32accf1cc016ca1dd25c95a9",
+    "spend": {
+     "input_tokens": 5332,
+     "output_tokens": 2400,
+     "estimated_calls": 6,
+     "cost_usd": 0.0017331999999999998,
+     "stopped": false
+    }
+   }
+  },
+  {
+   "rep": 1,
+   "business": "dental",
+   "scenario_ids": [
+    "D1-booking-confirmed-then-verified"
+   ],
+   "reply": {
+    "conversations": [
+     [
+      {
+       "message": "I'd like to book a cleaning tomorrow at 3pm",
+       "final_response": "Just to confirm — a cleaning visit on Thursday, January 1 at 3 PM? (yes/no)",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "cleaning",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": null,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 2727,
+           "latency_ms": 1584.3,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "think",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "cleaning",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "act": false,
+         "awaiting_confirmation": true,
+         "awaiting_human": false,
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 2384,
+           "latency_ms": 1021.2,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Just to confirm — a cleaning visit on Thursday, January 1 at 3 PM? (yes/no)",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {
+        "intent": "book_visit",
+        "tool": "book_dental_visit",
+        "args": {
+         "visit_type": "cleaning",
+         "slot_iso": "2026-01-01T15:00:00"
+        },
+        "question": "Just to confirm — a cleaning visit on Thursday, January 1 at 3 PM? (yes/no)"
+       },
+       "pending_intent": "book_visit",
+       "session_facts": {},
+       "tool_calls": [],
+       "interrupted": false,
+       "interrupt": null
+      },
+      {
+       "message": "yes",
+       "final_response": "Your cleaning visit is booked for 2026-01-01T15:00:00 (confirmation BSD-00001). Please arrive ten minutes early. Anything else I can help with?",
+       "trace": [
+        {
+         "node": "intent_detect",
+         "intent": "book_visit",
+         "category": "FLOW",
+         "slots": {
+          "visit_type": "cleaning",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "fast_routed": false,
+         "confirmed_action": "book_dental_visit"
+        },
+        {
+         "node": "tool_exec",
+         "tool": "book_dental_visit",
+         "args": {
+          "visit_type": "cleaning",
+          "slot_iso": "2026-01-01T15:00:00"
+         },
+         "ok": true,
+         "error": null,
+         "tool_status": "ok",
+         "refusal": null
+        },
+        {
+         "node": "execution_validator",
+         "ok": true,
+         "error": null,
+         "outcome": "verified",
+         "verified": true,
+         "evidence": "book_dental_visit record BSD-00001 found for ('cleaning', '2026-01-01T15:00:00')",
+         "tool_status": "ok"
+        },
+        {
+         "node": "enrichment",
+         "model_calls": [
+          {
+           "model": "gpt-6-luna",
+           "kind": "structured",
+           "path": "json_mode",
+           "ok": false,
+           "error": "BadRequestError",
+           "input_tokens": null,
+           "output_tokens": null,
+           "input_chars": 1224,
+           "latency_ms": 560.4,
+           "parse_error": "BadRequestError"
+          }
+         ],
+         "degraded": true
+        },
+        {
+         "node": "validator",
+         "final_response": "Your cleaning visit is booked for 2026-01-01T15:00:00 (confirmation BSD-00001). Please arrive ten minutes early. Anything else I can help with?",
+         "stall_count": 1,
+         "handoff_requested": false
+        }
+       ],
+       "handoff_requested": false,
+       "pending_confirmation": {},
+       "pending_intent": null,
+       "session_facts": {
+        "confirmation": "BSD-00001"
+       },
+       "tool_calls": [
+        [
+         "book_dental_visit",
+         {
+          "visit_type": "cleaning",
+          "slot_iso": "2026-01-01T15:00:00"
+         }
+        ]
+       ],
+       "interrupted": false,
+       "interrupt": null
+      }
+     ]
+    ],
+    "validator": [],
+    "tool_registry": [
+     "book_dental_visit",
+     "retrieve_full_result",
+     "send_email"
+    ],
+    "verifiers": [
+     "book_dental_visit"
+    ],
+    "llm_mode": "LIVE (OpenAI)",
+    "config_sha256": "5444b6231c558a5e1236bd1969d2863d768bb39cb72758d5fabb71cfae1d37d1",
+    "spend": {
+     "input_tokens": 4224,
+     "output_tokens": 2400,
+     "estimated_calls": 6,
+     "cost_usd": 0.0016224,
+     "stopped": false
+    }
+   }
+  }
+ ],
+ "git": "9913278 (uncommitted changes)",
+ "date_utc": "2026-10-12T09:26:29+00:00"
+}

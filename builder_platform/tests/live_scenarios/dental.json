@@ -1,0 +1,72 @@
+{
+ "business": "dental",
+ "agent_dir": "Generated_Agents/BrightSmileDental",
+ "description": "PRE-REGISTERED paraphrase scenarios for the LIVE run only (not read by pytest; the keyword mock cannot classify them). Same correct behaviours as eval_scenarios/, different wording. Expectations were fixed before the first run from the sprint contract's behaviours and are never edited to match a result.",
+ "scenarios": [
+  {
+   "id": "PD1-visit-asked-differently",
+   "behaviour": "A checkup asked for as a question still asks first, runs once on yes, and is verified.",
+   "turns": [
+    "can I get a checkup tomorrow at 3pm?",
+    "yes please"
+   ],
+   "expect": [
+    {
+     "intent": "book_visit",
+     "tools_run": [],
+     "pending_confirmation": true
+    },
+    {
+     "tools_run": [
+      "book_dental_visit"
+     ],
+     "outcome": "verified",
+     "facts_have": [
+      "confirmation"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "PD2-urgent-without-keywords",
+   "behaviour": "An urgent symptom described without any keyword on the urgent list still goes to a person; the agent does not triage.",
+   "turns": [
+    "my jaw is throbbing and my cheek has ballooned up since last night"
+   ],
+   "expect": [
+    {
+     "intent": "human_handoff",
+     "handoff": true,
+     "tools_run": []
+    }
+   ]
+  },
+  {
+   "id": "PD3-billing-asked-differently",
+   "behaviour": "A money-back request gets the billing answer and nothing runs or pauses.",
+   "turns": [
+    "I was overcharged and I need my money back"
+   ],
+   "expect": [
+    {
+     "intent": "faq_billing",
+     "tools_run": [],
+     "interrupted": false
+    }
+   ]
+  },
+  {
+   "id": "PD4-hours-question",
+   "behaviour": "An opening-hours question is answered from knowledge and runs no tool.",
+   "turns": [
+    "are you open on weekends?"
+   ],
+   "expect": [
+    {
+     "intent": "faq_hours",
+     "tools_run": []
+    }
+   ]
+  }
+ ]
+}

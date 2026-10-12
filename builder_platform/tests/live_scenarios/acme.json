@@ -1,0 +1,90 @@
+{
+ "business": "acme",
+ "agent_dir": "boilerplate",
+ "description": "PRE-REGISTERED paraphrase scenarios for the LIVE run only (not read by pytest; the keyword mock cannot classify them). Same correct behaviours as eval_scenarios/, different wording. Expectations were fixed before the first run from the sprint contract's behaviours and are never edited to match a result.",
+ "scenarios": [
+  {
+   "id": "PA1-booking-asked-differently",
+   "behaviour": "A booking worded as a favour still asks first, runs once on yes, and is verified.",
+   "turns": [
+    "could you fit me in at the downtown store tomorrow around 3 in the afternoon?",
+    "yes please"
+   ],
+   "expect": [
+    {
+     "intent": "book_fitting",
+     "tools_run": [],
+     "pending_confirmation": true
+    },
+    {
+     "tools_run": [
+      "book_appointment"
+     ],
+     "outcome": "verified",
+     "facts_have": [
+      "confirmation"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "PA2-refund-asked-differently",
+   "behaviour": "A refund asked for as 'my money back' still waits for an operator and runs nothing.",
+   "turns": [
+    "this jacket fell apart after two washes, I'd like my money back for AC-12345"
+   ],
+   "expect": [
+    {
+     "intent": "request_refund",
+     "tools_run": [],
+     "interrupted": true
+    }
+   ]
+  },
+  {
+   "id": "PA3-order-asked-differently",
+   "behaviour": "A status question without the usual words is still a read-only lookup.",
+   "turns": [
+    "any news on package AC-12345? it has been a week"
+   ],
+   "expect": [
+    {
+     "intent": "order_status",
+     "tools_run": [
+      "lookup_order"
+     ],
+     "outcome": "unchecked",
+     "pending_confirmation": false,
+     "interrupted": false
+    }
+   ]
+  },
+  {
+   "id": "PA4-person-asked-differently",
+   "behaviour": "Wanting someone to take over, without the keywords, reaches the handoff path.",
+   "turns": [
+    "this is going nowhere, I want someone on your team to take over"
+   ],
+   "expect": [
+    {
+     "intent": "human_handoff",
+     "handoff": true,
+     "tools_run": []
+    }
+   ]
+  },
+  {
+   "id": "PA5-hours-question",
+   "behaviour": "An opening-hours question is answered from knowledge and runs no tool.",
+   "turns": [
+    "what time do you open on saturdays?"
+   ],
+   "expect": [
+    {
+     "intent": "faq_hours",
+     "tools_run": []
+    }
+   ]
+  }
+ ]
+}
