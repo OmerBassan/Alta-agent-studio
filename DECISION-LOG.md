@@ -191,3 +191,49 @@ User messages are cited by label. Their dates were not recorded, so the order be
 **Decision:** On a clean checkout (`core.autocrlf=true`, so CRLF) `step4_build.md` is 6_462 bytes and `test_step_files_exist_within_budget[step4_build.md]` failed: the sprint added `episode_trace.py` (Day 1, landing exactly on 6_450) and `authz.py` (Day 2, +12) to its write-blocked engine list. The suite was green only in a working tree with LF endings. The budget was raised by the size of that new required surface, following the test's own rule ("Raise a budget only for new REQUIRED surface") and its `agent_sandbox.py` precedent; making the test ignore line endings was rejected because it would loosen every budget by about 100 bytes.
 **Status:** the user was shown the gap but did not choose a fix; this is the session's choice.
 
+
+---
+
+## Model-selection session (2026-10-12)
+
+User messages in this session, in order: MSG-10 "we have enough days, focus on the work rather then the deadline / … I believe in a better model investigation fitst…"; MSG-11 "this project is a brownfield… the architecture spine is the more reliable ground truth for us"; MSG-12 "I will run the research with an external tool…"; MSG-13 "It is ok if the research does not tie a claim to a source…"; MSG-14 "the whole candidate table will be attached… a spend ceiling would be 50 cents."; MSG-15 "luna nd haiku are going to use the same amount of tokens approx. and cost the same we can go with luna".
+
+### DL-031 · APPROVED · No day accounting; focus on the work
+**Decision:** The remaining sprint work is not planned against a day count.
+**Source:** MSG-10: "we have enough days, focus on the work rather then the deadline".
+
+### DL-032 · APPROVED (research only) · The Architecture Spine is the ground truth for model and platform questions
+**Decision:** For the model research, requirements come from the Architecture Spine and the PRD; the brownfield code is the reference implementation, and its constraints are a compatibility check for the sprint's live run only. Recorded in `MODEL-RESEARCH-BRIEF.md`.
+**Source:** MSG-11: "this project is a brownfield. therefore, it has some misconseptions. some contradictions… the architecture spine is the more reliable ground truth for us".
+**Open:** DL-022 (APPROVED) ranks the Spine below the repository for sprint work, and DL-007 keeps the LangGraph runtime. The user has not said whether MSG-11 also overrides DL-022 for sprint execution. Until they do, it is applied to model and platform research only.
+
+### DL-033 · APPROVED · The external research report is accepted as reliable
+**Decision:** `Agent Studio model research.pdf` (external tool, 2026-10-12) is accepted although it does not tie claims to sources and calls itself a provisional draft. The candidate table's truncated columns (P1, P2, P3, P6) were supplied by the user in MSG-14.
+**Source:** MSG-13: "It is ok if the research does not tie a claim to a source. it is a reliable research." "It is ok that we never mentioned hebrew, we could ignore it anyway".
+
+### DL-034 · APPROVED · The live evaluation model is `gpt-6-luna`, on all three tiers
+**Decision:** "Luna 6" means OpenAI `gpt-6-luna`. Claude Haiku 5.5 (`claude-haiku-5-5`) was considered, and an engine change for it was acceptable on the condition that it be "more efficient and perform as good as luna 6". It was dropped because the two are expected to use about the same tokens at the same price. No Haiku-specific change was made.
+**Source:** MSG-13: "Luna 6 and gpt-6-luna is the same", "claude-haiku-5-5 is the one i talked about of course. I am ok with an engine change if needed, so Haiku 5 5 could fit. only if it is more efficient and perform as good as luna 6", "I get your propose to take gpt 6 luna but i want it to not be too pricey." MSG-15: "luna nd haiku are going to use the same amount of tokens approx. and cost the same we can go with luna".
+
+### DL-035 · APPROVED · Spend ceiling for the live evaluation: US$0.50
+**Decision:** The whole live evaluation, compatibility probe included, spends at most US$0.50. `live_eval.py --max-cost` defaults to 0.50.
+**Source:** MSG-14: "a spend ceiling would be 50 cents."
+
+### DL-036 · PROPOSED · How live model calls are made visible and the spend is bounded
+**Decision:** (1) `llm_client` records every live call (kind, path actually used: parse / json_mode / text, ok, error type, reported token usage, input size, latency) in a per-node log that `graph._traced` attaches to the node's trace entry as `model_calls`, with `degraded: true` when any call failed and the node fell back to its heuristic. Mock mode makes no calls, so its traces are unchanged. (2) `agent_driver.run_agent(live=True)` passes the caller's environment through, refuses to start without `OPENAI_API_KEY` or if the client still comes up in mock mode, and stops before the next turn once the estimated spend reaches the budget (overshoot of at most one turn). Calls the provider reported no usage for are estimated pessimistically (3 characters per token in, 400 tokens out). (3) `live_eval.py` runs every C7 scenario N times with one model pinned on all tiers and writes a Markdown report plus raw JSON.
+**Status:** The user approved the live run on `gpt-6-luna` and the ceiling ("we can go with luna"); this mechanism is the session's design.
+**Source:** this session; `boilerplate/llm_client.py`, `boilerplate/graph.py` (re-copied to both agents), `builder_platform/tests/agent_driver.py`, `builder_platform/tests/live_eval.py`; tests `test_model_call_trace.py` (2 of its tests failed before the change), `test_live_eval_tooling.py`.
+
+### DL-037 · PROPOSED · Output-cap field and reasoning effort are env settings; the live run uses reasoning effort `none`
+**Evidence (live, 2 probes, 18 rejected calls, no model output):** every call to `gpt-6-luna` failed with HTTP 400 `Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.` (probe reports `20261012T092629Z` and `20261012T094115Z`; the second captured the provider message). OpenAI's model page lists reasoning effort `medium` as the default and says Chat Completions supports function calling only with effort `none`; it is silent on `temperature` and on whether reasoning tokens count against the output cap (treated as likely, unconfirmed).
+**Decision:** `OPENAI_TOKEN_PARAM` (`max_tokens` default | `max_completion_tokens`, anything else fails at startup) and `OPENAI_REASONING_EFFORT` (unset by default and then not sent; format-checked only) are read by `llm_client`. No provider check in code. `live_eval.py` takes `--token-param` and `--reasoning-effort`, and records both in the report. Regression tests in `test_llm_client_timeout.py` (failed before).
+**Third probe (LIVE, `gpt-6-luna`, `--token-param max_completion_tokens --reasoning-effort none`, report `20261012T101247Z`):** 9 calls, 0 failed, so `temperature` and `max_completion_tokens` are accepted at effort `none`; 3/3 first scenarios (Acme, brewery, dental booking) passed; call latency p50 2.2 s / p95 4.1 s; 13.3k input / 2.9k output tokens including pessimistic estimates for the 6 rejected parse attempts (reported figures are lower). The native parse path is rejected for `IntentResult` and `ThinkDecision` ("Invalid schema for response_format … 'required' … Extra required key 'slots' supplied": the free-keyed `slots: Dict[str, Optional[str]]` is not valid for strict structured outputs) and succeeds in the JSON-mode fallback every time; `EnrichVerdict` parses natively. That costs one rejected request per intent/think call; not changed (a schema change is a separate decision).
+**Status:** the settings are the session's design. Using effort `none` for the live run is a recommendation; the user ran the probe with it but did not otherwise say yes, so it stays PROPOSED.
+**Source:** this session; `boilerplate/llm_client.py` re-copied to both agents.
+
+**Full live run (report `20261012T103142Z`, 2026-10-12):** `gpt-6-luna`, effort `none`, `max_completion_tokens`, 3 runs: 22/22 business scenarios passed 3/3, 138 calls, 0 failed, about US$0.015 by provider-reported usage. Effort `none` is still PROPOSED: the user ran it with `--reasoning-effort none` but did not say yes. Second run (paraphrases, report `20261012T105341Z`, requested by the user: "one more run and then c8"): 13/13 scenarios passed 3/3, 84 calls, 0 failed, about US$0.0085. The result is recorded in CURRENT-STATE section 3b, with its limits.
+
+### DL-038 · APPROVED (delegated) · C8 breaks the dental consent gate; no fingerprint or driver-trace change
+**Decision:** The correction-loop demo removes `state_changing` from dental `book_visit` on a temporary copy of the agent, restores it, re-runs the failing scenarios and the full suite, and compares fingerprints within that copy. The fingerprint's dependence on the install folder (found while planning) is recorded as a limitation and not fixed, because C8 does not need it. The driver was not changed to write trace files; the fingerprint in the driver reply comes from the configuration the agent process loaded.
+**Source:** MSG (2026-10-12): "about step 0 make sure you dont over engineer the situation. is it really such a big deal? proceed only if it is really required", "the rule to break - up to you", "about step 1 i dont care. i am more focused on the ai engineering here".
+**Evidence:** `correction_loop.py` exit 0 in the working tree and on a clean CRLF checkout; `test_correction_loop.py`.
