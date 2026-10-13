@@ -81,7 +81,7 @@ The Builder conversation and any operator UI (including the UX spines' surfaces)
 
 ## 8. Not part of the contract (proposals and open points)
 
-Decisions made inside sessions are not part of this contract until the user approves them. Their current status lives in [DECISION-LOG.md](DECISION-LOG.md), which is the single place to check: as of the end of 2026-10-12, DL-015, DL-026, DL-029, DL-030 and DL-036 are `PROPOSED` (all already in the code) and DL-023 is `OPEN`; the others raised during the sprint (DL-013, DL-014, DL-016 to DL-021, DL-024, DL-025, DL-027, DL-028, DL-031 to DL-035) are `APPROVED`, DL-032 for research only.
+Decisions made inside sessions are not part of this contract until the user approves them. Their current status lives in [DECISION-LOG.md](DECISION-LOG.md), which is the single place to check: as of the end of the Day 7 session (2026-10-12), no decision is `PROPOSED`. DL-023 is `OPEN` (not needed by the sprint); DL-030 is `SUPERSEDED` (the file was trimmed instead); every other decision raised during the sprint (DL-013 to DL-021, DL-024 to DL-029, DL-031 to DL-041) is `APPROVED`; DL-041 is an idea recorded for later, not scheduled work. DL-015 is approved as strict consent, which replaced its keyword bypass; DL-032 is clarified (the Spine is the up-to-date design, not the top of DL-022's order); DL-038 was delegated to the session.
 
 ## 9. Ambiguities resolved since this contract was written
 

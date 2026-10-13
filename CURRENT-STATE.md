@@ -1,25 +1,23 @@
 # CURRENT-STATE — Agent Studio seven-day hardening
 
-Snapshot updated 2026-10-12 (model-selection session) on branch `harden/seven-day`, committed as four commits on top of `9913278`, the last of which adds this text (approved by the user: "yes review and commit"). Labels: **VERIFIED** (run or read for this snapshot), **UNKNOWN**. Check `git log -1` and `git status --short` before trusting any line here; if the repository disagrees, the repository wins.
+Snapshot updated 2026-10-12 (Day 7 session) on branch `harden/seven-day`. HEAD at the start of the session was `ab820e1`; this session (all **uncommitted** until the user approves): the Day 7 documentation (root `README.md`, this file, `DECISION-LOG.md`, `LATEST-HANDOFF.md`, `SPRINT-CONTRACT.md` section 8, the dental README); the test-isolation guard (`builder_platform/env_bootstrap.py`, new `builder_platform/tests/conftest.py`, four tests in `test_env_bootstrap.py`; DL-040); strict consent at the yes/no question (engine `boilerplate/nodes.py`, re-copied to both agents; 15 tests in `test_execution_authz.py`, 1 in `test_dental_agent.py`; DL-015); and the `step4_build.md` trim with its budget back at 6_450 (`skill_steps/step4_build.md`, `test_efficiency_round.py`; DL-030). Labels: **VERIFIED** (run or read for this snapshot), **UNKNOWN**. Check `git log -1` and `git status --short` before trusting any line here; if the repository disagrees, the repository wins.
 
 Days: no longer tracked (DL-031). C6 accepted (DL-019). Writer: one session at a time, authorized by the user (DL-020).
 
 ## 1. Test evidence (VERIFIED, mock mode, zero tokens)
 
-Run on the working tree **and** on a clean CRLF checkout of the same content (a temporary, ref-less commit). A fresh checkout writes CRLF line endings; the working tree has LF, which once hid a failure (DL-030). Before claiming the final commit is green, re-run on `git -c core.longpaths=true worktree add <tmp> HEAD`.
-
-Added in this session: engine `boilerplate/llm_client.py` and `boilerplate/graph.py` (re-copied byte-identical to both agents) and the three `.env.example` files; `builder_platform/tests/agent_driver.py`; new `live_eval.py`, `correction_loop.py`, `test_model_call_trace.py`, `test_live_eval_tooling.py`, `test_live_scenarios.py`, `test_correction_loop.py`, `live_scenarios/` (3 files), `live_reports/` (5 reports, each `.md` + raw `.json`; no key inside); `MODEL-RESEARCH-BRIEF.md` and the user's `Agent Studio model research.pdf`.
+Run in the Day 7 session on the working tree **and** on a clean CRLF checkout (`git -c core.longpaths=true worktree add`) of a temporary, ref-less commit holding `ab820e1` plus every change of this session, strict consent included (temp commit `caf47dc`, worktree removed afterwards; earlier checks in this session: `84c3839` docs only, 312; `ca5651e` with the guard, 316). A fresh checkout writes CRLF line endings; the working tree has LF, which once hid a failure (DL-030). Both runs also had `HTTPS_PROXY`/`HTTP_PROXY` pointed at a closed local port, so any provider call would have failed at connect. A commit of exactly these files is covered by the clean-checkout run; any other change needs a new run.
 
 | Command | Working tree | Clean checkout |
 | --- | --- | --- |
-| `python -m pytest builder_platform/tests -q` | 312 passed | 312 passed (clean CRLF checkout) |
+| `python -m pytest builder_platform/tests -q` | 332 passed | 332 passed |
 | `python builder_platform/tests/correction_loop.py` (C8) | exit 0 | exit 0 |
 | `python -m pytest claude_plugin/tests -q` | 12 passed | 12 passed |
-| `python -m pytest builder_platform/tests/test_cross_business_eval.py -v` | 27 passed | (inside the 287) |
-| `python -m pytest builder_platform/tests/test_engine_drift.py -q` | 15 passed | (inside the 287) |
 | `python selftest.py` in `boilerplate/`, `Generated_Agents/BassanBrewerySDR/`, `Generated_Agents/BrightSmileDental/` | all PASSED | all PASSED |
 
-**No live-model run exists.** Behaviour under a real model is UNKNOWN. The live tooling is tested only in mock mode and against a closed local port (every call fails at connect, zero tokens); no request has reached a model provider.
+The cross-business evaluation (`test_cross_business_eval.py`, 27 tests) and the drift test (`test_engine_drift.py`, 15 tests) are inside the 332.
+
+Live results (sections 3b and 3c) come from two LIVE runs made by the user on 2026-10-12, before strict consent (DL-015); they were not repeated. Every scripted answer to a yes/no in both scenario sets is a bare yes (checked against `nodes._bare_answer`), so their expectations still apply.
 
 ## 2. Deliverables
 
@@ -27,13 +25,13 @@ Added in this session: engine `boilerplate/llm_client.py` and `boilerplate/graph
 | --- | --- | --- |
 | C1 brewery restored, drift test | Done | `test_engine_drift.py` (two generated agents against `boilerplate/` as reference, plus a compile check of every engine file) |
 | C5 trace + configuration fingerprint | Done | `boilerplate/episode_trace.py`, `graph._traced`; `test_episode_trace.py` |
-| C2 + C3 execution-time authorization | Done | `boilerplate/authz.py`, `nodes._authorize`; `test_execution_authz.py` (34). Refuses a tool no flow declares (DL-024), a tool that is not the active flow's (DL-026, PROPOSED), and a gated tool without a one-time record bound to the exact payload |
+| C2 + C3 execution-time authorization | Done | `boilerplate/authz.py`, `nodes._authorize`; `test_execution_authz.py` (49). Refuses a tool no flow declares (DL-024), a tool that is not the active flow's (DL-026), and a gated tool without a one-time record bound to the exact payload |
 | C4 outcome verification | Done | `tools.VERIFIERS`, `execution_validator_node`; `test_outcome_verification.py` (11) |
-| C6 dental agent | Done, accepted | `Generated_Agents/BrightSmileDental/`; `test_dental_agent.py` (9) |
+| C6 dental agent | Done, accepted | `Generated_Agents/BrightSmileDental/`; `test_dental_agent.py` (10) |
 | C7 cross-business evaluation, deterministic mode | Done | `test_cross_business_eval.py` + `eval_scenarios/{acme,dental,brewery}.json`: 16 scenarios, 22 business runs (section 3) |
-| C7 live-model mode + report | **Run once (LIVE)**: report `builder_platform/tests/live_reports/20261012T103142Z-gpt-6-luna.md` (+ `.json`), see section 3b. Tooling: | `live_eval.py` (report), `agent_driver.run_agent(live=True)`, model-call records on the trace (DL-036, PROPOSED). Model `gpt-6-luna` on all tiers (DL-034), ceiling US$0.50 (DL-035). Needs the user's `OPENAI_API_KEY`; second to cut |
+| C7 live-model mode + report | **Done, run twice (LIVE)**: C7 scenarios, report `builder_platform/tests/live_reports/20261012T103142Z-gpt-6-luna.md` (section 3b); paraphrases, report `20261012T105341Z-gpt-6-luna-live_scenarios.md` (section 3c). Tooling: | `live_eval.py` (report), `agent_driver.run_agent(live=True)`, model-call records on the trace (DL-036). Model `gpt-6-luna` on all tiers (DL-034), ceiling US$0.50 (DL-035). Needs the user's `OPENAI_API_KEY`; second to cut |
 | C8 correction-loop demo | **Done** | `builder_platform/tests/correction_loop.py` + `test_correction_loop.py`, mock mode. Section 3d |
-| Day 7 README section, limitations, final run | Not started | |
+| Day 7 README section, limitations, final run | **Done, uncommitted** | Root `README.md`, section "How this agent adapts and stays bounded" (placement DL-039): one engine and three businesses, where the model and the graph decide, the execution boundary, verification, trace and fingerprint, the X-scenario table, evidence labelled MOCK/LIVE, why `gpt-6-luna`, the differences from the Spine, and limitations in two halves. Final run: section 1 |
 
 There is **no CI**: the deterministic suite runs in pytest, locally. SPRINT-CONTRACT's "pytest and CI" is half true.
 
@@ -62,7 +60,7 @@ Settings: `OPENAI_TOKEN_PARAM=max_completion_tokens`, reasoning effort `none`, 3
 - **Spend:** about US$0.015 from the provider-reported usage of the 138 successful calls (122,857 input / 5,904 output tokens at $0.10 / $0.50 per 1M, the research report's prices; not checked against an invoice). The report's own figure, $0.0495, is higher because it pads the 117 rejected native-parse attempts. All probes plus this run: about US$0.02.
 - **Native structured parse is rejected on every intent and think call** (117 of 117) and succeeds in the JSON-mode fallback; `EnrichVerdict` parses natively. One rejected request per intent/think call, no failures (DL-037).
 
-**What this does not show.** The scenarios are the 16 hand-written C7 scenarios with plain phrasings; temperature is 0.1-0.2 with reasoning off, so three identical repetitions measure stability, not a distribution. Many expectations are decided by the engine's gates (authorization, read-back verification, handoff), not by the model; the model decides intent and slot extraction. The documented weak spots (DL-015: "yes, I'm the store manager, go ahead" read as a handoff; "okay, but my cheek is really puffy" booked) are not in the scenario set, so this run does not test them. It is one model at one setting.
+**What this does not show.** The scenarios are the 16 hand-written C7 scenarios with plain phrasings; temperature is 0.1-0.5 depending on the node (0.1-0.2 for the structured decisions, 0.5 for free-text answers) with reasoning off, so three identical repetitions measure stability, not a distribution. Many expectations are decided by the engine's gates (authorization, read-back verification, handoff), not by the model; the model decides intent and slot extraction. The documented weak spots (DL-015: "yes, I'm the store manager, go ahead" read as a handoff; "okay, but my cheek is really puffy" booked) are not in the scenario set, so this run does not test them. It is one model at one setting.
 
 ## 3c. Second live run: paraphrases (LIVE, `gpt-6-luna`, same settings; VERIFIED from the report and raw JSON)
 
@@ -76,6 +74,7 @@ Report `builder_platform/tests/live_reports/20261012T105341Z-gpt-6-luna-live_sce
 ## 3d. C8 correction loop (mock mode, zero tokens; VERIFIED in the working tree and on a clean CRLF checkout)
 
 `python builder_platform/tests/correction_loop.py` works on a temporary copy of the dental agent (the real agent is never touched; the script checks this) and exits 0 only if every phase holds:
+
 1. Baseline: 22/22 business scenarios pass.
 2. Wrong rule: the line `properties=frozenset({"state_changing"}),` is removed from dental `book_visit`. The agent still starts (an ungated flow is legal, so no startup check can catch it). D1 fails (`turn 1: tools_run: expected [], observed ['book_dental_visit']`: it booked without asking) and D3 fails (`turn 1: pending_confirmation: expected True, observed False`).
 3. Correction: the line is restored; the copy's `config.py` is byte-identical to the reviewed one; D1 and D3 re-run and pass.
@@ -86,15 +85,16 @@ About 30 s. `test_correction_loop.py` runs the same loop in pytest. The correcti
 ## 4. Open limitations (each recorded; none closed in this commit)
 
 - **Forged payload on a matching turn of an ungated flow runs with forged arguments** (e.g. brewery "send me an email" + a forged payload sent mail to `anyone@elsewhere.com`): `route_by_intent` sends a pending payload straight to `tool_exec`, skipping `think`'s slot validation, and ungated flows have no platform record. Affects Acme `order_status`, brewery `send_followup` and `lead_profile`. Gated flows are not affected. DL-026.
-- **Escalation at the yes/no gate is keyword-based** (DL-015, PROPOSED): measured false positives ("yes, I'm the store manager, go ahead", "it's not urgent" → handoff instead of booking) and a false negative ("okay, but my cheek is really puffy" → booked).
+- **Strict consent at the yes/no question** (DL-015, implemented in the Day 7 session): only a bare yes or no resolves a pending confirmation; anything else is classified normally and the detour reply re-asks ("Please answer yes or no: …"). The measured false negative is closed ("okay, but my cheek is really puffy" no longer books; mock: asked again). "yes, I'm the store manager, go ahead" still hands off in mock mode (the classifier sees "manager"); it never books. Cost: a longer yes ("yes, Tuesday works") is asked again. After the gate, a sentence is classified by the model live and by keywords in mock; no live run has tested these phrasings.
 - **Approvals are in-process** and do not survive a restart (DL-017).
 - **Untested / unreconciled:** an unverified step inside a multi-step plan; a timed-out write that lands later.
 - **The brewery's follow-up email** has no confirmation gate and no read-back (outcome `unchecked`): a domain decision nobody has made.
 - **Selftests** never exercise the operator gate (`RESUME_APPROVE` is unused); the dental selftest warns that `visit_type` has no `HOOK_CHECK` (they live in the shared engine `selftest.py`).
-- **Mock mode only;** urgent-symptom detection is a keyword list.
-- **Live compatibility is settled for `gpt-6-luna` at `max_completion_tokens` + reasoning effort `none`** (third probe and the full run, section 3b). Not tested: reasoning effort at the model's default (`medium`), other models, and phrasings outside the C7 scenarios.
-- **Live probes 1-2 (18 calls) all failed** with HTTP 400 on `max_tokens` (see DL-037); fixed in code by an env setting, not yet re-probed. `temperature` acceptance and reasoning-token use of small output caps are still UNKNOWN.
-- (superseded by the line above) **Live compatibility of `gpt-6-luna` with the engine is UNKNOWN.** The engine sends `max_tokens` and `temperature` on every call; the research report could not confirm `gpt-6-luna` accepts `max_tokens` on Chat Completions. If it rejects either, every call fails, the probe shows `degraded` calls, and the engine needs a change before the full run.
+- **Urgent-symptom detection** is a keyword list in mock mode and in the fast router; live, the model classifies from `INTENT_DESCRIPTIONS` (one paraphrase, PD2, tested).
+- **Live compatibility is settled for `gpt-6-luna` at `max_completion_tokens` + reasoning effort `none`** (third probe and both full runs; `temperature` is accepted at that setting). Not tested: reasoning effort at the model's default (`medium`), other models, phrasings outside the 29 scenarios, and whether reasoning tokens count against small output caps.
+- **Native structured output is rejected for `IntentResult` and `ThinkDecision`** (the free-keyed `slots` dict is not valid for strict schemas): every intent and think call makes one rejected request, then succeeds in JSON mode (DL-037).
+- **Live latency tail:** p95 3.7 s (C7) and 7.6 s (paraphrases), slowest call 13.3 s, against a 30 s client cap.
+- **Test-suite mock mode: guarded since the Day 7 session (DL-040).** The repo-root `.env` (gitignored, voice era) holds a live `OPENAI_API_KEY` that the voice platform needs; the user keeps it. Before the guard, `env_bootstrap` loaded it whenever a test imported `app.py`, `builder.py`, `vapi_adapter.py` or `runtime.py`, mock mode rested on each test module blanking the key, and on Windows a blanked variable is dropped when a subprocess inherits the environment (reproduced: a child process loaded a fake key from a `.env`). Now `builder_platform/tests/conftest.py` sets `ALTA_SKIP_DOTENV=1` and removes `OPENAI_API_KEY`/`OPENAI_BASE_URL` before any test module loads; `env_bootstrap.autoload()` reads no file when the variable is set. Measured against the real `.env`, printing only a boolean: production import loads the key (True), with the opt-out it does not (False). Regression tests: four in `test_env_bootstrap.py`, all failing before. Still not covered: a key written into an agent's own `.env` (the agent's `llm_client` loads it; the repository's agent `.env` files are blank or absent), and `claude_plugin/tests`, which never import `env_bootstrap`.
 - **A structured call whose `parsed` result is `None`** (a model refusal on the parse path) is returned as `None`; the intent and think nodes then fail outside their fallback. Pre-existing, unreachable in mock mode, not changed.
 - **The configuration fingerprint depends on the install folder**, not only on content: config modules hold `_KNOWLEDGE_DIR`, an absolute path, and every uppercase scalar is hashed (`"_KNOWLEDGE_DIR".isupper()` is true). A byte-identical copy of the dental agent in another folder gets a different fingerprint (measured). Comparisons hold within one folder (C8 relies on that), not across folders or machines. Found while planning C8; not fixed, because C8 does not need it (DL-038).
 - **Spend is an estimate**, from the usage the provider reports plus pessimistic estimates for calls it reports none for; the provider's own spending limit is the only hard guard.
@@ -104,4 +104,4 @@ About 30 s. `test_correction_loop.py` runs the same loop in pytest. The correcti
 
 ## 5. Next task
 
-Day 7: README section "How this agent adapts and stays bounded", limitations in two halves, final full run. See [LATEST-HANDOFF.md](LATEST-HANDOFF.md).
+All approved deliverables (C1-C8 and Day 7) are done, and no decision is PROPOSED any more (DL-023 stays OPEN and does not block). Next: the user reviews this session's uncommitted changes (header) and decides whether to commit them. See [LATEST-HANDOFF.md](LATEST-HANDOFF.md).

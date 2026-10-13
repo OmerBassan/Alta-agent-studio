@@ -27,6 +27,11 @@ python agent_sandbox.py    # text REPL for a developer
 Behaviour tests: `python -m pytest builder_platform/tests/test_dental_agent.py`
 from the repo root.
 
-Not covered: live-model classification of urgent symptoms (the keyword list is
-what mock mode and the fast router use; a live model classifies from
-`INTENT_DESCRIPTIONS`), and any channel or real practice-management system.
+Urgent symptoms are classified by a keyword list in mock mode and in the fast
+router, and by the model from `INTENT_DESCRIPTIONS` in live mode. Live
+coverage is thin: one LIVE run (`gpt-6-luna`, 3 repetitions) handed off a
+symptom described without any listed keyword (scenario PD2 in
+`builder_platform/tests/live_scenarios/`). At the yes/no question only a bare
+yes or no is an answer; anything else, an urgent symptom included, is
+classified like any other message, and the booking is never made on it. Not covered: any channel or real
+practice-management system.
