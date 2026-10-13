@@ -85,6 +85,16 @@ def test_urgent_symptom_at_the_confirmation_gate_is_not_a_yes(urgent_runs):
         assert not urgent["pending_confirmation"], "the pending booking must be dropped"
 
 
+def test_a_symptom_without_a_keyword_at_the_confirmation_does_not_book():
+    """The measured false negative (DL-015): "puffy" is on no keyword list, and
+    "okay" used to be read as consent. Strict consent keeps the question open."""
+    out = _run([BOOK, "okay, but my cheek is really puffy"])
+    ask, reply = out["conversations"][0]
+    assert ask["pending_confirmation"], "precondition: a yes/no is pending"
+    assert not reply["tool_calls"], f"booked on an unclear answer: {reply['tool_calls']}"
+    assert reply["pending_confirmation"] or reply["handoff_requested"]
+
+
 # ── no symptom questions ─────────────────────────────────────────────────────
 def test_outgoing_symptom_questions_are_scrubbed():
     drafts = ["What symptoms are you having? I can book you in tomorrow.",

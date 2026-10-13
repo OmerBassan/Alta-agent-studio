@@ -22,9 +22,8 @@
    copied verbatim and write-blocked — never read or edit them;
    engine fixes go upstream in `boilerplate/`, once. The director and the
    objection/tie-down gates are engine code you drive from `config.py`, never
-   edit. `agent_sandbox.py` is a text-chat REPL (`python agent_sandbox.py`)
-   for testing the built agent with zero voice infrastructure — mention it to
-   the client only if they're a developer testing from a terminal.
+   edit. `python agent_sandbox.py` is a developer text-chat REPL with no voice
+   infrastructure; mention it only to a client testing from a terminal.
 3. **Voice style pass** — every user-audible string (OPENER, HELP/STALL/HANDOFF
    text, slot prompts, confirm templates, NEXT_STEP_HINTS, enrich templates,
    filler banks, `Stage.line`/`Stage.nudge`, the isolate template, `TIEDOWNS`)

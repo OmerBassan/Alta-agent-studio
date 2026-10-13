@@ -152,6 +152,49 @@ def test_escalation_at_the_confirmation_gate_is_not_consent(calls, reply):
     assert not st.get("pending_confirmation")
 
 
+# ── strict consent (DL-015): only a bare answer resolves the yes/no ─────────
+@pytest.mark.parametrize("reply", [
+    "okay, but my cheek is really puffy",        # booked before strict consent
+    "yes, but can we make it 4pm instead?",
+    "sure, what are your opening hours?",
+    "ok, if the downtown branch has parking",
+])
+def test_a_yes_with_anything_else_is_not_consent(calls, reply):
+    """Consent is the whole message, never a yes-word found inside a sentence.
+    The question stays open (or the message escalates); nothing runs."""
+    g = build_pipeline()
+    _turn(g, "nb", BOOK)
+    st = _turn(g, "nb", reply)
+    assert not calls, f"{reply!r} was taken as consent"
+    assert st.get("pending_confirmation") or st.get("handoff_requested")
+
+
+def test_an_unclear_answer_is_asked_again_as_yes_or_no(calls):
+    g = build_pipeline()
+    _turn(g, "re", BOOK)
+    st = _turn(g, "re", "okay, but my cheek is really puffy")
+    assert st.get("pending_confirmation"), "the question must stay open"
+    assert "yes or no" in st["final_response"].lower(), st["final_response"]
+
+
+@pytest.mark.parametrize("reply", ["yes", "Yeah!", "ok, go ahead", "yes please", "sounds good, thanks"])
+def test_a_bare_yes_is_consent(calls, reply):
+    g = build_pipeline()
+    _turn(g, "by", BOOK)
+    _turn(g, "by", reply)
+    assert [c[0] for c in calls] == ["book_appointment"], reply
+
+
+@pytest.mark.parametrize("reply", ["no", "Nope.", "no thanks", "cancel", "wait"])
+def test_a_bare_no_declines(calls, reply):
+    g = build_pipeline()
+    _turn(g, "bn", BOOK)
+    st = _turn(g, "bn", reply)
+    assert not calls
+    assert not st.get("pending_confirmation")
+    assert st["final_response"] == config.CONFIRM_DECLINED_TEXT or st.get("confirmation_declined")
+
+
 # ── 1. modified payload ──────────────────────────────────────────────────────
 def test_payload_modified_between_question_and_yes_is_refused(calls):
     g = build_pipeline()

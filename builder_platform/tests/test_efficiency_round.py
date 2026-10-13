@@ -38,13 +38,14 @@ STEP_FILES = ("step1_discovery.md", "step2_playbook.md",
 # split exists to cap per-phase reading cost. step4 (6_200 -> 6_450) was raised
 # when agent_sandbox.py (the text-chat sandbox) landed as a new engine file the
 # build step must know is write-blocked, same as every other engine file.
-# step4 (6_450 -> 6_475) for the same reason: episode_trace.py and authz.py
-# joined the write-blocked engine list (+23 bytes). Sizes are measured as
-# checked out; with core.autocrlf=true every line costs a CR, which is the
-# basis these budgets were set on (6_462 at the time of this raise).
+# When episode_trace.py and authz.py joined the write-blocked engine list,
+# step4 went over 6_450 on a CRLF checkout; it was trimmed back under the
+# budget rather than raising it again (6_462 -> 6_389 bytes). Sizes are
+# measured as checked out; with core.autocrlf=true every line costs a CR,
+# which is the basis these budgets were set on.
 BUDGETS = {"SKILL.md": 5_000, "step1_discovery.md": 6_000,
            "step2_playbook.md": 4_000, "step3_contract.md": 4_300,
-           "step4_build.md": 6_475}
+           "step4_build.md": 6_450}
 
 
 def test_skill_core_is_slim_and_schedules_the_steps():

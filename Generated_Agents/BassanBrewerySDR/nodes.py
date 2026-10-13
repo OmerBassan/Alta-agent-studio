@@ -100,6 +100,41 @@ _NEGATE_RE = re.compile(r"\b(no|nope|don'?t|cancel|stop|wait|not yet|hold on|"
 _AFFIRM_RE = re.compile(r"\b(yes|yep|yeah|sure|confirm|confirmed|go ahead|do it|"
                         r"ok(ay)?|please do|correct|right|absolutely)\b", re.IGNORECASE)
 
+# Strict consent at the confirmation gate (DL-015): the WHOLE message must be
+# the answer. A yes-word inside a longer sentence ("okay, but my cheek is
+# really puffy") is not consent, and a no-word inside one ("no, get me a
+# person") is not a decline: both are classified normally, so an escalation
+# reaches the handoff path and the question otherwise stays open.
+_YES_PHRASES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "all right",
+                "correct", "right", "confirm", "confirmed", "absolutely", "go ahead",
+                "do it", "please do", "sounds good", "that works", "works for me")
+_NO_PHRASES = ("no", "nope", "nah", "cancel", "not now", "not today", "not yet", "wait",
+               "hold on", "stop", "don't", "do not", "don't do it", "never mind", "nevermind",
+               "changed my mind", "i changed my mind")
+_COURTESY = ("please", "thanks", "thank you")
+
+
+def _phrase_run_re(phrases):
+    alt = "|".join(re.escape(p) for p in sorted(phrases + _COURTESY, key=len, reverse=True))
+    return re.compile(rf"(?:(?:{alt}) )+")
+
+
+_BARE_YES_RE = _phrase_run_re(_YES_PHRASES)
+_BARE_NO_RE = _phrase_run_re(_NO_PHRASES)
+
+
+def _bare_answer(message: str) -> str:
+    """'yes' or 'no' when the message is nothing but that answer, else ''."""
+    words = re.findall(r"[a-z']+", message.lower().replace("’", "'"))
+    if not words or all(w in ("please", "thanks", "thank", "you") for w in words):
+        return ""
+    text = " ".join(words) + " "
+    if _BARE_NO_RE.fullmatch(text):
+        return "no"
+    if _BARE_YES_RE.fullmatch(text):
+        return "yes"
+    return ""
+
 # Mock-mode heuristic for "explain yourself" questions grounded on last_action.
 _GROUNDING_Q_RE = re.compile(r"\b(how do you know|how would you know|are you sure|"
                              r"based on what|how come|why is that|says who)\b", re.IGNORECASE)
@@ -189,17 +224,14 @@ async def intent_detect_node(state, thread_id: str = "", ledger=None) -> dict:
 
     # Confirmation gate resolution: a stashed payload is waiting for yes/no.
     # Deterministic (no model) — a yes/no on a destructive action must never
-    # depend on a model's mood. Anything that is neither falls through to
-    # normal classification (a detour); the confirmation stays pending.
+    # depend on a model's mood — and strict: only a bare answer resolves it
+    # (_bare_answer). Anything else falls through to normal classification
+    # (an escalation reaches handoff, which clears the pending action; any
+    # other detour keeps the confirmation pending and re-asks it).
     confirm = state.get("pending_confirmation") or {}
-    # An escalation is never an answer to the yes/no: "okay, but get me a
-    # person" (or an urgent symptom, where an agent declares those as
-    # human_handoff keywords) must reach the handoff path, which clears the
-    # pending action. Skipping resolution here can only withhold consent.
-    escalating = any(k in user_message.lower()
-                     for k in config.INTENT_KEYWORDS.get("human_handoff", ()))
-    if confirm and not escalating:
-        if _NEGATE_RE.search(user_message):
+    answer = _bare_answer(user_message) if confirm else ""
+    if answer:
+        if answer == "no":
             logger.info("confirmation declined for %s", confirm.get("tool"))
             if ledger is not None:
                 ledger.revoke("confirm", thread_id)
@@ -208,7 +240,7 @@ async def intent_detect_node(state, thread_id: str = "", ledger=None) -> dict:
             return _clear_plan({"intent": "chitchat", "category": "ANSWER", "slots": {},
                                 "pending_intent": None, "pending_slots": {},
                                 "pending_confirmation": {}, "confirmation_declined": True})
-        if _AFFIRM_RE.search(user_message):
+        if answer == "yes":
             logger.info("confirmation accepted for %s", confirm.get("tool"))
             # The user's yes is the GRANT of the platform's outstanding offer
             # (minted by think when it asked). A yes with no offer behind it —
@@ -704,7 +736,8 @@ def _resume_suffix(state) -> str:
     a detour must never silently abandon the task in progress."""
     confirm = state.get("pending_confirmation") or {}
     if confirm.get("question"):
-        return " Now, back to where we were: " + confirm["question"]
+        # Strict consent re-asks in plain terms: only a bare yes or no answers.
+        return " Please answer yes or no: " + confirm["question"]
     pending = state.get("pending_intent")
     if pending and pending in config.FLOWS:
         flow = config.FLOWS[pending]
