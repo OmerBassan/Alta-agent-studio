@@ -10,14 +10,14 @@ The deliverable is the **builder platform**, not any single agent. Never sink ti
 
 Branch `harden/seven-day`. This is **channel-agnostic hardening of the existing LangGraph runtime**, driven in MOCK mode (empty `OPENAI_API_KEY`, zero tokens) through `graph.ainvoke`, `boilerplate/agent_sandbox.py`, or `builder_platform/tests/agent_driver.py`. **It is not a voice task**: no Vapi, ngrok, phone, TTS or browser. Do not implement the Architecture Spine's model-in-charge loop.
 
-The sprint's documents, in the order to read them:
+The sprint's documents live in `docs/sprint-seven-day/` (with the model research brief and its PDF). In the order to read them:
 
 | File | What it holds |
 | --- | --- |
-| `SPRINT-CONTRACT.md` | What the user approved: scope, constraints, cut order |
-| `CURRENT-STATE.md` | Verified repository and test state, with evidence |
-| `LATEST-HANDOFF.md` | The next task and how to start it |
-| `DECISION-LOG.md` | Every decision; `APPROVED` only if the user said so, otherwise `PROPOSED` / `OPEN` |
+| `docs/sprint-seven-day/SPRINT-CONTRACT.md` | What the user approved: scope, constraints, cut order |
+| `docs/sprint-seven-day/CURRENT-STATE.md` | Verified repository and test state, with evidence |
+| `docs/sprint-seven-day/LATEST-HANDOFF.md` | The next task and how to start it |
+| `docs/sprint-seven-day/DECISION-LOG.md` | Every decision; `APPROVED` only if the user said so, otherwise `PROPOSED` / `OPEN` |
 
 **Precedence:** where a rule below conflicts with the sprint documents, the sprint documents win for sprint work. The voice-only, latency and Vapi rules below govern the voice runtime surfaces (`builder_platform/runtime.py`, `vapi_*`, filler, sanitizer); they do not apply to the sprint's mock-mode work. Three rules bind the sprint without exception: engine files are edited only in `boilerplate/` and re-copied; no LLM vendor SDK or hardcoded provider; `python selftest.py` passes in mock mode for every agent.
 
@@ -55,7 +55,7 @@ Known Vapi trap (cost a day): an assistant `firstMessage` of a single space wedg
 
 ## Verification
 
-Current counts live in `CURRENT-STATE.md`; do not copy numbers here (they go stale).
+Current counts live in `docs/sprint-seven-day/CURRENT-STATE.md`; do not copy numbers here (they go stale).
 
 - Platform: `python -m pytest builder_platform/tests -q` (must stay green). Plugin: `python -m pytest claude_plugin/tests -q`.
 - Cross-business evaluation (mock mode): `python -m pytest builder_platform/tests/test_cross_business_eval.py -v`.
@@ -65,6 +65,6 @@ Current counts live in `CURRENT-STATE.md`; do not copy numbers here (they go sta
 
 ## Plan
 
-Sprint work: see `SPRINT-CONTRACT.md` and `LATEST-HANDOFF.md`. The shipped voice system's spec of record is `_bmad-output/specs/spec-alta-agent-studio/` (SPEC.md + brownfield.md; `.memlog.md` is its append-only decision log).
+Sprint work: see `docs/sprint-seven-day/SPRINT-CONTRACT.md` and `docs/sprint-seven-day/LATEST-HANDOFF.md`. The shipped voice system's spec of record is `_bmad-output/specs/spec-alta-agent-studio/` (SPEC.md + brownfield.md; `.memlog.md` is its append-only decision log).
 
 Outside the sprint, work is improvement-driven rather than milestone-driven. The standing rule for it: a named optimization is a hypothesis about this codebase, not a spec — grep for the mechanism it targets and confirm it exists on the hot path here before implementing, and never add a model call to the reply path in the name of latency. See `~/.claude/reasoning-log/2026-07-23_context-latency-asks-must-be-audited-against-engine-shape.md`.

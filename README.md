@@ -90,10 +90,10 @@ and `OPENAI_TOKEN_PARAM=max_completion_tokens`. They cost about US$0.03 in
 total against a US$0.50 ceiling (estimated from reported usage). They predate
 strict consent at the yes/no question; every scripted answer in them is a bare
 yes, so their expectations still apply, but they were not re-run. Current
-counts live in [CURRENT-STATE.md](CURRENT-STATE.md).
+counts live in [CURRENT-STATE.md](docs/sprint-seven-day/CURRENT-STATE.md).
 
 **Why `gpt-6-luna`.** The model research
-([brief](MODEL-RESEARCH-BRIEF.md), report `Agent Studio model research.pdf`)
+([brief](docs/sprint-seven-day/MODEL-RESEARCH-BRIEF.md), report `docs/sprint-seven-day/Agent Studio model research.pdf`)
 provisionally picked GPT-6.1 Sol for a future main loop and Claude Haiku 5.5 for
 a small tier, with `gpt-6-luna` as the small-tier runner-up. Of those,
 `gpt-6-luna` was the closest fit for this engine's interface
