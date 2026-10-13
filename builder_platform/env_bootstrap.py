@@ -85,5 +85,18 @@ def anthropic_key_status() -> tuple[bool, str]:
     return True, f"ANTHROPIC_API_KEY set (…{raw.strip()[-4:]})."
 
 
+# Opt-out for processes that must never read a developer's local credentials.
+# The test suite sets it (builder_platform/tests/conftest.py); it is non-empty,
+# so it survives inheritance by subprocesses on Windows, unlike a blanked key.
+SKIP_ENV_VAR = "ALTA_SKIP_DOTENV"
+
+
+def autoload() -> None:
+    """The import-time bootstrap: load_env(), unless SKIP_ENV_VAR is set."""
+    if os.environ.get(SKIP_ENV_VAR, "").strip():
+        return
+    load_env()
+
+
 # Importing this module runs the bootstrap.
-load_env()
+autoload()
