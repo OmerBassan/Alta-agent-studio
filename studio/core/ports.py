@@ -51,7 +51,8 @@ class OutboundMessage(_F):
 # --- agent runtime ---------------------------------------------------------------
 
 class ConversationEntry(_F):
-    role: Literal["requester", "agent"]
+    role: Literal["requester", "agent", "external"]
+    """``external`` is an event from a system (a passed deadline), never the person."""
     text: str
 
 

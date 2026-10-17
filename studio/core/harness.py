@@ -41,7 +41,7 @@ from studio.core.policy import (ArgumentError, canonical_arguments, coerce, deny
                                 payload_digest)
 from studio.core.ports import (Adapter, AdapterResult, AgentDecision, AgentRuntime, AgentView, ConversationEntry,
                                InboundMessage, ObligationView, OfferView, OutboundMessage, ProvenanceRef)
-from studio.core.store import Episode, EpisodeStore
+from studio.core.store import Episode, EpisodeStore, parse_instant
 from studio.core.types import (TURN_ENDING_KINDS, Argument, ClarifyRequest, Denial, EffectRequest, EscalateRequest,
                                ReadRequest, Result, RespondRequest, RetrieveRequest, SuspendRequest)
 from studio.core.vocabulary import REASON_CLASS
@@ -125,6 +125,21 @@ def _signature(request) -> str:
     return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
 
 
+DEADLINE_EXPIRED = "deadline_expired"
+
+
+def _describe_event(payload: dict) -> str:
+    """How an external-system event reads in the Agent's conversation."""
+    if payload.get("kind") == DEADLINE_EXPIRED:
+        return (f"The deadline {payload.get('deadline')} passed while waiting for {payload.get('awaiting')}; "
+                "nothing has arrived.")
+    return f"An external system reported: {payload}"
+
+
+def _due(deadline: Optional[str], now: str) -> bool:
+    return deadline is not None and parse_instant(deadline) <= parse_instant(now)
+
+
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = frozenset("a an and are at be can do for how i in is it me my of on or the to we what when you your".split())
 
@@ -153,11 +168,7 @@ class Core:
         compiled = self.registry.live(inbound.tenant)  # raises UnknownTenant
         # One lock per conversation serialises every inbound message that could
         # touch the same episode, including the one that creates it (AD-13).
-        key = (inbound.tenant, inbound.conversation_key)
-        lock = self._locks.get(key)
-        if lock is None:
-            lock = self._locks[key] = asyncio.Lock()
-        async with lock:
+        async with self._lock(inbound.tenant, inbound.conversation_key):
             known = self.store.seen_message(inbound.tenant, inbound.message_id)
             if known:
                 return self._duplicate(inbound.tenant, known)
@@ -171,6 +182,13 @@ class Core:
             except sqlite3.IntegrityError:
                 return self._duplicate(inbound.tenant, episode.episode_id)
             return await self._turn(episode, inbound, seq)
+
+    def _lock(self, tenant: str, conversation_key: str) -> asyncio.Lock:
+        key = (tenant, conversation_key)
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = asyncio.Lock()
+        return lock
 
     def _duplicate(self, tenant: str, episode_id: str) -> TurnOutcome:
         episode = self.store.get_episode(tenant, episode_id)
@@ -695,10 +713,24 @@ class Core:
                  seq: int) -> tuple[Result, Optional[TurnOutcome]]:
         if not request.awaiting.strip():
             return _refused("suspend", "awaiting_unnamed", "a pending episode must name what it is waiting for"), None
+        deadline = None
+        if request.deadline is not None:
+            # Refused now, so a malformed deadline never sits as one that
+            # silently never fires. Stored as a UTC instant (a naive one is UTC).
+            try:
+                instant = parse_instant(request.deadline)
+            except ValueError:
+                return _refused("suspend", "invalid_deadline",
+                                f"{request.deadline!r} is not an ISO 8601 date-time (YYYY-MM-DDTHH:MM, with an "
+                                "optional offset; without one it is read as UTC)"), None
+            if instant <= parse_instant(self.store.now()):
+                return _refused("suspend", "invalid_deadline",
+                                f"the deadline has already passed ({request.deadline!r}, now {self.store.now()})"), None
+            deadline = instant.isoformat()
         self._expire_confirmations(episode)
         outcome = self._reply(episode, compiled, request.message)
         self.store.set_lifecycle(episode.tenant, episode.episode_id, "pending", awaiting=request.awaiting,
-                                 deadline=request.deadline)
+                                 deadline=deadline)
         outcome.lifecycle = "pending"
         return Result(kind="suspend", status="ok"), outcome
 
@@ -759,6 +791,8 @@ class Core:
             elif step["kind"] == "egress":
                 egressed = True
                 conversation.append(ConversationEntry(role="agent", text=step["payload"]["text"]))
+            elif step["kind"] == "external_event":
+                conversation.append(ConversationEntry(role="external", text=_describe_event(step["payload"])))
         facts = self.store.facts(tenant, eid)
         goals = self.store.goals(tenant, eid)
         waivers = self.store.waivers(tenant, eid)
@@ -837,3 +871,111 @@ class Core:
         seq = self.store.append_step(tenant, episode_id, "core", "external_result", payload)
         self.store.add_evidence(tenant, episode_id, "external_result", payload, seq)
         return "recorded"
+
+    # ==============================================================================
+    # The expiry source — a passed deadline is an external event (FR60, FR61, FR63)
+    # ==============================================================================
+
+    @staticmethod
+    def _last_wait(steps: list[dict]) -> Optional[tuple[int, Optional[str], Optional[str]]]:
+        """``(result seq, awaiting, deadline)`` of the episode's latest
+        successful suspend, read from the journal (closing an episode clears
+        the episode row's own awaiting and deadline). None if it never waited."""
+        decision = None
+        wait = None
+        for s in steps:
+            if s["kind"] == "decision":
+                decision = (s["payload"] or {}).get("request") or {}
+            elif (s["kind"] == "result" and s["payload"].get("kind") == "suspend"
+                  and s["payload"].get("status") == "ok" and decision is not None):
+                deadline = decision.get("deadline")
+                if deadline is not None:
+                    try:
+                        deadline = parse_instant(deadline).isoformat()
+                    except ValueError:  # a wait recorded before deadlines were validated: kept as written
+                        logger.warning("a recorded wait has an unreadable deadline %r", deadline)
+                wait = (s["seq"], decision.get("awaiting"), deadline)
+        return wait
+
+    def _already_expired(self, tenant: str, episode_id: str, steps: list[dict]) -> bool:
+        """Whether the deadline of the episode's latest wait has already been
+        delivered — as an event since the wait began, or as a late result."""
+        wait = self._last_wait(steps)
+        waited = wait[0] if wait else 0
+        if any(s["kind"] == "external_event" and s["payload"].get("kind") == DEADLINE_EXPIRED and s["seq"] > waited
+               for s in steps):
+            return True
+        return any(r["payload"].get("kind") == DEADLINE_EXPIRED for r in self.store.late_results(tenant, episode_id))
+
+    async def record_expiry(self, tenant: str, episode_id: str) -> TurnOutcome | str:
+        """Deliver the expiry of a pending episode's deadline, read against the
+        recorded clock (AD-12). It is recorded as an external-system event and
+        the episode resumes: the Agent receives the expiry as its input and its
+        request is the next step. The Core itself never replies, escalates or
+        closes because of an expiry.
+
+        Returns the turn's outcome when the expiry was delivered, otherwise:
+        ``"duplicate"`` (this expiry was already delivered; nothing recorded),
+        ``"late"`` (the episode closed after waiting with a deadline; recorded
+        as a late result that changes nothing), ``"not_due"`` (no passed
+        deadline is outstanding; nothing recorded), ``"unreadable_deadline"``
+        (a stored deadline that does not parse; logged, nothing recorded) or
+        ``"agent_suspended"`` (an operator has stopped the Agent; nothing
+        recorded, so the episode stays pending and due).
+        """
+        episode = self.store.get_episode(tenant, episode_id)
+        if episode is None:
+            raise LookupError(f"no episode {episode_id} for {tenant}")
+        async with self._lock(tenant, episode.conversation_key):
+            episode = self.store.get_episode(tenant, episode_id)  # re-read under the lock
+            steps = self.store.steps(tenant, episode_id)
+            if self._already_expired(tenant, episode_id, steps):
+                return "duplicate"
+            if episode.lifecycle == "closed":
+                wait = self._last_wait(steps)
+                if wait is None or wait[2] is None:
+                    return "not_due"
+                self.store.add_late_result(tenant, episode_id,
+                                           {"kind": DEADLINE_EXPIRED, "awaiting": wait[1], "deadline": wait[2]})
+                return "late"
+            if episode.lifecycle != "pending":
+                return "not_due"
+            event = {"kind": DEADLINE_EXPIRED, "awaiting": episode.awaiting, "deadline": episode.deadline}
+            try:
+                due = _due(episode.deadline, self.store.now())
+            except ValueError:
+                logger.warning("episode %s/%s has an unreadable deadline %r", tenant, episode_id, episode.deadline)
+                return "unreadable_deadline"
+            if not due:
+                return "not_due"
+            entry = self.registry.entry(tenant, episode.spec_version)  # raises UnknownTenant
+            agent_suspended, effects_suspended = self.store.flags(tenant)
+            if agent_suspended:
+                return "agent_suspended"
+            with self.store.transaction():
+                seq = self.store.append_step(tenant, episode_id, "core", "external_event", event)
+                self.store.add_evidence(tenant, episode_id, "external_event", event, seq)
+                self.store.append_step(tenant, episode_id, "core", "resumed", {"awaiting": episode.awaiting})
+                self.store.set_lifecycle(tenant, episode_id, "active")
+            return await self._agent_loop(self.store.get_episode(tenant, episode_id), entry, (), effects_suspended)
+
+    async def expire_due(self) -> list[tuple[str, str, TurnOutcome | str]]:
+        """Deliver every passed deadline, across every tenant, once. A method a
+        caller invokes — a scenario or a CLI decides when — never a timer.
+        Returns ``(tenant, episode_id, outcome)`` per due episode; an episode
+        this process holds no specification for is reported as
+        ``"unknown_tenant"`` and one whose delivery raised as ``"failed"``,
+        never skipped silently."""
+        delivered = []
+        for episode in self.store.due_pending(self.store.now()):
+            try:
+                outcome = await self.record_expiry(episode.tenant, episode.episode_id)
+            except UnknownTenant:
+                logger.warning("expiry for %s/%s: no specification %s is registered", episode.tenant,
+                               episode.episode_id, episode.spec_version)
+                outcome = "unknown_tenant"
+            except Exception:  # one episode's failure must not abort the sweep; it is reported, not hidden
+                logger.exception("expiry for %s/%s failed", episode.tenant, episode.episode_id)
+                outcome = "failed"
+            delivered.append((episode.tenant, episode.episode_id, outcome))
+        return delivered

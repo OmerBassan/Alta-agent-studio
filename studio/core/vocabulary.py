@@ -52,6 +52,7 @@ Reason = Literal[
     "escalation_reason_undeclared",
     "nothing_to_retrieve",
     "awaiting_unnamed",
+    "invalid_deadline",
     # platform
     "adapter_failed",
     "adapter_timeout",
@@ -87,6 +88,7 @@ REASON_CLASS: dict[str, Classification] = {
     "escalation_reason_undeclared": "spec_defect",
     "nothing_to_retrieve": "business_refusal",
     "awaiting_unnamed": "business_refusal",
+    "invalid_deadline": "business_refusal",
     "adapter_failed": "platform_error",
     "adapter_timeout": "platform_error",
     "adapter_missing": "platform_error",

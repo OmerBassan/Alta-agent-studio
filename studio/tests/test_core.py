@@ -363,6 +363,210 @@ def test_pending_must_name_what_it_waits_for(world):
     assert ("business_refusal", "awaiting_unnamed") in world.denials()
 
 
+# --- FR60, FR61, FR63: a passed deadline resumes the episode as an external event ---------
+
+DEADLINE = "2026-10-14T09:00:00"  # naive: read as UTC
+
+
+@pytest.fixture
+def clocked(runner):
+    clock = {"now": datetime(2026, 10, 13, 9, 0, tzinfo=timezone.utc)}
+    return build_world(runner, [DENTAL], store=EpisodeStore(clock=lambda: clock["now"])), clock
+
+
+def wait_for_card(w, deadline=DEADLINE):
+    return w.send("I'll send my insurance card later", script=[
+        SuspendRequest(awaiting="insurance card", message="Thanks, I'll wait for it.", deadline=deadline)])
+
+
+def expire(w):
+    return w.runner.run(w.core.expire_due())
+
+
+def kinds_after_resumed(w, episode_id):
+    steps = w.store.steps(TENANT, episode_id)
+    start = max(i for i, s in enumerate(steps) if s["kind"] == "resumed")
+    return [(s["actor"], s["kind"]) for s in steps[start + 1:]]
+
+
+def test_a_passed_deadline_resumes_the_episode(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] += timedelta(days=2)
+    w.agent.extend([RespondRequest(message="We still need your insurance card; could you send it?")])
+    [(tenant, episode_id, outcome)] = expire(w)
+    assert (tenant, episode_id) == (TENANT, out.episode_id)
+    assert outcome.lifecycle == "active" and outcome.messages
+    event = {"kind": "deadline_expired", "awaiting": "insurance card", "deadline": "2026-10-14T09:00:00+00:00"}
+    steps = w.store.steps(TENANT, out.episode_id)
+    assert [s["payload"] for s in steps if s["kind"] == "external_event"] == [event]
+    assert "resumed" in [s["kind"] for s in steps]
+    assert [e["payload"] for e in w.store.evidence(TENANT, out.episode_id) if e["kind"] == "external_event"] == [event]
+    seen = w.agent.views[-1].conversation[-1]
+    assert seen.role == "external" and "insurance card" in seen.text
+    assert w.store.get_episode(TENANT, out.episode_id).lifecycle == "active"
+
+
+def test_on_an_expiry_the_core_initiates_nothing(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] += timedelta(days=2)
+    w.agent.extend([RespondRequest(message="We still need your insurance card.")])
+    expire(w)
+    # The only steps after the resumption are the Agent's decision and what it produced.
+    assert kinds_after_resumed(w, out.episode_id) == [("agent", "decision"), ("core", "egress"), ("core", "result")]
+    assert not any(o["kind"] in ("escalation", "halt_notice") for o in w.store.outbox(TENANT))
+    assert w.store.resolutions(TENANT, out.episode_id) == []
+
+
+def test_a_deadline_not_yet_passed_records_nothing(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] = datetime(2026, 10, 14, 8, 59, tzinfo=timezone.utc)
+    before = w.store.steps(TENANT, out.episode_id)
+    assert expire(w) == []
+    assert w.runner.run(w.core.record_expiry(TENANT, out.episode_id)) == "not_due"
+    assert w.store.steps(TENANT, out.episode_id) == before
+    assert w.store.get_episode(TENANT, out.episode_id).lifecycle == "pending"
+
+
+def test_a_deadline_is_compared_as_an_instant_not_as_text(clocked):
+    w, clock = clocked
+    out = wait_for_card(w, deadline="2026-10-14T12:00:00+05:00")  # 07:00 UTC
+    clock["now"] = datetime(2026, 10, 14, 8, 0, tzinfo=timezone.utc)
+    w.agent.extend([RespondRequest(message="Still waiting on the card.")])
+    assert [r[1] for r in expire(w)] == [out.episode_id]
+
+
+def test_a_pending_episode_without_a_deadline_never_expires(clocked):
+    w, clock = clocked
+    out = wait_for_card(w, deadline=None)
+    clock["now"] += timedelta(days=365)
+    assert expire(w) == []
+    assert w.runner.run(w.core.record_expiry(TENANT, out.episode_id)) == "not_due"
+    assert w.store.get_episode(TENANT, out.episode_id).lifecycle == "pending"
+
+
+@pytest.mark.parametrize("then", [
+    RespondRequest(message="We still need your insurance card."),
+    EscalateRequest(reason_class="rules_silent", summary="card never came", message="I've passed this on."),
+])
+def test_the_same_expiry_delivered_twice_is_processed_once(clocked, then):
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] += timedelta(days=2)
+    w.agent.extend([then])
+    assert len(expire(w)) == 1
+    assert expire(w) == []
+    assert w.runner.run(w.core.record_expiry(TENANT, out.episode_id)) == "duplicate"
+    steps = w.store.steps(TENANT, out.episode_id)
+    assert [s["kind"] for s in steps].count("external_event") == 1
+    assert w.store.late_results(TENANT, out.episode_id) == []
+
+
+def test_an_expiry_for_a_closed_episode_is_late_and_changes_nothing(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    w.send("Actually, please just pass me to someone", script=[
+        EscalateRequest(reason_class="rules_silent", summary="wants a person", message="I've passed this on.")])
+    clock["now"] += timedelta(days=2)
+    before = w.store.resolutions(TENANT, out.episode_id)
+    assert w.runner.run(w.core.record_expiry(TENANT, out.episode_id)) == "late"
+    assert w.store.resolutions(TENANT, out.episode_id) == before
+    episode = w.store.get_episode(TENANT, out.episode_id)
+    assert episode.lifecycle == "closed" and episode.close_reason == "escalated"
+    assert [r["payload"] for r in w.store.late_results(TENANT, out.episode_id)] == [
+        {"kind": "deadline_expired", "awaiting": "insurance card", "deadline": "2026-10-14T09:00:00+00:00"}]
+    assert w.runner.run(w.core.record_expiry(TENANT, out.episode_id)) == "duplicate"
+    assert len(w.store.late_results(TENANT, out.episode_id)) == 1
+
+
+def test_a_closed_episode_that_never_had_a_deadline_does_not_expire(world):
+    first, second = book_happily(world)
+    assert world.runner.run(world.core.record_expiry(TENANT, second.episode_id)) == "not_due"
+    assert world.store.late_results(TENANT, second.episode_id) == []
+
+
+@pytest.mark.parametrize("deadline", ["next week", "2026-10-20", "0001-01-01T00:00:00+01:00"])
+def test_a_deadline_that_cannot_be_read_is_refused_at_suspend(world, deadline):
+    out = world.send("x", script=[SuspendRequest(awaiting="photo", message="wait", deadline=deadline),
+                                  RespondRequest(message="ok")])
+    assert ("business_refusal", "invalid_deadline") in world.denials()
+    assert world.store.get_episode(TENANT, out.episode_id).lifecycle == "active"
+
+
+def test_a_deadline_already_passed_is_refused_at_suspend(clocked):
+    w, clock = clocked
+    out = w.send("I'll send my card", script=[
+        SuspendRequest(awaiting="insurance card", message="I'll wait.", deadline="2026-10-13T08:00:00"),
+        RespondRequest(message="ok")])
+    assert ("business_refusal", "invalid_deadline") in w.denials()
+    assert w.store.get_episode(TENANT, out.episode_id).lifecycle == "active"
+
+
+def test_an_expiry_while_the_agent_is_stopped_records_nothing(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    w.core.set_suspension(TENANT, agent=True, effects=True, by="owner")
+    clock["now"] += timedelta(days=2)
+    called = len(w.agent.views)
+    assert expire(w) == [(TENANT, out.episode_id, "agent_suspended")]
+    kinds = [s["kind"] for s in w.store.steps(TENANT, out.episode_id)]
+    assert "external_event" not in kinds and "resumed" not in kinds
+    assert w.store.get_episode(TENANT, out.episode_id).lifecycle == "pending"
+    assert len(w.agent.views) == called
+
+
+def test_a_second_wait_after_an_expiry_expires_again(clocked):
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] += timedelta(days=2)
+    w.agent.extend([SuspendRequest(awaiting="insurance card", message="I'll wait a little longer.",
+                                   deadline="2026-10-17T09:00:00+00:00")])
+    assert expire(w)[0][2].lifecycle == "pending"
+    clock["now"] += timedelta(days=3)
+    w.agent.extend([RespondRequest(message="We still need your card.")])
+    [(_, _, outcome)] = expire(w)
+    assert outcome != "duplicate" and outcome.lifecycle == "active"
+    events = [s["payload"]["deadline"] for s in w.store.steps(TENANT, out.episode_id) if s["kind"] == "external_event"]
+    assert events == ["2026-10-14T09:00:00+00:00", "2026-10-17T09:00:00+00:00"]
+
+
+def test_an_unreadable_legacy_deadline_does_not_stop_the_sweep(clocked):
+    w, clock = clocked
+    valid = wait_for_card(w)
+    legacy = w.send("I'll send a photo", conversation="c2", script=[
+        SuspendRequest(awaiting="photo", message="ok", deadline="2026-10-14T09:00:00")])
+    w.store.set_lifecycle(TENANT, legacy.episode_id, "pending", awaiting="photo", deadline="next week")
+    clock["now"] += timedelta(days=2)
+    w.agent.extend([RespondRequest(message="We still need your card.")])
+    assert [r[1] for r in expire(w)] == [valid.episode_id]
+    assert w.runner.run(w.core.record_expiry(TENANT, legacy.episode_id)) == "unreadable_deadline"
+    assert w.store.get_episode(TENANT, legacy.episode_id).lifecycle == "pending"
+
+
+def test_the_deterministic_agent_hands_over_on_an_expiry(clocked):
+    from studio.agent.deterministic import DeterministicAgent
+    from studio.agent.llm_agent import render
+    w, clock = clocked
+    out = wait_for_card(w)
+    clock["now"] += timedelta(days=2)
+    seen = []
+
+    class Watching(DeterministicAgent):
+        async def decide(self, view):
+            seen.append(view)
+            return await super().decide(view)
+
+    w.core.agent = Watching()
+    [(_, _, outcome)] = expire(w)
+    assert outcome.lifecycle == "closed"
+    assert w.store.get_episode(TENANT, out.episode_id).close_reason == "escalated"
+    assert any(o["kind"] == "escalation" for o in w.store.outbox(TENANT))
+    assert kinds_after_resumed(w, out.episode_id)[0] == ("agent", "decision")
+    assert "EXTERNAL: The deadline" in render(seen[0])[1]["content"]
+
+
 # --- FR87: a re-sent message is processed once ---------------------------------------------
 
 def test_a_resent_message_is_processed_once(world):

@@ -21,6 +21,7 @@ the foreign reference in order to refuse it.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import uuid
@@ -196,12 +197,30 @@ CREATE TABLE IF NOT EXISTS late_results (
 );
 """
 
+logger = logging.getLogger("studio.store")
+
 EPISODE_TABLES = ("episodes", "inbound", "steps", "facts", "goals", "provenance", "offers", "effects", "evidence",
                   "denials", "resolutions", "waivers", "outbox", "model_calls", "late_results")
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def parse_instant(text: str) -> datetime:
+    """An ISO 8601 date-time, as an aware UTC datetime. A naive value is read
+    as UTC. A date without a time of day is refused: whether "2026-10-20" means
+    its start or its end is a guess, and a deadline is never guessed. Raises
+    ``ValueError`` on anything else."""
+    if not isinstance(text, str) or len(text.strip()) <= 10:
+        raise ValueError(f"{text!r} is not an ISO 8601 date-time")
+    value = datetime.fromisoformat(text.strip())
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    try:
+        return value.astimezone(timezone.utc)
+    except OverflowError as exc:  # e.g. 0001-01-01T00:00:00+01:00 has no UTC equivalent
+        raise ValueError(f"{text!r} is outside the representable range") from exc
 
 
 def _dump(value: Any) -> str:
@@ -305,6 +324,25 @@ class EpisodeStore:
     def episodes(self, tenant: str) -> list[Episode]:
         return [self._episode(r) for r in self._all(
             "SELECT * FROM episodes WHERE tenant = ? ORDER BY created_at", (tenant,))]
+
+    def due_pending(self, now: str) -> list[Episode]:
+        """Pending episodes, across every tenant, whose deadline is at or before
+        ``now``. Deadlines are compared as parsed instants, never as strings.
+        The Core validates a deadline before it is stored; a row that still
+        cannot be parsed is logged and skipped, never treated as due."""
+        cutoff = parse_instant(now)
+        due = []
+        for row in self._all("SELECT * FROM episodes WHERE lifecycle = 'pending' AND deadline IS NOT NULL "
+                             "ORDER BY created_at"):
+            try:
+                deadline = parse_instant(row["deadline"])
+            except ValueError:
+                logger.warning("episode %s/%s has an unreadable deadline %r", row["tenant"], row["episode_id"],
+                               row["deadline"])
+                continue
+            if deadline <= cutoff:
+                due.append(self._episode(row))
+        return due
 
     def create_episode(self, tenant: str, conversation_key: str, spec_version: str, compiler_version: str) -> Episode:
         episode_id = "ep_" + uuid.uuid4().hex[:16]

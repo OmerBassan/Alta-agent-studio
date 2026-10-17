@@ -44,10 +44,12 @@ Reply with exactly ONE JSON object: the next request. Kinds:
 - {"kind":"escalate","reason_class":"<declared reason or rules_silent>","summary":"...","message":"..."} hand to a person.
   Use rules_silent when the business's rules do not cover the situation — never invent a rule.
 - {"kind":"suspend","awaiting":"<named input>","message":"...","deadline":null} wait for something specific.
+  deadline is null or a future ISO date-time with offset, e.g. "2026-10-20T17:00:00+00:00" (never a bare date).
 Any request may also carry "goal":"<declared goal id>" and "facts":[{"name":..,"value":..}] for facts the person
 has told you — record each one the first time you see it (resolve "Monday" against today's date). To act, record
 the facts, then clarify with "confirm" set to the capability and its arguments; only that turns a later plain yes
-into permission. Dates are YYYY-MM-DD, times HH:MM. Write messages as a short email from the business, in its voice."""
+into permission. Dates are YYYY-MM-DD, times HH:MM. Write messages as a short email from the business, in its voice.
+An EXTERNAL entry in the conversation is an event from a system (such as a passed deadline), not the person."""
 
 
 def _section(title: str, lines: list[str]) -> str:

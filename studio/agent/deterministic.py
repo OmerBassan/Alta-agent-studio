@@ -152,6 +152,13 @@ class DeterministicAgent:
         if view.constraints:
             return self._escalate(view, " ".join(view.constraints), "A member of the team will pick this up.")
 
+        # An event from a system (a passed deadline), not the person: this agent
+        # cannot judge what it means for the request, so it hands over.
+        if last is None and view.conversation and view.conversation[-1].role == "external":
+            return self._escalate(view, view.conversation[-1].text,
+                                  "We haven't received what we were waiting for, so I've passed this to the team, "
+                                  "who will be in touch.")
+
         if last is not None:
             kind, result = last
             if kind == "effect" and result.status == "ok" and result.verified:

@@ -48,7 +48,7 @@ development_status:
   1-7-goals-obligations-grounded-claims-and-verified-resolutions: done
   1-8-provider-agnostic-agent-boundary-scenario-channel-and-two-bu: done
   1-9-complete-the-proof-gate-with-a-live-comparison: done  # sprint 1, critical path; D1 granted 2026-10-17; run 1 FAIL, fixed and re-run with the user's approval; final PASS (PROOF-GATE.md)
-  1-10-a-deadline-expiry-resumes-a-pending-episode-as-an-external-e: backlog  # sprint 1; unblocked: 1.9 verdict PASS 2026-10-17
+  1-10-a-deadline-expiry-resumes-a-pending-episode-as-an-external-e: done  # sprint 1; 2026-10-17
   1-11-an-in-flight-episode-survives-a-crash-mid-turn: backlog  # sprint 1; unblocked: 1.9 verdict PASS 2026-10-17
   1-12-credential-free-ci-on-a-clean-checkout: done  # sprint 1; D3 granted 2026-10-17; CI green on Linux and Windows
   epic-1-retrospective: optional

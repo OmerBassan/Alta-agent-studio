@@ -40,6 +40,8 @@ CHECKS = {
                                  "        if False:\n            return _refused"),
     "goals come from the declared set": (
         "        if request.goal is not None and request.goal not in policy.goals:", "        if False:"),
+    "a passed deadline resumes the episode": (
+        "        for episode in self.store.due_pending(self.store.now()):", "        for episode in ():"),
 }
 
 
