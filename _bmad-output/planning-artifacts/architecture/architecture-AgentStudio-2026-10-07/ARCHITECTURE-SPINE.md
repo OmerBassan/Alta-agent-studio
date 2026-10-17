@@ -8,6 +8,7 @@ scope: 'The reusable platform that turns a business specification plus business 
 status: final
 created: '2026-10-08'
 updated: '2026-10-08'
+amended: '2026-10-16'
 binds: []
 sources:
   - '../../briefs/brief-AgentStudio-2026-10-07/brief.md'
@@ -17,6 +18,8 @@ companions: []
 ---
 
 # Architecture Spine — Agent Studio
+
+> **Amended after finalization (2026-10-16).** AD-26 to AD-29 were added to answer UX contract gaps 4, 5, 12 and 14 (EXPERIENCE.md, Amendments and Upstream Gaps). No earlier AD was rewritten; AD-18 carries one inline cross-reference. Their wording was approved by the user; the decisions remain PROPOSED under program gate D14. Decision trail in `.memlog.md`.
 
 ## Design Paradigm
 
@@ -163,7 +166,7 @@ graph TD
 
 - **Binds:** Core, Agent, every Core mechanism
 - **Prevents:** a mechanism acquiring next-step authority through an undefined rejection path
-- **Rule:** Every Core mechanism declares a **closed outcome vocabulary**. Every outcome returns control to the Agent as a typed result, except a declared **safety halt**, which terminates the episode with a recorded outcome. No Core mechanism routes control anywhere else, chooses what follows a refusal, or selects a next step.
+- **Rule:** Every Core mechanism declares a **closed outcome vocabulary**. Every outcome returns control to the Agent as a typed result, except a declared **safety halt**, which terminates the episode with a recorded outcome. No Core mechanism routes control anywhere else, chooses what follows a refusal, or selects a next step. *[2026-10-16: an operator suspension is a trigger of the declared safety halt — AD-26]*
 
 ### AD-19 — Goals and obligations are Core-held typed state
 
@@ -206,6 +209,30 @@ graph TD
 - **Binds:** Core, Specification, operations
 - **Prevents:** an evidence store whose shape makes per-business retention and deletion impossible to retrofit, given that episodes may hold sensitive and health-adjacent material
 - **Rule:** Episode evidence must be storable such that per-business data lifecycle requirements *can* be honoured — addressable and removable by tenant, by episode and by age, without reshaping the evidence schema. The concrete retention policy, the deletion executor and their implementation are **deferred** to the infrastructure and data-handling epic; this AD fixes only that the architecture must not foreclose them.
+
+### AD-26 — Each deployed Agent has one operator-controlled suspension state `[ADDED 2026-10-16 · PROPOSED]`
+
+- **Binds:** Core, Channel adapters, operator surface
+- **Prevents:** a suspend that fails silently or lapses on restart; a suspended Agent leaving a person mid-conversation in silence
+- **Rule:** Each deployed Agent has exactly one suspension state — not suspended, effects suspended, or suspended — which is durable, scoped to that Agent, and changed only by a recorded, attributable operator action, resume included. The Core enforces it on every request. The Core reads the state as a recorded step (AD-12). Under *effects suspended*, every `effect` is refused as a typed result classified `business_refusal` (AD-5), and replies continue. Under *suspended*, each episode in flight — active or pending — ends in a declared safety halt (AD-18) whose recorded reason is the operator's suspension, so the business's terminal notice is emitted; for an episode mid-turn, a request already authorized completes and its evidence stands, and the halt applies at its next request to the Core. A terminal notice that cannot be delivered is recorded as undelivered, and the halt stands. An inbound message or external system event that would start an episode while the Agent is suspended is recorded as an episode that closes without an Agent turn and without a reply, with the recorded outcome *arrived while suspended*; it never reaches the Agent, so it is not a Core exit (AD-18), it carries no resolution (AD-20), and it is never answered after resume. Such episodes stay in the operational record and are outside the denominator of Agent-quality evaluation; every report of those measures states the exclusion and the number excluded. Mailbox connection status is reported by the channel adapter and is not part of this state.
+
+### AD-27 — Specification versions have four states, derived from records `[ADDED 2026-10-16 · PROPOSED]`
+
+- **Binds:** Builder, Core, Specification, operator surface
+- **Prevents:** approving a version that failed validation; two live versions; a state field that drifts from what the records show
+- **Rule:** A specification version is exactly one of draft, validated, approved or live, derived from its records and never stored as a free field. Only a version whose validation suite passed can be approved; only an approved version can be promoted. Each Agent has at most one live version. A version replaced as live stays approved, keeps its promotion history, and remains eligible for rollback (AD-23).
+
+### AD-28 — A specification reference names its item `[ADDED 2026-10-16 · PROPOSED]`
+
+- **Binds:** Core, Specification, operator surface
+- **Prevents:** an interaction view that can quote source material but not the specification rule a reply relied on
+- **Rule:** Within the specification projection, a provenance reference's locator (AD-7) names the expression area and the item.
+
+### AD-29 — Received time and display label are stored uninterpreted `[ADDED 2026-10-16 · PROPOSED]`
+
+- **Binds:** Core, Channel adapters
+- **Prevents:** channel semantics leaking into episode state through an interaction label
+- **Rule:** A normalised inbound turn may carry the received time (UTC) and a channel-neutral display label supplied by the channel adapter. The Core stores both uninterpreted and never reasons on them; they carry no channel semantics (AD-16) and are removable with the evidence (AD-25).
 
 ```mermaid
 graph RL

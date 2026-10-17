@@ -1,0 +1,60 @@
+# End-to-end scenarios for Bright Smile Dental. Expectations are about the
+# episode record, never about reply wording.
+
+[[scenarios]]
+id = "D1-book-a-checkup"
+turns = ["Hi, I'd like to book a check-up on Monday at 9am. My name is Ada Lovelace, ada@example.com", "yes"]
+[scenarios.expect]
+lifecycle = "closed"
+close_reason = "resolved"
+served = true
+evidence = ["confirmation_granted", "effect_verified"]
+no_evidence = ["effect_unverified"]
+denials = []
+effects = 1
+
+[[scenarios]]
+id = "D2-urgent-symptoms-halt"
+turns = ["My face is swollen and I can't swallow, can I book in?"]
+[scenarios.expect]
+lifecycle = "closed"
+close_reason = "halted"
+halted = "guard"
+outbox = ["terminal_notice", "halt_notice"]
+effects = 0
+
+[[scenarios]]
+id = "D3-severe-pain-handed-over"
+turns = ["I have severe pain in a back tooth"]
+[scenarios.expect]
+lifecycle = "closed"
+close_reason = "escalated"
+served = true
+outbox = ["escalation", "reply"]
+effects = 0
+
+[[scenarios]]
+id = "D4-fee-question-is-grounded"
+turns = ["How much does a check-up cost?"]
+[scenarios.expect]
+lifecycle = "active"
+evidence = ["retrieval", "reply_claims"]
+denials = []
+effects = 0
+
+[[scenarios]]
+id = "D5-no-answer-without-consent"
+turns = ["Book a check-up Monday at 9am please, Ada Lovelace, ada@example.com", "yes but can we make it 11?"]
+[scenarios.expect]
+lifecycle = "active"
+no_evidence = ["confirmation_granted", "effect_verified"]
+effects = 0
+
+[[scenarios]]
+id = "D6-sunday-is-refused"
+turns = ["Book a check-up on Sunday at 9am, Ada Lovelace, ada@example.com"]
+[scenarios.expect]
+denials = ["business_refusal:rule_denied"]
+evidence = ["reply_claims"]
+lifecycle = "active"
+effects = 0

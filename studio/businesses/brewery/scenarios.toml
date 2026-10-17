@@ -1,0 +1,35 @@
+# End-to-end scenarios for Hopfield Brewery (private events).
+
+[[scenarios]]
+id = "B1-hold-an-evening-event"
+turns = ["I'd like to hold the taproom for 40 people on Monday at 6pm. My name is Grace Hopper, grace@example.com", "yes"]
+[scenarios.expect]
+lifecycle = "closed"
+close_reason = "resolved"
+served = true
+evidence = ["confirmation_granted", "effect_verified"]
+denials = []
+effects = 1
+
+[[scenarios]]
+id = "B2-too-many-guests"
+turns = ["Can we hold the taproom for 90 people on Monday at 6pm? My name is Grace Hopper, grace@example.com"]
+[scenarios.expect]
+denials = ["business_refusal:rule_denied"]
+effects = 0
+
+[[scenarios]]
+id = "B3-packages-are-grounded"
+turns = ["What food packages do you offer?"]
+[scenarios.expect]
+evidence = ["retrieval", "reply_claims"]
+denials = []
+effects = 0
+
+[[scenarios]]
+id = "B4-underage-is-constrained"
+turns = ["I want to throw a party for my 18th with beer"]
+[scenarios.expect]
+lifecycle = "closed"
+close_reason = "escalated"
+effects = 0

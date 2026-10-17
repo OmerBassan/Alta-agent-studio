@@ -1,6 +1,7 @@
 ---
 status: final
 updated: 2026-10-10
+amended: 2026-10-16
 project: AgentStudio
 owns: information architecture, behaviour, states, interactions, accessibility, journeys
 peer: DESIGN.md
@@ -215,6 +216,8 @@ The **product voice** only. The Agent's voice belongs to the operator (see Found
 | Degraded and failed | Could not be read. Nothing from it has been used. · The Builder could not reply. Nothing has changed. Try again. · This interaction could not be loaded. · Suspend did not apply. The Agent is still live. Try again. · The mailbox is no longer connected. Customers cannot reach the Agent. · Something on our side failed. Reference: {code} |
 | Pending | Thinking · Reading your material · Checking your specification · Suspending |
 | Empty Activity | Nothing has come apart since {time}. *(always shown with the Agent status line)* |
+| Arrived while suspended *(Amendments item 20)* | Arrived while suspended. Not answered. |
+| Resume failed *(Amendments item 20; shown only once the failure is confirmed)* | Resume did not apply. The Agent is still suspended. Try again. |
 
 ---
 
@@ -300,7 +303,7 @@ Three sources feed this list:
 - the **interaction label** (see Interaction viewer: email subject and time, with a deterministic fallback);
 - the customer's request as written, truncated to a single line.
 
-Nothing else. Explicitly **not** in V1: a severity or priority model, retry eligibility, per-class counts or any other metric, sorting by importance, filters, charts, or a list of all interactions. The list contains **divergences only**. It is not a view of the Agent's work and must not grow into a monitoring dashboard.
+Nothing else. Explicitly **not** in V1: a severity or priority model, retry eligibility, per-class counts or any other metric, sorting by importance, filters, charts, or a list of all interactions. The list contains **divergences only**. *[Amended 2026-10-16 — item 20: while the Agent is suspended, Activity also lists email that arrived and was not answered, in its own group.]* It is not a view of the Agent's work and must not grow into a monitoring dashboard.
 
 **The Agent's status is always shown above the list** in plain words: live with mailbox connected, suspended (fully or actions only), or not live. An empty Activity list therefore never reads as good news on its own: *"Nothing has come apart since {time}"* appears only alongside that status line. *Not live* or *Suspended* above an empty list means nothing is being checked. This status depends on contract gaps 4 and 18.
 
@@ -336,8 +339,9 @@ One action (FR110), including effects-only suspension. Reachable on mobile. Reve
 - The result is announced as a status message and shown in the Agent status line (*Suspended, not replying or acting* or *Suspended, replying but not acting*).
 - If suspension does not apply, the operator is told plainly (*"Suspend did not apply. The Agent is still live. Try again."*). A suspend that silently failed is the worst failure this product can have.
 - **Let the Agent act again** resumes. It is a secondary action and never looks like Suspend.
+- *(Amendments item 20, 2026-10-16.)* Interactions in flight when Suspend applies end, and each customer receives the business's terminal notice. Email that arrives while suspended is kept, not answered, and listed in Activity under *Arrived while suspended. Not answered.*
 
-> **Upstream contract gap.** The Architecture Spine models no persistent suspended state and contains no agent status enum at all. This document states the operator-visible need; it does not invent the field. Raise with architecture before implementation.
+> **Upstream contract gap.** The Architecture Spine models no persistent suspended state and contains no agent status enum at all. This document states the operator-visible need; it does not invent the field. Raise with architecture before implementation. **Recorded upstream: Spine AD-26 (2026-10-16; wording approved, decision PROPOSED).**
 
 ### Material intake
 
@@ -638,25 +642,26 @@ Raise each with the owning document before implementation.
 
 | # | Item | Against | Status |
 |---|---|---|---|
-| 1 | **A material divergence may ride the existing declared escalation email path when it requires operator attention.** That is the whole of it. PRD §13.2 states *"there is no alerting."* Explicitly **not** authorised by this amendment: a generic notification system, a divergence-alerts product, an inbox, a digest, or any notification framework. Materiality itself is an upstream attention-policy decision, not a UX one. | PRD §13.2 | **Explicit amendment.** A product decision taken in this UX discussion, not a reading of the existing PRD. |
+| 1 | **A material divergence may ride the existing declared escalation email path when it requires operator attention.** That is the whole of it. PRD §13.2 states *"there is no alerting."* Explicitly **not** authorised by this amendment: a generic notification system, a divergence-alerts product, an inbox, a digest, or any notification framework. Materiality itself is an upstream attention-policy decision, not a UX one. | PRD §13.2 | **Explicit amendment.** A product decision taken in this UX discussion, not a reading of the existing PRD. **Recorded upstream: PRD §14 A2 (2026-10-15).** |
 | 2 | **Email / inbound messaging as the V1 channel.** | PRD FR84 | **Sourced.** FR84 ships one inbound email / messaging adapter. An earlier draft wrongly called this a UX-originated decision; the decision is unchanged. |
 | 3 | **Connect-your-mailbox surface.** Required for operability; no upstream source describes it. Provider, authorisation model and what the operator sees are all unspecified. | PRD silent | **Originated here.** Needs a source owner. |
-| 4 | **Persistent suspended state.** FR110 gives a one-action suspend; the Spine models no suspended state and no agent status enum. | Architecture Spine | **Contract gap.** Not invented here. |
-| 5 | **Specification version lifecycle** as operator-visible states. | Architecture Spine | **Contract gap.** |
+| 4 | **Persistent suspended state.** FR110 gives a one-action suspend; the Spine models no suspended state and no agent status enum. | Architecture Spine | **Contract gap.** Not invented here. **Recorded upstream: Spine AD-26; PRD §14 A7 (2026-10-16; wording approved, decision PROPOSED).** |
+| 5 | **Specification version lifecycle** as operator-visible states. | Architecture Spine | **Contract gap.** **Recorded upstream: Spine AD-27 (2026-10-16; wording approved, decision PROPOSED).** |
 | 6 | **Specification field schema.** EX1–EX17 are named; nothing below them is. Deferred to epic E1. | PRD O7 | **Deferred upstream.** This document specifies behaviour, not fields. |
-| 7 | **The approval act's relationship to validity.** O1: *"no reviewer role or review verdict is defined anywhere in the sources."* Resolved here as: the operator is the approver, and approval does not determine validity. | PRD O1 | **Resolved here.** Confirm upstream. |
+| 7 | **The approval act's relationship to validity.** O1: *"no reviewer role or review verdict is defined anywhere in the sources."* Resolved here as: the operator is the approver, and approval does not determine validity. | PRD O1 | **Resolved here.** Confirm upstream. **Recorded upstream: PRD §14 A3 (2026-10-15).** |
 | 8 | **Counterfactual replay (O11)** — re-running a closed interaction against a later version. Undecided for V1 and not designed here. | PRD O11 | **Open upstream.** |
 | 9 | **Latency, timeouts, streaming.** No budget or decision exists; the Spine defers them as *"measured, not designed up front."* Pending states are specified here without durations. | Architecture Spine | **Deferred upstream.** |
-| 10 | **Material intake limits** — accepted formats, size, ingestion duration, failure taxonomy. | PRD silent | **Open.** |
+| 10 | **Material intake limits** — accepted formats, size, ingestion duration, failure taxonomy. | PRD silent | **Open.** **Recorded upstream: PRD §14 A4 (2026-10-16; wording approved, decision PROPOSED).** |
 | 11 | **Divergence item fields.** Not specified upstream. | PRD silent | **Resolved for V1** as the minimum in Component Patterns: class, interaction label, one-line request. No severity, retry eligibility, metrics or filters. Grouping repeated occurrences of one problem remains open. |
-| 12 | **Linking a reply to the specification item it relied on.** The interaction viewer quotes the parts of the specification a reply was based on. The Spine records provenance for *sources* as `(tenant, source, source version, locator)`. Whether *specification items* are addressable the same way, and recorded per decision, is unconfirmed. | Architecture Spine | **Contract gap.** Without it the viewer can quote source material but not the specification rule. |
-| 13 | **Validation result shape.** The UI lists blocking and non-blocking findings, each pointing at the part of Understanding it concerns. No contract defines a finding's fields or its link to a specification area. | PRD FR22 / FR95 | **Contract gap.** |
-| 14 | **Email subject and received time in the interaction record.** The interaction label uses them. The Spine lists channel identity as not stored; whether the subject survives into the record is unconfirmed. | Architecture Spine | **Contract gap.** The deterministic fallback still needs the received time. |
+| 12 | **Linking a reply to the specification item it relied on.** The interaction viewer quotes the parts of the specification a reply was based on. The Spine records provenance for *sources* as `(tenant, source, source version, locator)`. Whether *specification items* are addressable the same way, and recorded per decision, is unconfirmed. | Architecture Spine | **Contract gap.** Without it the viewer can quote source material but not the specification rule. **Recorded upstream: Spine AD-28 (2026-10-16; wording approved, decision PROPOSED).** |
+| 13 | **Validation result shape.** The UI lists blocking and non-blocking findings, each pointing at the part of Understanding it concerns. No contract defines a finding's fields or its link to a specification area. | PRD FR22 / FR95 | **Contract gap.** **Recorded upstream: PRD §14 A5 (2026-10-16; wording approved, decision PROPOSED).** |
+| 14 | **Email subject and received time in the interaction record.** The interaction label uses them. The Spine lists channel identity as not stored; whether the subject survives into the record is unconfirmed. | Architecture Spine | **Contract gap.** The deterministic fallback still needs the received time. **Recorded upstream: Spine AD-29 (2026-10-16; wording approved, decision PROPOSED).** The premise that the Spine lists channel identity as not stored is an inference in `.working/extract-architecture.md` (lines 406–412), not Spine text. |
 | 15 | **Judging sampled refusals** (FR115): who decides that a sampled refusal was wrong, and on which surface. No surface is designed for it in V1. | PRD FR115 | **Gap.** Divergences from this source appear in Activity once judged; the judging act is unplaced. |
 | 16 | **Rollback** (FR26: *"promote (or roll back)"*). No rollback action is designed. | PRD FR26 | **Gap.** Not decided here. |
-| 17 | **Platform error reference.** The UI shows a reference code with every platform error, per NFR16. Its format and how it reaches the UI are unspecified. | PRD NFR16 | **Contract gap.** |
+| 17 | **Platform error reference.** The UI shows a reference code with every platform error, per NFR16. Its format and how it reaches the UI are unspecified. | PRD NFR16 | **Contract gap.** **Recorded upstream: PRD §14 A6 (2026-10-16; wording approved, decision PROPOSED).** |
 | 18 | **Mailbox connection status after go-live**, including disconnection, for the Agent status line. | Architecture Spine | **Contract gap.** Related to items 3 and 4. |
 | 19 | **Undeliverable escalation email.** What happens, and what the operator sees, when the escalation email bounces. | PRD FR103 / FR114 | **Gap.** |
+| 20 | **Email that arrives while the Agent is suspended.** It is recorded and not answered, and it appears in Activity under its own group, *Arrived while suspended. Not answered.*, which is not a divergence class. It is not answered after resume, and its items stay in Activity after resume like any other item. *Nothing has come apart since {time}* refers to divergences only and may appear beside this group; no counts are shown. Interactions in flight when Suspend applies end, and each customer receives the business's terminal notice. If resume does not apply, *Resume did not apply. The Agent is still suspended. Try again.* is shown only after the platform has confirmed that the resume failed and the Agent is still suspended; while that is unconfirmed the status line shows the recorded state, and a failure that cannot be confirmed either way is shown as *Something on our side failed. Reference: {code}*. | PRD FR110 (§14 A7); Spine AD-26 | **Explicit amendment**: wording approved by the user 2026-10-16; decision PROPOSED (program gate D14). Visual treatment: DESIGN.md refinement item 6. |
 
 ---
 

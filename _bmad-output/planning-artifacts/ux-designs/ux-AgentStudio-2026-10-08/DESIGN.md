@@ -3,6 +3,7 @@ name: Alta Agent Studio — Ledger
 description: Visual identity for the V1 builder platform where a business operator teaches an Agent how the business works and reviews what it understood. Light theme only. Foundation direction "Ledger", the printed record.
 status: final
 updated: 2026-10-10
+amended: 2026-10-16
 project: AgentStudio
 peer: EXPERIENCE.md
 sources:
@@ -381,3 +382,4 @@ The visual specification of each component. Behaviour is canonical in **EXPERIEN
 3. **Divergence class shapes at phone width.** Defined above, with a 6px double rule; to be checked on real devices.
 4. **Repeated divergences on the Activity list** at real volume. Nothing upstream deduplicates, so repeated occurrences of one problem appear as separate items in V1. How they group is untested and must not be solved with a severity or metric model.
 5. **The mocks predate this revision** in four places: they use the Changed blue for focus, 11px labels, `text-quiet` on sunken in key-diff, and no Agent status line. This document wins; the mocks are illustrations.
+6. **The *Arrived while suspended* group in Activity** (EXPERIENCE.md Amendments item 20, 2026-10-16). It is not a divergence class, so it must not borrow a class shape or colour; its non-colour cue is undecided.

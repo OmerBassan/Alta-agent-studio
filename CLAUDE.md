@@ -6,7 +6,25 @@ A platform where a user **chats with an AI builder** that creates and edits a **
 
 The deliverable is the **builder platform**, not any single agent. Never sink time into optimizing an individual generated agent beyond what proves the platform works.
 
-## Current work: the seven-day hardening sprint (read this first)
+## Current work: implementing the V1 product in `studio/` (read this first)
+
+The user's mandate (2026-10-13): implement the product and architecture decisions already made through BMAD — Brief, PRD, Architecture Spine, UX spines — as a traceable program, phase by phase. This is a **new product line** in the `studio/` package (text, inbound, specification-driven, model-in-charge; voice is out of V1). It does not modify `boilerplate/`, `builder_platform/` or `Generated_Agents/`, which remain the shipped voice product governed by `_bmad-output/specs/spec-alta-agent-studio/` (`m-arch` 10: that spec is not mutated).
+
+| File | What it holds |
+| --- | --- |
+| `docs/next-phase-proposals/HANDOFF.md` | The latest session handoff: start here |
+| `docs/next-phase-proposals/NEXT-PHASE-PLAN.md` | The implementation program: phases and their order, technical choices, decision gates D1–D13, sprint plan; §9 says where each kind of information lives |
+| `_bmad-output/planning-artifacts/epics.md` | BMAD epics and stories: the only home of story acceptance criteria and of the per-requirement trace (regenerate the trace with `docs/next-phase-proposals/tools/trace_epics.py`) |
+| `_bmad-output/implementation-artifacts/sprint-status.yaml` | BMAD sprint state per story (`bmad-sprint-planning` generates it; `bmad-build` advances it) |
+| `docs/next-phase-proposals/IMPLEMENTATION-STATE.md` | Verified state; §0 is the latest phase report and the next-step handoff |
+| `docs/next-phase-proposals/BMAD-DECISION-REGISTER.md` | Every BMAD decision with source, decision status and implementation status |
+| `docs/next-phase-proposals/PROOF-GATE.md` | The Spine/PRD proof gate: model-in-charge runtime vs the 15-node system |
+
+**Precedence for `studio/` work:** approved BMAD decisions (register) win; the Architecture Spine's ADs bind the code. The voice-only, latency and Vapi rules below do **not** apply to `studio/`; provider agnosticism (no vendor SDK — `studio` uses plain HTTP to an OpenAI-compatible `/v1`), no hardcoded provider, and "no claim without evidence" do. Verify with `python -m pytest studio/tests -q` (set `STUDIO_SKIP_MUTATION=1` to skip the slower mutation proofs) and `python -m studio scenarios`. Never run `--live` without the user's approval.
+
+## Completed: the seven-day hardening sprint (historical)
+
+Its "do not implement the model-in-charge loop" constraint was scoped to the sprint (DL-007) and does not bind `studio/`.
 
 Branch `harden/seven-day`. This is **channel-agnostic hardening of the existing LangGraph runtime**, driven in MOCK mode (empty `OPENAI_API_KEY`, zero tokens) through `graph.ainvoke`, `boilerplate/agent_sandbox.py`, or `builder_platform/tests/agent_driver.py`. **It is not a voice task**: no Vapi, ngrok, phone, TTS or browser. Do not implement the Architecture Spine's model-in-charge loop.
 
