@@ -1,0 +1,65 @@
+# Credential-free verification on a fresh checkout (Story 1.12, register D-05).
+# Runs on Linux (LF checkout) and Windows (CRLF checkout). No secret is
+# referenced and the model credentials are blanked at job level, so every
+# command runs in mock / deterministic mode. studio/tests/test_ci_workflow.py
+# pins these properties.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: studio tests
+        run: python -m pytest studio/tests -q
+
+      - name: studio scenarios
+        run: python -m studio scenarios --today 2026-10-13
+
+      - name: builder_platform tests
+        run: python -m pytest builder_platform/tests -q
+
+      - name: claude_plugin tests
+        run: python -m pytest claude_plugin/tests -q
+
+      - name: selftest boilerplate
+        working-directory: boilerplate
+        run: python selftest.py
+
+      - name: selftest BassanBrewerySDR
+        working-directory: Generated_Agents/BassanBrewerySDR
+        run: python selftest.py
+
+      - name: selftest BrightSmileDental
+        working-directory: Generated_Agents/BrightSmileDental
+        run: python selftest.py
