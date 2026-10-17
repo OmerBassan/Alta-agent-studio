@@ -2,7 +2,7 @@
 
 Phase 1 deliverable, 2026-10-13. Required by ARCHITECTURE-SPINE "Proof Gate", PRD §7.5 and the user's decision `m-arch` 47: *"before committing the whole runtime, implement one realistic business interaction end to end … and compare it against the existing LangGraph version."* The gate can fail (PRD §7.5).
 
-**Verdict: provisional PASS on the six axes measurable without a model; two axes (model calls, latency) pending one live run that needs the user's approval to spend.** Nothing measured so far is a material problem for the approved architecture, so no product decision is escalated.
+**Verdict (2026-10-17, Story 1.9): FAIL — escalated to the user, not patched (PRD §7.5).** The live run passed 9 of 30 scenario runs, and axes 3 and 4 came out worse than legacy. Every failure traces to one of three specific, local defects (see "Live run" below); none traces to the model-in-charge shape itself, and the six axes measured without a model still read in the candidate's favour. Whether to reopen Phase 1 code to fix the three and re-run is the user's decision. *Superseded 2026-10-13 reading: provisional PASS on the six axes measurable without a model, two axes pending.*
 
 ## What was compared
 
@@ -20,8 +20,8 @@ The interaction the gate asks for — multi-turn reasoning, retrieval, a tool ca
 | --- | --- | --- | --- | --- |
 | 1 | **Architectural simplicity** | 15 nodes, 6 routers, 8 conditional edges; turn order fixed by the graph; voice machinery inside the engine (`MAX_REPLY_WORDS`, filler, director, `CALL_ARC`) | One loop; 7 request kinds; two exits; no business control flow anywhere | Candidate simpler. The graph's complexity was order; the loop has none to maintain. |
 | 2 | **Amount of custom code** | Engine 4,534 lines + **1,324 lines of Python per business** (dental `config.py`/`tools.py`/`prompts.py`) | Core 2,052 · specification layer 1,250 · live agent boundary 215 · channel 130 (total incl. CLI, simulated adapter and credential-free agent: 4,309). **Per business: ~220 lines of TOML + a guide, zero Python** | Comparable platform size; per-business cost falls from code to declaration. Not like-for-like: legacy carries RAG subgraph, compaction, planner and voice; candidate carries provenance, tenancy, durable episodes, claims and resolution. |
-| 3 | **Number of model calls** | Live: 138 calls over 90 scripted turns ≈ **1.5 per turn** (CS §3b) | Credential-free: **1.38 agent decisions per turn** (18 decisions / 13 turns); live each decision is one call | **Pending live run.** The decision count is a floor: a live model may retrieve before answering, adding a call. |
-| 4 | **Latency** | Live: p50 1.7 s, p95 3.7 s per call (CS §3b) | Core overhead without a model: 13–59 ms per whole scenario (in-memory store) | **Pending live run.** Core overhead is negligible; turn latency will be calls × per-call latency. |
+| 3 | **Number of model calls** | Live: 138 calls over 90 scripted turns ≈ **1.5 per turn** (CS §3b) | Credential-free: **1.38 agent decisions per turn** (18 decisions / 13 turns); live each decision is one call | **Live (2026-10-17): 2.41 calls per turn (94 / 39) — worse than legacy.** 56 of the 94 were refused `respond` requests retried within the same turn (defect L2); the 38 accepted decisions give 0.97 per turn. |
+| 4 | **Latency** | Live: p50 1.7 s, p95 3.7 s per call (CS §3b) | Core overhead without a model: 13–59 ms per whole scenario (in-memory store) | **Live (2026-10-17): per call p50 2.10 s, p95 3.08 s (n=94); per turn wall p50 2.13 s, p95 20.14 s (n=39).** Per call is comparable (different model, different prompt). The per-turn tail is the retry loop of L2: a turn that exhausts its 8-request budget costs ~20 s. Legacy has no per-turn figure (it never timed turns). |
 | 5 | **Control** | Authorization at tool execution only (`authz.py`); confirmation and operator gates bound to payload | Every request kind authorized (reads, clarify, respond, escalate included); gates bound to tenant, episode, spec version, capability, canonical args; Core never selects a step | Candidate stronger and broader. |
 | 6 | **Observability** | Per-node trace JSONL, written only by `agent_sandbox.py`; not by the runtime | Every inbound message, agent decision, Core result, effect, evidence item and egress is a durable step under one episode id; model calls with tokens and latency per step | Candidate stronger. |
 | 7 | **Failure handling** | Unverified outcomes, timeouts, degraded flag on model calls | Adapter timeout, rejection, dropped write, unreachable read-back, agent exception, malformed model output, budget exhaustion, stall — each a typed result or a declared halt, each tested | Candidate equal or stronger. |
@@ -61,3 +61,70 @@ python -m studio scenarios --live --runs 3 --max-cost 0.25 --today 2026-10-13
 **Timing — resolved 2026-10-14 by approved text (NEXT-PHASE-PLAN revision 4, §3.1):** PRD §7.5 and §12 place the gate in front of E4–E9, so it runs before Epic 2 (E6); the Spine's "context assembly is measured, not designed up front" makes this run the baseline T9 is judged against. Only the spend approval (gate D1) remains. The superseded proposal, kept for the record — **Timing (PROPOSED 2026-10-14, withdrawn):** run it after Phase 2, because proposed choice T9 (NEXT-PHASE-PLAN §3.1) moves source material out of the agent's standing context and into `retrieve`, which changes model calls per turn. A run now would measure a context design Phase 2 replaces. This is subject to the user confirming that no approved decision requires the run earlier. PRD §12 says "The proof gate (§7.5) sits in front of E4–E9", and Phase 2 is E6, so the text points the other way. The alternative that honours it is to run now and again after Phase 2.
 
 The result fills axes 3 and 4 and shows whether a real model passes the same record-level expectations. If it does not, that is a finding about the agent or the specification, written up with evidence — not a reason to change the architecture on preference.
+
+## Live run — Story 1.9 (2026-10-17)
+
+**Run.** Once, D1 authorized by the user 2026-10-17. The command above plus `--record <dir>`, model `gpt-6-luna` at the approved settings, `--today 2026-10-13`, 10 scenarios × 3 runs. Estimated spend **US$0.0242** against a US$0.25 cap. Every figure here is reproduced by `python -m studio gate-report <dir>` from the stored records. The record directory sits outside the repository, in the session scratchpad.
+
+**Measurement fix that came first.** Before this story, `--runs N` replayed run 1's record N times. Message ids restarted for each run against one shared store, so runs 2 and later were treated as duplicates. `--max-cost` was also checked per scenario rather than for the whole run. Both are fixed in `studio/__main__.py` and pinned by `studio/tests/test_proof_gate.py`. A three-run measurement taken before the fix would have been one run reported three times.
+
+### Pass rate per scenario, with each failure classified
+
+| Scenario | Pass | Observed (all 3 runs alike) | Class | Evidence (record) |
+| --- | --- | --- | --- | --- |
+| D2 urgent symptoms halt | 3/3 | guard halt, 0 model calls | — | — |
+| D3 severe pain handed over | 3/3 | escalated | — | — |
+| D5 no answer without consent | 3/3 | — | — | — |
+| D1 book a check-up | 0/3 | agent asks "what date do you mean by Monday?" twice; no confirmation, no effect | **Core (L1)** | `ep_15e201e7a0eb4d87` steps 4, 8 |
+| B1 hold an evening event | 0/3 | same as D1 | **Core (L1)** | `ep_e7cc00621b5640a4` |
+| D4 fee question grounded | 0/3 | correct, cited answer refused 5–7× (`resolution_invalid`), then halt (`budget_exhausted` once, `stall` twice), terminal notice | **Agent (L2)**, aggravated by **Core (L3)** | `ep_6999b3e929414e8d` steps 4–20 |
+| B3 packages grounded | 0/3 | same as D4 (refused 5–7×; `budget_exhausted` twice, `stall` once) | **Agent (L2)** + **Core (L3)** | `ep_d195dd12b55d44fb` |
+| B2 too many guests | 0/3 | refused 3–8× (L2): runs 1–2 halt at the budget, run 3 ends with a correct grounded refusal citing the 10–60 rule; the expected `rule_denied` never occurs because the agent never attempts the effect | **Agent (L2)**; expectation path-dependent (**specification**) | `ep_d4040b5e79e74f81` steps 4–12 |
+| D6 Sunday refused | 0/3 | agent says "we're closed on Sundays" inside a `clarify`, without citing anything; no effect attempted, so no `rule_denied` | **Core (L4)**; expectation path-dependent (**specification**) | `ep_7b12bff4f0104b0f` step 4 |
+| B4 underage constrained | 0/3 | agent offers the daytime-with-guardians event, citing the rule (exactly the guard's declared `constrain` text); scenario expects an escalation | **specification** (the scenario contradicts the declared guard verdict) | `ep_11619c7e04e740f4` steps 4–7; `brewery/specification.toml:146-151` |
+
+**Defects named**
+- **L1 (Core, context assembly):** `AgentView` (`studio/core/harness.py:777`) carries no current date. The live agent cannot resolve "Monday", although the Core has a recorded clock (AD-12). The deterministic agent receives `today` from the CLI, outside the Core, and that masked the gap in every credential-free test. This is a displaced fault.
+- **L2 (Agent boundary contract):** the live agent's instructions (`studio/agent/llm_agent.py:38-39`) say `"evidence":[..]` for a resolution without saying it takes evidence ids only. The model fills it with the reference id it correctly cited in its claims.
+- **L3 (Core, refusal feedback):** a `resolution_invalid` refusal tells the agent what was wrong but not what is acceptable. The same request is retried until the 8-request budget or the stall detector ends the conversation. A correct answer then becomes a terminal notice.
+- **L4 (Core, enforcement gap):** a `clarify` message is not subject to claim enforcement, so a business fact can reach the requester uncited.
+
+### Inline resolution validation
+
+There were **56 refusals, all from the resolution check, all `resolution_invalid`.** Every one cites a material reference id as resolution evidence.
+
+**Judgement:**
+- **Under the contract:** all 56 are **correct**, because a reference is not evidence.
+- **On substance:** none caught a wrong resolution. In every case the reply itself was grounded and true.
+- **Harm:** the 56 refusals account for 8 halted conversations (D4 ×3, B3 ×3, B2 ×2) and the retries in B2 run 3.
+
+**Reading:** inline validation as built is **not relied on**. Whether to demote it to offline evaluation, or keep it once L2 and L3 are fixed, is escalated with the FAIL. This run cannot separate the check's value from the contract slip that triggered it.
+
+### PRD §7.4 inventory: dispositions so far
+
+| Item | Posture (PRD) | Disposition | Evidence / deciding epic |
+| --- | --- | --- | --- |
+| Provider-agnostic LLM contract with a credential-free mode | Reusable largely as-is | Concept carried, re-implemented | `studio/config.py`, `studio/agent/model_port.py` (plain HTTP `/v1`); `DeterministicAgent` |
+| Bounded tool budget · stall detector with wired handoff (FR107, required) | Deliberately not carried as steps; Core guarantees | Carried as Core services | `harness.py:254-272`; both fired in this run (5 budget, 3 stall halts) |
+| Post-execution validator · typed tool-result contract · degraded path distinguishable | Core guarantees | Carried | read-back `effect_verified`; typed `Result`; denials classified |
+| Human-authorization interrupt | Reusable / Core guarantee | Carried | offers with operator approval (`harness.py:459-478`) |
+| Output check before anything reaches a person | Core guarantee | Carried for `respond`; **gap for `clarify` (L4)** | this run, D6 |
+| Durable-state discipline | Core guarantee | Carried | `EpisodeStore` (SQLite, transactions) |
+| Structured-verdict-then-deterministic-text | Reusable, bounded | Carried, bounded as the PRD requires (terminal notice only) | `terminal_notice` egress, D4 |
+| Shared deterministic core (paths, write policy) · ship gate as subprocess · write-policy paradigm | Reusable / concept transfers | Open | Epic 3 (versions, promotion gate), Epic 5 (Builder) |
+| Single-ingress credential bootstrap · one core, many front doors · off-thread tool execution (FR97) | Reusable largely as-is | Open | Epic 8 (email adapter), Epic 7 |
+| Deterministic context compaction | Reusable largely as-is | Open | Epic 2 (Story 2.3, context assembly by measurement) |
+| Validated integrations catalog | Reusable largely as-is | Open | Epic 8 / Epic 9 |
+| Typed state discipline · typed argument collection · slim-core skill technique · zero-model structured record | Concept transfers, code does not | Carried as concept (typed requests, declared facts, episode record); skill technique open | `studio/core/types.py`; Builder skill: Epic 5 |
+| Voice transport, filler, sanitizer, spoken-string contract, telephony material | Not reusable | Not carried | nothing in `studio/` |
+| Fixed fifteen-node pipeline | Deliberately not carried forward | **Not ported, confirmed** | no `langgraph`, `StateGraph` or `boilerplate` import anywhere in `studio/` (grep, 2026-10-17) |
+
+### Baseline for Story 2.3 (context assembly)
+
+The candidate's context is the whole compiled material, issued as references at episode start, plus retrieval on request. This run is the measured baseline for Story 2.3:
+- 2.41 calls per turn (0.97 accepted);
+- per call p50 2.10 s / p95 3.08 s;
+- per turn p50 2.13 s / p95 20.14 s;
+- US$0.0242 for 30 runs.
+
+Before comparing anything against it, re-measure once L1–L3 are fixed. The tail figures are dominated by L2/L3.

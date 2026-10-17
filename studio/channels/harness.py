@@ -28,6 +28,7 @@ Scenario file (TOML)::
 
 from __future__ import annotations
 
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +66,8 @@ class ScenarioResult:
     failures: list[str]
     transcript: Transcript
     episode_id: Optional[str]
+    turn_latency_ms: list[float] = field(default_factory=list)
+    """Wall time of each ``channel.send``, in order — what the requester waits."""
 
 
 def load_scenarios(path: str | Path) -> list[dict[str, Any]]:
@@ -116,8 +119,11 @@ async def run_scenario(core: Core, tenant: str, scenario: dict[str, Any], effect
     transcript = Transcript()
     conversation = scenario["id"]
     halted = None
+    latencies: list[float] = []
     for text in scenario["turns"]:
+        started = time.perf_counter()
         outcome = await channel.send(conversation, text)
+        latencies.append((time.perf_counter() - started) * 1000.0)
         transcript.exchanges.append((text, outcome.messages))
         if outcome.episode_id not in transcript.episode_ids:
             transcript.episode_ids.append(outcome.episode_id)
@@ -127,4 +133,4 @@ async def run_scenario(core: Core, tenant: str, scenario: dict[str, Any], effect
     failures = check(core, tenant, episode_id, scenario.get("expect", {}), effects, halted) if episode_id else \
         ["no episode was created"]
     return ScenarioResult(id=scenario["id"], passed=not failures, failures=failures, transcript=transcript,
-                          episode_id=episode_id)
+                          episode_id=episode_id, turn_latency_ms=latencies)

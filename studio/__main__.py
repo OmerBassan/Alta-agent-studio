@@ -2,6 +2,7 @@
 
     validate <business>            run the validation suite on a business specification
     scenarios [<business> ...]     run scenario files end to end (credential-free by default)
+    gate-report <dir>              proof-gate figures from a ``scenarios --record <dir>`` run
     chat <business>                talk to a business's Agent in the terminal (developer tool)
 
 ``<business>`` is a folder under ``studio/businesses`` or a path to a
@@ -19,6 +20,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from studio import proof_gate
 from studio.agent.deterministic import DeterministicAgent
 from studio.channels.harness import HarnessChannel, load_scenarios, run_scenario
 from studio.config import ConfigurationError, Settings
@@ -50,20 +52,11 @@ def _agent(settings: Settings, live: bool, today: date):
 
 
 def _spend(core: Core, settings: Settings) -> float:
+    """Estimated spend recorded in one Core's store (one run); the caller sums runs."""
     if not settings.live or settings.model.price_in_per_mtok is None:
         return 0.0
-    total = 0.0
-    for tenant in {e.tenant for e in _all_episodes(core)}:
-        for episode in core.store.episodes(tenant):
-            for call in core.store.model_calls(tenant, episode.episode_id):
-                total += (call["input_tokens"] or 0) * settings.model.price_in_per_mtok / 1e6
-                total += (call["output_tokens"] or 0) * (settings.model.price_out_per_mtok or 0) / 1e6
-    return total
-
-
-def _all_episodes(core: Core):
-    for tenant in core.registry.tenants():
-        yield from core.store.episodes(tenant)
+    calls = [c for tenant in core.registry.tenants() for c in proof_gate.store_model_calls(core.store, tenant)]
+    return proof_gate.spend(calls, settings.model.price_in_per_mtok, settings.model.price_out_per_mtok) or 0.0
 
 
 def cmd_validate(args) -> int:
@@ -81,35 +74,87 @@ def cmd_validate(args) -> int:
     return 0 if report.passed else 1
 
 
-async def _scenarios(args, settings: Settings) -> int:
+async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
+    """Run every scenario ``args.runs`` times. Each run is independent: its own
+    registry, store, Core and simulated calendar, so message ids that restart
+    per run never collide with an earlier run's record. Spend is summed over
+    every run so far and checked against ``--max-cost`` after each run."""
     names = args.business or sorted(p.parent.name for p in BUSINESSES.glob("*/scenarios.toml"))
-    agent, port = _agent(settings, args.live, date.fromisoformat(args.today))
-    failed = 0
+    record = Path(args.record) if getattr(args, "record", None) else None
+    plan = []
+    for name in names:
+        compiled = compile_specification(load_specification(_spec_path(name)))
+        plan.append((name, _spec_path(name).parent.name, compiled,
+                     load_scenarios(_spec_path(name).parent / "scenarios.toml")))
+    if record is not None:
+        proof_gate.prepare_record_dir(record)
+    agent, port = agent_factory(settings, args.live, date.fromisoformat(args.today))
+    prices = settings.model if settings.live else None
+    failed = completed = 0
+    spent = 0.0
+    outcome, message = "error", "interrupted before the first run finished"
     try:
-        for name in names:
-            compiled = compile_specification(load_specification(_spec_path(name)))
-            for scenario in load_scenarios(_spec_path(name).parent / "scenarios.toml"):
-                registry = SpecRegistry()
-                registry.register(compiled)
-                calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
-                core = Core(registry, EpisodeStore(), agent, {"calendar": calendar})
-                for _ in range(args.runs):
-                    result = await run_scenario(core, compiled.tenant, scenario,
-                                                effects_counter=lambda: sum(calendar.executions.values()))
-                    status = "PASS" if result.passed else "FAIL"
-                    failed += not result.passed
-                    calls = core.store.model_calls(compiled.tenant, result.episode_id) if result.episode_id else []
-                    print(f"{status} {name}/{scenario['id']}  model calls: {len(calls)}")
-                    for failure in result.failures:
-                        print(f"     {failure}")
-                    spent = _spend(core, settings)
+        for name, label, compiled, scenarios in plan:
+            for scenario in scenarios:
+                for run in range(1, args.runs + 1):
+                    registry = SpecRegistry()
+                    registry.register(compiled)
+                    calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
+                    store_file = proof_gate.store_name(label, scenario["id"], run)
+                    store = EpisodeStore(record / store_file) if record is not None else EpisodeStore()
+                    core = Core(registry, store, agent, {"calendar": calendar})
+                    try:
+                        result = await run_scenario(core, compiled.tenant, scenario,
+                                                    effects_counter=lambda: sum(calendar.executions.values()))
+                        status = "PASS" if result.passed else "FAIL"
+                        failed += not result.passed
+                        calls = store.model_calls(compiled.tenant, result.episode_id) if result.episode_id else []
+                        print(f"{status} {name}/{scenario['id']}  model calls: {len(calls)}")
+                        for failure in result.failures:
+                            print(f"     {failure}")
+                        if record is not None:
+                            proof_gate.append_result(record, {
+                                "business": label, "tenant": compiled.tenant, "scenario": scenario["id"],
+                                "run": run, "passed": result.passed, "failures": result.failures,
+                                "episode_id": result.episode_id, "episode_ids": result.transcript.episode_ids,
+                                "turn_latency_ms": result.turn_latency_ms, "store": store_file,
+                                "agent": agent.name,
+                                "price_in_per_mtok": prices.price_in_per_mtok if prices else None,
+                                "price_out_per_mtok": prices.price_out_per_mtok if prices else None})
+                        completed += 1
+                    finally:
+                        spent += _spend(core, settings)  # counted even when the run raised
+                        store.close()
                     if args.max_cost is not None and spent >= args.max_cost:
+                        outcome, message = "stopped_at_cap", f"estimated spend ${spent:.4f} reached ${args.max_cost}"
                         print(f"Stopping: estimated spend ${spent:.4f} reached --max-cost ${args.max_cost}")
                         return 2
+        outcome, message = "complete", None
+    except BaseException as exc:
+        outcome, message = "error", f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         if port:
             await port.aclose()
+        if record is not None:
+            proof_gate.write_status(record, {
+                "planned_runs": sum(len(s) for *_, s in plan) * args.runs, "completed_runs": completed,
+                "outcome": outcome, "message": message, "agent": agent.name,
+                "model": settings.model.agent_model if settings.live else None, "today": args.today})
+        if settings.live:
+            cap = f" (cap ${args.max_cost})" if args.max_cost is not None else ""
+            print(f"Estimated spend: ${spent:.4f}{cap}")
     return 1 if failed else 0
+
+
+def cmd_gate_report(args) -> int:
+    try:
+        report = proof_gate.load_report(args.directory)
+    except proof_gate.RecordError as exc:
+        print(f"gate-report: {exc}", file=sys.stderr)
+        return 1
+    print(proof_gate.render(report))
+    return 0
 
 
 async def _chat(args, settings: Settings) -> int:
@@ -151,6 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--runs", type=int, default=1)
     s.add_argument("--max-cost", type=float, default=None)
     s.add_argument("--today", default=date.today().isoformat(), help="the date relative weekdays resolve against")
+    s.add_argument("--record", metavar="DIR", default=None,
+                   help="keep each run's episode store and a results.jsonl line in DIR (for gate-report)")
+    g = sub.add_parser("gate-report")
+    g.add_argument("directory")
     c = sub.add_parser("chat")
     c.add_argument("business")
     c.add_argument("--live", action="store_true")
@@ -159,13 +208,23 @@ def main(argv: list[str] | None = None) -> int:
         settings = Settings.from_env()
         if args.command == "validate":
             return cmd_validate(args)
+        if args.command == "gate-report":
+            return cmd_gate_report(args)
         if args.command == "scenarios":
+            if args.runs < 1:
+                raise ConfigurationError("--runs must be at least 1")
             if args.live and args.max_cost is None:
                 raise ConfigurationError("--live needs --max-cost so spend is bounded")
+            if args.live and settings.live and settings.model.price_in_per_mtok is None:
+                raise ConfigurationError("--live needs STUDIO_PRICE_IN (dollars per million input tokens), "
+                                         "or --max-cost cannot bound spend")
             return asyncio.run(_scenarios(args, settings))
         return asyncio.run(_chat(args, settings))
     except ConfigurationError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except proof_gate.RecordError as exc:
+        print(f"Record error: {exc}", file=sys.stderr)
         return 2
 
 
