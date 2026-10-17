@@ -82,7 +82,7 @@ class DeterministicAgent:
                 if iso:
                     found[fact.name] = iso.group(1)
                 else:
-                    today = self._today()
+                    today = date.fromisoformat(view.today) if view.today else self._today()
                     ahead = (_WEEKDAYS.index(weekday) - today.weekday()) % 7 or 7
                     found[fact.name] = (today + timedelta(days=ahead)).isoformat()
             elif fact.type == "time" and time_match:

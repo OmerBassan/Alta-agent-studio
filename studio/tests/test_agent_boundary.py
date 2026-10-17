@@ -148,6 +148,31 @@ def test_the_rendered_view_carries_references_constraints_and_the_request_guide(
     assert "severe pain" in user.lower() and "FORBIDDEN" in system
 
 
+def test_the_view_carries_the_recorded_date_so_a_live_agent_can_resolve_a_weekday():
+    """Proof gate L1 (2026-10-17): the date reached the credential-free agent only from the CLI, so a live agent
+    could not resolve "Monday". The view now carries the Core's recorded clock."""
+    from datetime import datetime, timezone
+    from studio.core.ports import AgentDecision
+    from studio.core.types import RespondRequest
+    registry = SpecRegistry()
+    registry.register(compile_specification(load_specification(DENTAL)))
+    clock = lambda: datetime(2026, 10, 13, 9, 0, tzinfo=timezone.utc)  # noqa: E731 - a Tuesday
+    captured = {}
+
+    class Capture:
+        name = "capture"
+
+        async def decide(self, view):
+            captured["view"], captured["messages"] = view, render(view)
+            return AgentDecision(request=RespondRequest(message="ok"))
+
+    core = Core(registry, EpisodeStore(clock=clock), Capture(), {"calendar": SimulatedCalendar()})
+    asyncio.run(core.handle(InboundMessage(tenant="bright-smile-dental", conversation_key="c", message_id="1",
+                                           text="Can I come in on Monday?")))
+    assert captured["view"].today == "2026-10-13"
+    assert "Today is Tuesday 2026-10-13." in captured["messages"][1]["content"]
+
+
 # --- the credential-free agent -----------------------------------------------------------------
 
 def test_a_bare_yes_is_never_recorded_as_a_fact():

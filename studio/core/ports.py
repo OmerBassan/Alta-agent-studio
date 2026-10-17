@@ -98,6 +98,8 @@ class AgentView(_F):
     requests_left: int
     first_message: bool
     """True when nothing has yet been sent to the requester in this episode."""
+    today: Optional[str] = None
+    """The Core's recorded date (AD-12), so the Agent can resolve "Monday"."""
 
 
 class ModelCall(_F):

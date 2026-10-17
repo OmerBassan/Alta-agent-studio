@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from studio import proof_gate
@@ -88,7 +88,12 @@ async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
                      load_scenarios(_spec_path(name).parent / "scenarios.toml")))
     if record is not None:
         proof_gate.prepare_record_dir(record)
-    agent, port = agent_factory(settings, args.live, date.fromisoformat(args.today))
+    today = date.fromisoformat(args.today)
+    agent, port = agent_factory(settings, args.live, today)
+
+    def clock() -> datetime:  # the recorded clock reads --today, so the Agent's view carries it (AD-12)
+        return datetime.combine(today, datetime.now(timezone.utc).timetz())
+
     prices = settings.model if settings.live else None
     failed = completed = 0
     spent = 0.0
@@ -101,7 +106,7 @@ async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
                     registry.register(compiled)
                     calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
                     store_file = proof_gate.store_name(label, scenario["id"], run)
-                    store = EpisodeStore(record / store_file) if record is not None else EpisodeStore()
+                    store = EpisodeStore(record / store_file if record is not None else ":memory:", clock=clock)
                     core = Core(registry, store, agent, {"calendar": calendar})
                     try:
                         result = await run_scenario(core, compiled.tenant, scenario,
@@ -205,11 +210,11 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--live", action="store_true")
     args = parser.parse_args(argv)
     try:
-        settings = Settings.from_env()
         if args.command == "validate":
             return cmd_validate(args)
-        if args.command == "gate-report":
+        if args.command == "gate-report":  # reads stored records only; needs no model settings
             return cmd_gate_report(args)
+        settings = Settings.from_env()
         if args.command == "scenarios":
             if args.runs < 1:
                 raise ConfigurationError("--runs must be at least 1")

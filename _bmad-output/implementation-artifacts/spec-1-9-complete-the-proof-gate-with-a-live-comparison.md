@@ -62,6 +62,7 @@ context:
 
 - Measurement fixes (pre-spend): independent runs; cumulative cap; `--record`; `gate-report`; startup refusal of `--live` without prices; `status.json` with outcome; non-empty record dirs refused; refusal source taken from the refused respond step and pinned to the Core's wording by a real-Core test. `python -m pytest studio/tests -q` 157 passed; default scenarios unchanged (10/10, 0 calls).
 - Live run 2026-10-17, once: 9/30 passed, US$0.0242. Verdict FAIL, escalated, nothing patched. Four defects named in PROOF-GATE.md: L1 the AgentView has no date (displaced fault, masked because the deterministic agent receives `today` from the CLI); L2 the agent contract does not say resolution evidence takes evidence ids; L3 refusal feedback loops until budget/stall; L4 `clarify` bypasses claim enforcement. B2, B4 and D6 expectations are also path-dependent or contradict the declared guard (specification findings).
+- Fix and re-run (user-approved 2026-10-17, smallest diffs): L1–L4 plus L5 found in run 2; B2/B4/D6/B3/D4 expectations made outcome-based. Run 2: 17/30. Run 3 (declared last): 21/30, 0.95 calls/turn, p50 1.57 s / p95 2.24 s per call, 0 refusals. Final verdict PASS on the nine axes; D1, B1 and D6 remain as Agent findings. `gate-report` no longer loads model settings.
 - Record kept outside the repo (session scratchpad, `rec-live`); not committed.
 
 ## Spec Change Log

@@ -47,13 +47,13 @@ development_status:
   1-6-guards-two-exits-halts-escalation-and-suspension: done
   1-7-goals-obligations-grounded-claims-and-verified-resolutions: done
   1-8-provider-agnostic-agent-boundary-scenario-channel-and-two-bu: done
-  1-9-complete-the-proof-gate-with-a-live-comparison: review  # sprint 1, critical path; D1 granted 2026-10-17; verdict FAIL, escalated (PROOF-GATE.md)
-  1-10-a-deadline-expiry-resumes-a-pending-episode-as-an-external-e: backlog  # sprint 1, after the 1.9 gate verdict; held: verdict FAIL awaits the user's decision
-  1-11-an-in-flight-episode-survives-a-crash-mid-turn: backlog  # sprint 1, after the 1.9 gate verdict; held: verdict FAIL awaits the user's decision
-  1-12-credential-free-ci-on-a-clean-checkout: review  # sprint 1; D3 granted 2026-10-17
+  1-9-complete-the-proof-gate-with-a-live-comparison: done  # sprint 1, critical path; D1 granted 2026-10-17; run 1 FAIL, fixed and re-run with the user's approval; final PASS (PROOF-GATE.md)
+  1-10-a-deadline-expiry-resumes-a-pending-episode-as-an-external-e: backlog  # sprint 1; unblocked: 1.9 verdict PASS 2026-10-17
+  1-11-an-in-flight-episode-survives-a-crash-mid-turn: backlog  # sprint 1; unblocked: 1.9 verdict PASS 2026-10-17
+  1-12-credential-free-ci-on-a-clean-checkout: done  # sprint 1; D3 granted 2026-10-17; CI green on Linux and Windows
   epic-1-retrospective: optional
 
-  epic-2: backlog  # starts after the 1.9 proof-gate verdict (PRD 7.5, 12: gate sits in front of E4-E9)
+  epic-2: backlog  # unblocked: 1.9 proof-gate verdict PASS 2026-10-17; (PRD 7.5, 12: gate sits in front of E4-E9)
   2-1-pin-source-material-so-episodes-survive-knowledge-edits: backlog
   2-2-reconstruct-every-answer-from-the-record-alone: backlog
   2-3-choose-context-assembly-by-measurement: backlog  # blocked: D2 (T9), D4 (T10)

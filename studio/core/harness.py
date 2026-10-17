@@ -610,7 +610,8 @@ class Core:
         for evidence_id in res.evidence:
             row = self.store.get_evidence(evidence_id)
             if row is None or row["tenant"] != tenant or row["episode_id"] != eid:
-                return _refused("respond", "resolution_invalid", f"'{evidence_id}' is not evidence from this conversation")
+                return _refused("respond", "resolution_invalid", f"'{evidence_id}' is not evidence from this conversation; resolution "
+                                "evidence takes only evidence ids from results (never a reference id), or none")
             evidence[evidence_id] = row
         if res.served:
             facts = self.store.facts(tenant, eid)
@@ -783,7 +784,7 @@ class Core:
             offers=tuple(OfferView(offer_id=o["offer_id"], capability=o["capability"], state=o["state"])
                          for o in self.store.offers(tenant, eid)),
             constraints=constraints, turn_results=tuple(results), requests_left=requests_left,
-            first_message=not egressed)
+            first_message=not egressed, today=self.store.now()[:10])
 
     # ==============================================================================
     # Operator actions — recorded, attributable, and never the Agent's

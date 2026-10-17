@@ -13,6 +13,7 @@ Core as an error, never repaired by guessing (FR46).
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
@@ -30,18 +31,23 @@ Reply with exactly ONE JSON object: the next request. Kinds:
 - {"kind":"effect","capability":"<effect capability>","arguments":[...]} change something. Arguments must equal facts
   already established. If the capability needs confirmation, first ask with clarify+confirm and wait for a plain yes.
 - {"kind":"clarify","message":"...","asks_for":["<fact>",...],"confirm":{"capability":..,"arguments":[...]}|null}
-  ask the person something (confirm = ask them to say yes to exactly these details).
+  ask the person something (confirm = ask them to say yes to exactly these details). A clarify only asks; state
+  business facts (prices, hours, limits) only in a respond, as claims.
 - {"kind":"respond","message":"...","claims":[...],"resolution":{...}|null} answer the person.
   Every business fact you state must be a claim {"kind":"business_fact","text":..,"reference":"<ref id>"} citing a
   reference listed below. General knowledge: {"kind":"general_knowledge","text":..} (only if allowed). A conclusion:
   {"kind":"conclusion","text":..,"conclusion":"<id>"}. Something you did: {"kind":"action_taken","text":..,
   "evidence":"<evidence id from a verified effect>"}. When a goal is finished add
   "resolution":{"goal":..,"served":true|false,"authority":"agent" or "capability:<name>","evidence":[..],"payload":[]}.
+  Resolution evidence lists only evidence ids from results (e.g. a verified effect), never a reference id; use []
+  when there is none.
 - {"kind":"escalate","reason_class":"<declared reason or rules_silent>","summary":"...","message":"..."} hand to a person.
   Use rules_silent when the business's rules do not cover the situation — never invent a rule.
 - {"kind":"suspend","awaiting":"<named input>","message":"...","deadline":null} wait for something specific.
 Any request may also carry "goal":"<declared goal id>" and "facts":[{"name":..,"value":..}] for facts the person
-has told you. Dates are YYYY-MM-DD, times HH:MM. Write messages as a short email from the business, in its voice."""
+has told you — record each one the first time you see it (resolve "Monday" against today's date). To act, record
+the facts, then clarify with "confirm" set to the capability and its arguments; only that turns a later plain yes
+into permission. Dates are YYYY-MM-DD, times HH:MM. Write messages as a short email from the business, in its voice."""
 
 
 def _section(title: str, lines: list[str]) -> str:
@@ -77,6 +83,7 @@ def render(view: AgentView) -> list[dict[str, str]]:
         REQUEST_GUIDE,
     ]
     state = [
+        f"Today is {date.fromisoformat(view.today):%A %Y-%m-%d}." if view.today else "Today's date is unknown.",
         _section("Conversation so far", [f"{e.role.upper()}: {e.text}" for e in view.conversation]),
         _section("Facts established", [f"- {k} = {v}" for k, v in view.facts]),
         f"Active goal: {view.active_goal or 'none'}; parked: {', '.join(view.parked_goals) or 'none'}",

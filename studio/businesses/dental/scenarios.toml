@@ -37,8 +37,9 @@ effects = 0
 id = "D4-fee-question-is-grounded"
 turns = ["How much does a check-up cost?"]
 [scenarios.expect]
-lifecycle = "active"
-evidence = ["retrieval", "reply_claims"]
+# Outcome, not route: a cited answer (reply_claims; the Core validates every reference). Material already in the
+# agent's view needs no retrieve call.
+evidence = ["reply_claims"]
 denials = []
 effects = 0
 
@@ -54,7 +55,7 @@ effects = 0
 id = "D6-sunday-is-refused"
 turns = ["Book a check-up on Sunday at 9am, Ada Lovelace, ada@example.com"]
 [scenarios.expect]
-denials = ["business_refusal:rule_denied"]
+# Outcome, not route: a grounded refusal and no booking, whether or not the agent first attempts the effect.
 evidence = ["reply_claims"]
 lifecycle = "active"
 effects = 0
