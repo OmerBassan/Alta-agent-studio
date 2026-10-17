@@ -25,11 +25,15 @@ jobs:
     env:
       OPENAI_API_KEY: ""
       OPENAI_BASE_URL: ""
+      ANTHROPIC_API_KEY: ""
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Assert checkout line endings
+        run: python -c "import sys; d=open('requirements.txt','rb').read(); w=sys.platform=='win32'; ok=(b'\r\n' in d) if w else (b'\r' not in d); print(sys.platform, 'CRLF' if b'\r\n' in d else 'LF'); sys.exit(0 if ok else 1)"
 
       - uses: actions/setup-python@v5
         with:

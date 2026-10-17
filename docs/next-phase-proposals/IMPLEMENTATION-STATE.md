@@ -34,9 +34,20 @@ Classes: **VERIFIED IMPLEMENTED** · **PARTIALLY IMPLEMENTED** · **NOT IMPLEMEN
 | `python -m pytest claude_plugin/tests -q` (legacy) | **12 passed**, 1 warning |
 | `python selftest.py` in `boilerplate/`, `BassanBrewerySDR/`, `BrightSmileDental/` | all three **exit 0** |
 
-Not yet done: a clean-checkout run (`git worktree add`), which needs `studio/` committed first.
+Not yet done: a clean-checkout run (`git worktree add`), which needs `studio/` committed first. *(Done 2026-10-17 by Story 1.12: fresh-checkout CI on Linux and Windows; see the Story 1.12 block below.)*
 
 **Re-verified 2026-10-14 (second session, before any planning edit), same HEAD and tree:** `studio/tests` 126 passed, all 12 mutation proofs run and passing (checked individually, none skipped); `python -m studio scenarios --today 2026-10-13` 10/10 PASS with 0 model calls; `builder_platform/tests` 332 passed; `claude_plugin/tests` 12 passed; the three `selftest.py` exit 0; `git status` unchanged by the runs. No application code was changed in that session.
+
+### Story 1.12 — credential-free CI on a clean checkout (2026-10-17, commit `339fb32`)
+
+`.github/workflows/ci.yml` runs the seven commands above on every push and pull request, on a fresh checkout, on `ubuntu-latest` (LF) and `windows-latest` (CRLF), with `OPENAI_API_KEY`/`OPENAI_BASE_URL` blank at job level, `permissions: contents: read`, no `secrets.*` and no `--live`. `studio/tests/test_ci_workflow.py` pins those properties (8 tests).
+
+| Evidence | Result |
+| --- | --- |
+| Green run, `studio/v1` @ `339fb32` | [run 39045384600](https://github.com/OmerBassan/Alta-agent-studio/actions/runs/39045384600) — `success`; both jobs, every step green |
+| Red run, throwaway `ci/deliberate-failure` @ `ab2b4c3` (one `assert False` test) | [run 39045399062](https://github.com/OmerBassan/Alta-agent-studio/actions/runs/39045399062) — `failure`; both jobs failed at the `studio tests` step, later steps skipped. Branch deleted from the remote after the run was recorded |
+
+This closes D-05 and the clean-checkout gap noted above: the full set now passes on a fresh clone on both line-ending platforms with no model credential. No product code, engine file or existing test was changed to make CI pass.
 
 ### Found and fixed during the phase
 
@@ -229,10 +240,10 @@ It supports the **bounded-authority** half of V-02 and the **evidence-of-effect*
 
 | Capability | Class | Evidence |
 | --- | --- | --- |
-| CI running the suite | **NOT IMPLEMENTED** | No `.github/`; CS §2 |
+| CI running the suite | **VERIFIED IMPLEMENTED** (2026-10-17) | `.github/workflows/ci.yml`, Linux + Windows; green run 39045384600, red run 39045399062 (§0, Story 1.12) |
 | Startup validation; health check proving a real request | **PARTIALLY IMPLEMENTED** | Startup validators exist; `/health` has no probe (§1.2 #11) |
 | Pinned dependencies, dev separated | **VERIFIED IMPLEMENTED** | Both requirements files pinned |
-| Clean-checkout reproducibility (CRLF) | **UNVERIFIED** at this HEAD | CS records it at a temp commit whose difference from HEAD is Markdown-only |
+| Clean-checkout reproducibility (CRLF) | **VERIFIED IMPLEMENTED** (2026-10-17, `339fb32`) | Fresh-checkout CI on LF (Linux) and CRLF (Windows), every push |
 | Tenancy topology, hosting, retention executor | **DEFERRED BY DECISION** | PRD §7.2–7.3 |
 
 ---
