@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-14-2026 18:00
-last_updated: 10-17-2026 10:00
+last_updated: 10-17-2026 16:00
 project: AgentStudio
 project_key: NOKEY
 tracking_system: file-system
@@ -121,8 +121,8 @@ development_status:
   8-7-a-material-divergence-can-ride-the-escalation-email: backlog  # blocked: D11 (what makes a divergence material)
   epic-8-retrospective: optional
 
-  epic-9: backlog
-  9-1-fix-the-engine-leak-classification-rules-before-the-fourth-b: backlog  # sprint 1, parallel (not behind the gate)
+  epic-9: in-progress
+  9-1-fix-the-engine-leak-classification-rules-before-the-fourth-b: done  # sprint 1, parallel (not behind the gate)
   9-2-the-first-exemplar-business-through-the-builder: backlog
   9-3-the-second-exemplar-business-through-the-builder: backlog
   9-4-the-third-exemplar-business-through-the-builder: backlog

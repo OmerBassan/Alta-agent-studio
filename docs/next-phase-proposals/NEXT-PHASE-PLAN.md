@@ -224,4 +224,5 @@ Each kind of information has exactly one home. Other documents refer to it; they
 | Sprint state per story | `_bmad-output/implementation-artifacts/sprint-status.yaml` | `bmad-sprint-planning` (generate), `bmad-build` (per story) |
 | Verification evidence (commands run, results) | `IMPLEMENTATION-STATE.md` §0 | at the end of each phase or sprint |
 | Proof-gate comparison | `PROOF-GATE.md` | Story 1.9 |
+| Engine-leak classification rules and the leak log (FR89) | `ENGINE-LEAK-LOG.md` | each business build (Stories 2.6, 9.2–9.5); rules changed only by dated amendment |
 | Session handoff | `HANDOFF.md` | at the end of each session |

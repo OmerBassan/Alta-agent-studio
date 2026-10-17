@@ -38,6 +38,8 @@ The interaction the gate asks for — multi-turn reasoning, retrieval, a tool ca
 
 Retroactive, from the legacy sprint: DL-015 (strict consent) changed shared engine code while the third business was being built — *should have been platform behaviour from the start*; carried into the candidate as `studio/core/consent.py`.
 
+The log has moved to [ENGINE-LEAK-LOG.md](ENGINE-LEAK-LOG.md) (Story 9.1, 2026-10-17): the classification rules, and both entries above reclassified under them as P1 and P2. New entries go there only; this text is kept unchanged for the record.
+
 ## Findings the gate produced
 
 1. **A credential-free agent bug that the Core cannot catch**: the agent recorded the requester's "yes" as the patient's *name*. The Core enforces that effect arguments equal established facts, but a fact the agent establishes wrongly is still established. Fixed in the agent; pinned by `test_a_bare_yes_is_never_recorded_as_a_fact`. It is also the honest limit of reference-level enforcement: the Core binds the payload to what the requester confirmed, which is why the requester sees the exact details before saying yes.
