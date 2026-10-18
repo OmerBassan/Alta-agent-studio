@@ -474,6 +474,13 @@ class EpisodeStore:
                         (tenant, episode_id, key))
         return dict(row) if row else None
 
+    def started_effects(self, tenant: str, episode_id: str) -> list[dict]:
+        """Effects begun but never finished: a process stopped between the
+        two writes (Story 1.11). The Core reconciles them by read-back."""
+        return [{**dict(r), "arguments": json.loads(r["arguments"])} for r in self._all(
+            "SELECT * FROM effects WHERE tenant = ? AND episode_id = ? AND state = 'started' "
+            "ORDER BY started_at, idempotency_key", (tenant, episode_id))]
+
     def start_effect(self, tenant: str, episode_id: str, key: str, capability: str, arguments: dict) -> None:
         self._exec("INSERT INTO effects (tenant, episode_id, idempotency_key, capability, arguments, state, started_at) "
                    "VALUES (?, ?, ?, ?, ?, 'started', ?)",

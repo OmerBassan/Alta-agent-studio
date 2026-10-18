@@ -216,6 +216,7 @@ class Core:
         compiled = entry.compiled
         agent_suspended, effects_suspended = self.store.flags(tenant)
         if agent_suspended:
+            await self._reconcile_started_effects(episode, compiled)  # no orphan survives into a closed episode
             self.store.append_step(tenant, eid, "core", "suspended_unanswered", {"message_id": inbound.message_id})
             self.store.set_lifecycle(tenant, eid, "closed", close_reason="suspended")
             return TurnOutcome(episode_id=eid, lifecycle="closed")
@@ -235,6 +236,7 @@ class Core:
             self.store.add_evidence(tenant, eid, "guard_verdict",
                                     {"guard": guard.id, "family": guard.family, "verdict": guard.verdict}, gseq)
             if guard.verdict == "halt":
+                await self._reconcile_started_effects(episode, compiled)  # no orphan survives into a closed episode
                 return self._halt(episode, compiled, "guard", f"guard {guard.id} ({guard.family})")
             constraints.append(f"[{guard.id}] {guard.constraint}")
         return await self._agent_loop(episode, entry, tuple(constraints), effects_suspended)
@@ -267,7 +269,7 @@ class Core:
     async def _agent_loop(self, episode: Episode, entry: _Entry, constraints: tuple[str, ...],
                           effects_suspended: bool) -> TurnOutcome:
         tenant, eid = episode.tenant, episode.episode_id
-        results: list[tuple[str, Result]] = []
+        results: list[tuple[str, Result]] = await self._reconcile_started_effects(episode, entry.compiled)
         signatures: Counter[str] = Counter()
         budget = self.settings.max_requests_per_turn
         for used in range(budget):
@@ -395,6 +397,57 @@ class Core:
         if cap.kind != expected:
             return None, _refused(kind, "wrong_kind", f"'{name}' is a {cap.kind}, not a {expected}")
         return cap, None
+
+    async def _reconcile_started_effects(self, episode: Episode,
+                                         compiled: CompiledSpecification) -> list[tuple[str, Result]]:
+        """A crash between starting an effect and recording its outcome leaves
+        it 'started': the system of record may or may not hold it (Story 1.11).
+        Before the Agent decides anything, settle each one by read-back only —
+        never by executing it again — so no effect stays an orphan. An
+        unreachable read-back proves nothing, so the effect is 'unverified'.
+        Each outcome is returned as the effect's own typed result, so the Agent
+        sees it exactly as if the effect had just run.
+
+        Limits: the read-back is keyed by the idempotency key (the adapter's
+        reference was never recorded), and the conversation lock is per
+        process, so this assumes the single-writer store (T3)."""
+        tenant, eid = episode.tenant, episode.episode_id
+        results: list[tuple[str, Result]] = []
+        for row in self.store.started_effects(tenant, eid):
+            cap = compiled.policy.capabilities.get(row["capability"])
+            adapter = self.adapters.get(cap.adapter) if cap else None
+            verified, reference, problem = False, None, None
+            if adapter is None:
+                problem = "adapter missing"
+            else:
+                try:
+                    check = await self._call_adapter(adapter.read_back, tenant, cap.operation, row["arguments"],
+                                                     row["idempotency_key"], None)
+                    verified, reference = bool(check.ok), check.reference
+                except Exception as exc:
+                    problem = f"read-back unreachable: {type(exc).__name__}: {exc}"
+                    logger.warning("reconciling %s: %s", row["capability"], problem)
+            state = "verified" if verified else "unverified"
+            with self.store.transaction():
+                seq = self.store.append_step(tenant, eid, "core", "effect_reconciled", {
+                    "capability": row["capability"], "idempotency_key": row["idempotency_key"], "state": state})
+                evidence_id = self.store.finish_effect(
+                    tenant, eid, row["idempotency_key"], state, reference, f"effect_{state}", {
+                        "capability": row["capability"], "arguments": row["arguments"], "reference": reference,
+                        "idempotency_key": row["idempotency_key"], "adapter_problem": problem, "reconciled": True}, seq)
+            if verified:
+                results.append(("effect", Result(kind="effect", status="ok", capability=row["capability"],
+                                                 verified=True, evidence_id=evidence_id,
+                                                 note="Settled after an interruption: it is done.")))
+            else:
+                escalate = cap is not None and cap.on_unverified == "inform_and_escalate"
+                results.append(("effect", _failed(
+                    "effect", "adapter_failed",
+                    f"{row['capability']} was interrupted and could not be confirmed by reading it back. It may or "
+                    "may not have happened. Do not tell the requester it is done." +
+                    (" The business wants this handed to a person." if escalate else ""),
+                    evidence_id=evidence_id, verified=False, capability=row["capability"])))
+        return results
 
     async def _call_adapter(self, fn, *args) -> AdapterResult:
         return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=self.settings.adapter_timeout_s)

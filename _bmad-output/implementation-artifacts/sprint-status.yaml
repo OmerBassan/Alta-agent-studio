@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-14-2026 18:00
-last_updated: 10-17-2026 19:00
+last_updated: 10-18-2026 10:00
 project: AgentStudio
 project_key: NOKEY
 tracking_system: file-system
@@ -38,7 +38,7 @@ story_location: _bmad-output/implementation-artifacts
 # Story acceptance criteria: _bmad-output/planning-artifacts/epics.md (the only copy).
 # 'backlog' covers both ready and blocked stories; the comment names the gate where one applies.
 development_status:
-  epic-1: in-progress
+  epic-1: done
   1-1-declare-a-business-in-one-specification-artifact: done
   1-2-validate-a-specification-with-the-platform-s-own-suite: done
   1-3-every-agent-request-crosses-the-core-under-a-closed-taxonomy: done
@@ -49,7 +49,7 @@ development_status:
   1-8-provider-agnostic-agent-boundary-scenario-channel-and-two-bu: done
   1-9-complete-the-proof-gate-with-a-live-comparison: done  # sprint 1, critical path; D1 granted 2026-10-17; run 1 FAIL, fixed and re-run with the user's approval; final PASS (PROOF-GATE.md)
   1-10-a-deadline-expiry-resumes-a-pending-episode-as-an-external-e: done  # sprint 1; 2026-10-17
-  1-11-an-in-flight-episode-survives-a-crash-mid-turn: backlog  # sprint 1; unblocked: 1.9 verdict PASS 2026-10-17
+  1-11-an-in-flight-episode-survives-a-crash-mid-turn: done  # sprint 1; 2026-10-18
   1-12-credential-free-ci-on-a-clean-checkout: done  # sprint 1; D3 granted 2026-10-17; CI green on Linux and Windows
   epic-1-retrospective: optional
 

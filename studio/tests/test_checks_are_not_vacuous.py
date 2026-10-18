@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 HARNESS = "studio/core/harness.py"
 
 CHECKS = {
+    "an effect a crash left started is reconciled": (
+        "        results: list[tuple[str, Result]] = await self._reconcile_started_effects(episode, entry.compiled)",
+        "        results: list[tuple[str, Result]] = []"),
     "confirmation is required": (
         '            if confirmation is None:\n                return _refused("effect", "confirmation_missing",',
         '            if False:\n                return _refused("effect", "confirmation_missing",'),

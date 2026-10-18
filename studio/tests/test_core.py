@@ -743,3 +743,62 @@ def test_identity_based_authority_is_refused_until_identity_is_verified(runner, 
     w.send("yes", script=[book(), RespondRequest(message="I need to verify who you are first.")])
     assert ("business_refusal", "authority_not_established") in w.denials()
     assert sum(w.calendar.executions.values()) == 0
+
+
+# --- Story 1.11: an effect a crash left 'started' --------------------------------------------
+
+def test_an_effect_left_started_by_a_crash_is_settled_by_read_back_not_repeated(world):
+    """A process stopped after the adapter wrote but before the outcome was recorded. The next turn settles the
+    effect by read-back before the Agent decides anything; it is never executed again."""
+    first = world.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
+                       script=[ask_to_confirm()])
+    eid, key = first.episode_id, "k-interrupted"
+    world.calendar.effect(TENANT, "book", DENTAL_FACTS, key)          # the system of record holds it
+    world.store.start_effect(TENANT, eid, key, "book_visit", DENTAL_FACTS)  # its outcome was never recorded
+    world.send("hello?", script=[RespondRequest(message="One moment, please.")])
+    assert world.store.get_effect(TENANT, eid, key)["state"] == "verified"
+    assert world.store.started_effects(TENANT, eid) == []
+    assert world.calendar.executions[(TENANT, key)] == 1
+    assert any(s["kind"] == "effect_reconciled" for s in world.store.steps(TENANT, eid))
+    assert [e["kind"] for e in world.store.evidence(TENANT, eid)].count("effect_verified") == 1
+    seen = world.agent.views[-1].turn_results  # the Agent sees the settled outcome before it decides
+    assert seen and seen[0][1].kind == "effect" and seen[0][1].verified is True
+
+
+def test_an_interrupted_effect_the_system_never_received_is_unverified_not_success(world):
+    first = world.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
+                       script=[ask_to_confirm()])
+    eid, key = first.episode_id, "k-never-sent"
+    world.store.start_effect(TENANT, eid, key, "book_visit", DENTAL_FACTS)
+    world.send("hello?", script=[RespondRequest(message="One moment, please.")])
+    assert world.store.get_effect(TENANT, eid, key)["state"] == "unverified"
+    assert sum(world.calendar.executions.values()) == 0
+
+
+def test_an_interrupted_effect_with_an_unreachable_read_back_is_unverified_and_says_why(world):
+    first = world.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
+                       script=[ask_to_confirm()])
+    eid, key = first.episode_id, "k-unreachable"
+    world.store.start_effect(TENANT, eid, key, "book_visit", DENTAL_FACTS)
+    world.calendar.fail_read_backs = True
+    world.send("hello?", script=[RespondRequest(message="One moment, please.")])
+    assert world.store.get_effect(TENANT, eid, key)["state"] == "unverified"
+    assert world.store.started_effects(TENANT, eid) == []
+    unverified = [e for e in world.store.evidence(TENANT, eid) if e["kind"] == "effect_unverified"]
+    assert len(unverified) == 1 and "unreachable" in unverified[0]["payload"]["adapter_problem"]
+    seen = world.agent.views[-1].turn_results[0][1]
+    assert seen.status == "failed" and seen.verified is False
+    assert sum(world.calendar.executions.values()) == 0
+
+
+def test_an_interrupted_effect_is_settled_even_when_the_turn_ends_without_the_agent(world):
+    first = world.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
+                       script=[ask_to_confirm()])
+    eid, key = first.episode_id, "k-suspended"
+    world.calendar.effect(TENANT, "book", DENTAL_FACTS, key)
+    world.store.start_effect(TENANT, eid, key, "book_visit", DENTAL_FACTS)
+    world.core.set_suspension(TENANT, agent=True, effects=True, by="operator")
+    world.send("hello?")
+    assert world.store.get_episode(TENANT, eid).close_reason == "suspended"
+    assert world.store.started_effects(TENANT, eid) == []
+    assert world.store.get_effect(TENANT, eid, key)["state"] == "verified"
