@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 
 from studio.spec.findings import Finding
-from studio.spec.loader import LoadedSpecification
+from studio.spec.loader import LoadedSpecification, heading_key
 from studio.spec.model import EXPRESSION_AREAS, BusinessSpecification, Capability, area_established
 
 REQUIRED_AREAS = {
@@ -136,6 +136,22 @@ def _check_references(loaded: LoadedSpecification) -> list[Finding]:
         out.append(Finding(code="unresolved_reference", severity="blocking", area=area, location=where,
                            message=f"{where} refers to {kind} '{name}', which is not declared."))
 
+    for c in spec.capabilities:
+        if c.depends_on is None:
+            continue
+        where = f"capabilities.{c.name}.depends_on"
+        if c.kind != "effect":
+            out.append(Finding(code="basis_on_a_read", severity="blocking", area="EX8", location=where,
+                               message=f"'{c.name}' is a read; only an effect contract can depend on a read."))
+        elif c.depends_on.read not in caps:
+            missing("capability", c.depends_on.read, where, "EX8")
+        elif caps[c.depends_on.read].kind != "read":
+            out.append(Finding(code="basis_not_a_read", severity="blocking", area="EX8", location=where,
+                               message=f"'{c.name}' depends on '{c.depends_on.read}', which is not a read."))
+        elif not {i.name for i in c.inputs} & {i.name for i in caps[c.depends_on.read].inputs}:
+            out.append(Finding(code="basis_shares_no_details", severity="blocking", area="EX8", location=where,
+                               message=f"'{c.name}' and '{c.depends_on.read}' share no input, so no read could be "
+                                       "shown to be about the same details."))
     for g in spec.goals:
         for f in g.obligations:
             if f not in facts:
@@ -299,6 +315,24 @@ def _check_sequencing_prose(spec: BusinessSpecification) -> list[Finding]:
     return out
 
 
+def _check_source_conflicts(loaded: LoadedSpecification) -> list[Finding]:
+    """Story 2.4: two sources of equal declared precedence that say different things under the same heading
+    leave no rule for which one is authoritative (FR31)."""
+    out: list[Finding] = []
+    seen: dict[tuple[int, str], tuple[str, str]] = {}
+    for doc in sorted(loaded.sources.values(), key=lambda d: d.id):
+        for section in doc.sections:
+            key = (doc.precedence, heading_key(section.heading or doc.id))
+            if key in seen and seen[key][0] != doc.id and seen[key][1] != section.text:
+                out.append(Finding(code="conflicting_sources_without_precedence", severity="blocking", area="EX14",
+                                   location=f"grounding.sources.{seen[key][0]} / grounding.sources.{doc.id}",
+                                   message=f"'{seen[key][0]}' and '{doc.id}' both say something different under "
+                                           f"'{section.heading or doc.id}' at the same precedence ({doc.precedence}); declare "
+                                           "which one is authoritative."))
+            seen.setdefault(key, (doc.id, section.text))
+    return out
+
+
 def validate(loaded: LoadedSpecification) -> ValidationReport:
     spec = loaded.spec
     findings: list[Finding] = list(loaded.load_findings)
@@ -306,4 +340,5 @@ def validate(loaded: LoadedSpecification) -> ValidationReport:
                   _check_rules_enforced, _check_guards, _check_sequencing_prose):
         findings.extend(check(spec))
     findings.extend(_check_references(loaded))
+    findings.extend(_check_source_conflicts(loaded))
     return ValidationReport(findings=tuple(findings))

@@ -70,6 +70,11 @@ class LoadedSpecification:
         return self.spec.business.tenant
 
 
+def heading_key(title: str) -> str:
+    """Two sections are about the same thing when their headings match, ignoring case and spacing (T11)."""
+    return " ".join(title.lower().split())
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 

@@ -68,7 +68,9 @@ def test_record_and_report_round_trip_without_model_calls(tmp_path, capsys):
     text = capsys.readouterr().out
     assert "Runs: 10, passed 10" in text
     assert "0.00 (0 calls / 13 turns)" in text
-    assert "1.38 (18 / 13)" in text  # the decision count PROOF-GATE.md cites
+    # 1.38 (18 / 13) at the 2026-10-13 gate; since Story 2.5 (T12) the deterministic agent reads availability
+    # before every booking proposal, so the credential-free decision count is higher by design.
+    assert "1.85 (24 / 13)" in text
     latency = [line for line in text.splitlines() if "p50 / p95" in line]
     assert len(latency) == 2 and all("no model calls" in line for line in latency)
     assert not any(" 0 ms" in line or "0.00 s" in line.split("legacy")[0] for line in latency)

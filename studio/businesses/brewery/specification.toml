@@ -109,6 +109,7 @@ inputs = [{ name = "event_date", type = "date" }]
 
 [[capabilities]]
 name = "place_event_hold"
+depends_on = { read = "check_event_availability", max_age_seconds = 900 }  # T12: hold only on fresh availability
 description = "Hold a date and start time for the organiser for 7 days, free of charge."
 kind = "effect"
 adapter = "calendar"

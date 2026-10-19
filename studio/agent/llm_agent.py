@@ -79,7 +79,9 @@ def render(view: AgentView) -> list[dict[str, str]]:
         "General knowledge (not from the business's material) is "
         + ("allowed, but must be marked." if ctx.general_knowledge_allowed else "NOT allowed."),
         _section("Capabilities", [
-            f"- {t.name} [{t.kind}{', needs confirmation' if t.confirmation_required else ''}]: {t.description} "
+            f"- {t.name} [{t.kind}{', needs confirmation' if t.confirmation_required else ''}"
+            f"{f', needs a recent {t.depends_on_read} read for the same details' if t.depends_on_read else ''}]: "
+            f"{t.description} "
             f"Inputs: {', '.join(f'{i.name}:{i.type}' for i in t.inputs) or '-'}" for t in s.tools]),
         _section("Business material you may cite (reference id: text)", [
             f"- {r.ref} [{r.title}]: {r.text}" for r in view.references]),

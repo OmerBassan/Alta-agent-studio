@@ -126,6 +126,7 @@ class RunFigures:
     closes: list[str] = field(default_factory=list)   # per episode: closed:<reason> or its open lifecycle
     halts: list[str] = field(default_factory=list)    # cause of every declared halt
     retrievals: list[str] = field(default_factory=list)  # per retrieval: "hit" or "miss" (no item returned)
+    gaps: list[tuple[int, float]] = field(default_factory=list)  # per effect with a basis: (turns, seconds), U3
 
 
 @dataclass
@@ -239,7 +240,10 @@ def _run_figures(store: EpisodeStore, line: dict) -> RunFigures:
         closes=[f"closed:{e.close_reason}" if e.lifecycle == "closed" else e.lifecycle for e in episodes],
         halts=[s["payload"].get("cause", "?") for s in steps if s["kind"] == "halt"],
         retrievals=["hit" if ev["payload"].get("references") else "miss"
-                    for e in episodes for ev in store.evidence(tenant, e.episode_id) if ev["kind"] == "retrieval"])
+                    for e in episodes for ev in store.evidence(tenant, e.episode_id) if ev["kind"] == "retrieval"],
+        gaps=[(ev["payload"]["basis"]["turns"], ev["payload"]["basis"]["age_seconds"])
+              for e in episodes for ev in store.evidence(tenant, e.episode_id)
+              if ev["kind"].startswith("effect_") and (ev["payload"] or {}).get("basis")])
 
 
 def load_report(directory: str | Path) -> Report:
@@ -343,6 +347,16 @@ def render(report: Report) -> str:
         out.extend(f"  {key:50s} {count}" for key, count in sorted(counts.items()))
         if not counts:
             out.append("  none")
+    gaps = [g for r in report.runs for g in r.gaps]
+    out.append("")
+    out.append("Read-to-effect gaps (U3; effects whose contract names a basis read)")
+    if gaps:
+        seconds = sorted(s for _, s in gaps)
+        out.append(f"  effects {len(gaps)}; turns between read and effect: "
+                   + ", ".join(f"{t}: {n}" for t, n in sorted(Counter(t for t, _ in gaps).items())))
+        out.append(f"  seconds: min {seconds[0]:.1f}, median {seconds[len(seconds) // 2]:.1f}, max {seconds[-1]:.1f}")
+    else:
+        out.append("  none")
     refusals = report.refusals
     out.append("")
     out.append(f"Resolution and action-claim refusals: {len(refusals)} "

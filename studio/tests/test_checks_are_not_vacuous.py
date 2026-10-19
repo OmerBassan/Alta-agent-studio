@@ -21,6 +21,11 @@ ROOT = Path(__file__).resolve().parents[2]
 HARNESS = "studio/core/harness.py"
 
 CHECKS = {
+    "an effect needs a fresh basis read": (
+        "        if cap.depends_on_read:\n            basis, refusal", "        if False:\n            basis, refusal"),
+    "a superseded source cannot be cited": (
+        "                if item.superseded_by:\n                    winner = entry.items.get(item.superseded_by)",
+        "                if False:\n                    winner = entry.items.get(item.superseded_by)"),
     "an episode pins the material it starts on": ("            self._pin(compiled)", "            pass"),
     "an effect a crash left started is reconciled": (
         "        results: list[tuple[str, Result]] = await self._reconcile_started_effects(episode, entry.compiled)",

@@ -37,6 +37,12 @@ def ask_to_confirm(values: dict[str, Any] = DENTAL_FACTS, goal: str = "book_visi
                           confirm=ConfirmProposal(capability="book_visit", arguments=args(values)))
 
 
+def check(values: dict[str, Any] = DENTAL_FACTS) -> ReadRequest:
+    """The availability read the booking contract depends on (T12, Story 2.5)."""
+    return ReadRequest(capability="check_availability", arguments=args(
+        {k: values[k] for k in ("visit_type", "preferred_date")}))
+
+
 def book(values: dict[str, Any] = DENTAL_FACTS, goal: str = "book_visit", with_facts: bool = False) -> EffectRequest:
     return EffectRequest(goal=goal, capability="book_visit", arguments=args(values),
                          facts=facts(values) if with_facts else ())

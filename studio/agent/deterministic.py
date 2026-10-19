@@ -21,7 +21,7 @@ from typing import Any, Callable, Optional
 from studio.core.consent import bare_answer
 from studio.core.ports import AgentDecision, AgentView
 from studio.core.types import (Argument, Claim, ClarifyRequest, ConfirmProposal, EffectRequest, EscalateRequest,
-                               FactUpdate, ResolutionClaim, RespondRequest, RetrieveRequest)
+                               FactUpdate, ReadRequest, ResolutionClaim, RespondRequest, RetrieveRequest)
 from studio.spec.compile import ToolDefinition
 
 _WORD = re.compile(r"[a-z0-9]+")
@@ -174,6 +174,11 @@ class DeterministicAgent:
                         kind="business_fact", text=item["text"][:120], reference=item["reference"]),))
                 return self._escalate(view, "the business's material does not answer this", "I don't have that "
                                       "information, so I've asked the team to reply.", silent=True)
+            if result.status == "refused" and result.denial and result.denial.reason in ("basis_missing",
+                                                                                       "basis_stale"):
+                read = self._basis_read(view, text)
+                if read is not None:
+                    return read
             if result.status == "refused" and result.denial and result.denial.rule:
                 return self._refuse_with_rule(view, result.denial.rule)
             if result.status == "refused" and result.denial and result.denial.reason not in (
@@ -200,12 +205,31 @@ class DeterministicAgent:
                                   message=f"Could you tell me {fact.description[0].lower()}{fact.description[1:]}?")
         arguments = tuple(Argument(name=i.name, value=known[i.name]) for i in tool.inputs if i.name in known)
         granted = any(o.capability == tool.name and o.state == "granted" for o in view.offers)
+        if tool.depends_on_read and not granted and not any(
+                kind == "read" and res.status == "ok" and res.capability == tool.depends_on_read
+                for kind, res in view.turn_results):
+            read_tool = next((t for t in view.surface.tools if t.name == tool.depends_on_read), None)
+            if read_tool is not None:  # make the read the contract depends on before asking to confirm (T12)
+                return ReadRequest(goal=goal_id, facts=updates, capability=read_tool.name, arguments=tuple(
+                    Argument(name=i.name, value=known[i.name]) for i in read_tool.inputs if i.name in known))
         if tool.confirmation_required and not granted:
             details = ", ".join(f"{a.name.replace('_', ' ')}: {a.value}" for a in arguments)
             return ClarifyRequest(goal=goal_id, facts=updates, message=f"Just to confirm — {details}. Shall I go "
                                   "ahead? Please reply yes or no.",
                                   confirm=ConfirmProposal(capability=tool.name, arguments=arguments))
         return EffectRequest(goal=goal_id, facts=updates, capability=tool.name, arguments=arguments)
+
+    def _basis_read(self, view: AgentView, text: str) -> Optional[ReadRequest]:
+        """The effect needs a fresh read first (T12): make that read with the details already established.
+        The Core never makes it on the Agent's behalf."""
+        goal_id = self._goal(view, text) or view.active_goal
+        tool = self._capability_for(view, goal_id, text) if goal_id else None
+        read_tool = next((t for t in view.surface.tools if tool and t.name == tool.depends_on_read), None)
+        if read_tool is None:
+            return None
+        known = dict(view.facts)
+        return ReadRequest(goal=goal_id, capability=read_tool.name, arguments=tuple(
+            Argument(name=i.name, value=known[i.name]) for i in read_tool.inputs if i.name in known))
 
     def _report_done(self, view: AgentView, evidence_id: str, capability: Optional[str]) -> RespondRequest:
         claim = Claim(kind="action_taken", text="done", evidence=evidence_id)

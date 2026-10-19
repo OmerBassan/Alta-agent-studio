@@ -182,6 +182,14 @@ class Consequence(_Strict):
     reaches_customer: bool
 
 
+class ReadBasis(_Strict):
+    """EX8 + T12 (approved 2026-10-19): the read an effect depends on, and how old that read may be when the
+    effect is taken (FR35). Declared per contract — never globally."""
+
+    read: Id
+    max_age_seconds: int = Field(gt=0)
+
+
 class Capability(_Strict):
     """EX8 — a granted capability and its contract (FR51).
 
@@ -204,6 +212,7 @@ class Capability(_Strict):
     idempotency: Literal["episode", "none"] = "episode"
     on_unverified: Literal["inform_and_escalate", "inform_only"] = "inform_and_escalate"
     freshness: Literal["fresh", "bounded"] = "fresh"
+    depends_on: Optional[ReadBasis] = None
 
 
 class Guard(_Strict):

@@ -26,7 +26,7 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict
 
 from studio.spec.findings import SpecificationError
-from studio.spec.loader import LoadedSpecification
+from studio.spec.loader import LoadedSpecification, heading_key
 from studio.spec.model import AuthorityBasis, AuthorityClass, Consequence, GuardFamily, InputType
 from studio.spec.validate import ValidationReport, validate
 
@@ -52,6 +52,9 @@ class ContextItem(_Frozen):
     title: str
     text: str
     precedence: int
+    superseded_by: Optional[str] = None
+    """Story 2.4 (T11): another item under the same heading outranks this one — a source of lower declared
+    precedence, or the specification itself, which outranks every source. Citing a superseded item is refused."""
 
 
 class GoalView(_Frozen):
@@ -125,6 +128,8 @@ class ToolDefinition(_Frozen):
     inputs: tuple[ToolInput, ...]
     confirmation_required: bool
     consequence: Optional[Consequence]
+    depends_on_read: Optional[str] = None
+    """T12: the read this effect needs, recent enough, in the same conversation."""
 
 
 class CapabilitySurface(_Frozen):
@@ -171,6 +176,8 @@ class CapabilityPolicy(_Frozen):
     on_unverified: str
     freshness: str
     deny_rules: tuple[DenyRule, ...]
+    depends_on_read: Optional[str] = None
+    max_basis_age_s: Optional[int] = None
 
 
 class GuardPolicy(_Frozen):
@@ -234,7 +241,26 @@ def _items(loaded: LoadedSpecification) -> tuple[ContextItem, ...]:
             items.append(ContextItem(item_id=f"src:{section.locator}", origin="source", source_id=doc.id,
                                      source_version=doc.content_hash, locator=section.locator,
                                      title=section.heading or doc.id, text=section.text, precedence=doc.precedence))
-    return tuple(items)
+    return _resolve_precedence(items)
+
+
+def _resolve_precedence(items: list[ContextItem]) -> tuple[ContextItem, ...]:
+    """A conflict is the same heading in two places (T11). The specification outranks every source; between
+    sources, the lower declared precedence wins. Equal precedence is a validation finding, not resolved here."""
+    by_heading: dict[str, list[ContextItem]] = {}
+    for item in items:
+        by_heading.setdefault(heading_key(item.title), []).append(item)
+    out = []
+    for item in items:
+        if item.origin == "source":
+            stronger = [o for o in by_heading[heading_key(item.title)] if o.item_id != item.item_id
+                        and o.text.strip() != item.text.strip() and (  # saying the same thing is no conflict
+                o.origin == "specification" or (o.source_id != item.source_id and o.precedence < item.precedence))]
+            if stronger:
+                winner = min(stronger, key=lambda o: (o.origin != "specification", o.precedence, o.item_id))
+                item = item.model_copy(update={"superseded_by": winner.item_id})
+        out.append(item)
+    return tuple(out)
 
 
 def compile_specification(loaded: LoadedSpecification,
@@ -283,7 +309,8 @@ def compile_specification(loaded: LoadedSpecification,
             inputs=tuple(ToolInput(name=i.name, type=i.type, required=i.required,
                                    description=i.description or facts[i.fact or i.name].description)
                          for i in c.inputs),
-            confirmation_required=c.confirmation, consequence=c.consequence)
+            confirmation_required=c.confirmation, consequence=c.consequence,
+            depends_on_read=c.depends_on.read if c.depends_on else None)
         for c in sorted(spec.capabilities, key=lambda c: c.name)))
 
     capabilities = {}
@@ -300,7 +327,9 @@ def compile_specification(loaded: LoadedSpecification,
             authority_class=c.authority_class, confirmation=c.confirmation, authority_basis=c.authority_basis,
             success_evidence=c.success_evidence, idempotent=c.idempotency == "episode",
             retry_eligible=c.idempotency == "episode", on_unverified=c.on_unverified,
-            freshness=c.freshness, deny_rules=rules)
+            freshness=c.freshness, deny_rules=rules,
+            depends_on_read=c.depends_on.read if c.depends_on else None,
+            max_basis_age_s=c.depends_on.max_age_seconds if c.depends_on else None)
 
     waivable: dict[str, list[str]] = {}
     for w in spec.waivers:

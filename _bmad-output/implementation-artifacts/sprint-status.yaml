@@ -57,8 +57,8 @@ development_status:
   2-1-pin-source-material-so-episodes-survive-knowledge-edits: done
   2-2-reconstruct-every-answer-from-the-record-alone: done
   2-3-choose-context-assembly-by-measurement: done  # both modes built and tested credential-free; AC4 live comparison open (spend approval)
-  2-4-resolve-conflicting-sources-by-declared-precedence: backlog  # D5 approved 2026-10-19
-  2-5-require-fresh-reads-before-effects-that-depend-on-them: backlog  # D6 approved 2026-10-19
+  2-4-resolve-conflicting-sources-by-declared-precedence: done  # D5 approved 2026-10-19
+  2-5-require-fresh-reads-before-effects-that-depend-on-them: done  # D6 approved 2026-10-19
   2-6-a-garden-centre-served-from-its-own-material: backlog
   epic-2-retrospective: optional
 

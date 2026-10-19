@@ -109,6 +109,7 @@ inputs = [
 
 [[capabilities]]
 name = "book_visit"
+depends_on = { read = "check_availability", max_age_seconds = 900 }  # T12: book only on fresh availability
 description = "Book an appointment on the practice calendar."
 kind = "effect"
 adapter = "calendar"

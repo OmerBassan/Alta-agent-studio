@@ -316,3 +316,172 @@ def test_the_scenarios_pass_credential_free_in_both_modes():
         assert done.returncode == 0, f"{mode}:\n{done.stdout[-1500:]}{done.stderr[-500:]}"
         lines = [line for line in done.stdout.splitlines() if line.startswith(("PASS", "FAIL"))]
         assert len(lines) >= 10 and all(line.startswith("PASS") for line in lines), f"{mode}: {lines}"
+
+
+# --- Story 2.4: conflicting sources resolved by declared precedence ---------------------------
+
+STALE = "A check-up and clean costs 70 dollars."
+
+
+def _with_second_source(business_copy, precedence: int, body: str, source_id: str = "old_price_list",
+                        folder: str = "copy"):
+    spec = business_copy("dental", folder=folder, replace=[("precedence = 10\n", f'''precedence = 10
+
+[[grounding.sources]]
+id = "{source_id}"
+path = "knowledge/{source_id}.md"
+description = "An earlier price list."
+precedence = {precedence}
+''')])
+    (spec.parent / "knowledge" / f"{source_id}.md").write_text(body, encoding="utf-8")
+    return spec
+
+
+def _core_on(spec: Path):
+    from studio.tests.helpers import World
+    from studio.agent.scripted import ScriptedAgent
+    runner = asyncio.Runner()
+    registry = SpecRegistry()
+    registry.register(compile_specification(load_specification(spec)))
+    store, agent, calendar = EpisodeStore(), ScriptedAgent(), SimulatedCalendar()
+    return World(core=Core(registry, store, agent, {"calendar": calendar}), agent=agent, store=store,
+                 calendar=calendar, runner=runner), runner
+
+
+def test_the_higher_precedence_source_is_authoritative_and_the_lower_is_marked_superseded(business_copy):
+    from studio.core.types import Claim, RetrieveRequest
+    spec = _with_second_source(business_copy, 50, f"# Services and fees\n\n{STALE}\n")
+    items = {i.item_id: i for i in compile_specification(load_specification(spec)).context.items}
+    stale = next(i for i in items.values() if i.source_id == "old_price_list")
+    assert items[stale.superseded_by].source_id == "practice_guide"
+    w, runner = _core_on(spec)
+
+    def cite_stale(view):
+        ref = next(r["reference"] for _, res in view.turn_results for r in res.items if r.get("superseded"))
+        return RespondRequest(message="It costs 70 dollars.",
+                              claims=(Claim(kind="business_fact", text="70 dollars", reference=ref),))
+
+    out = w.send("How much does a check-up cost?", script=[
+        RetrieveRequest(query="check-up clean costs dollars"), cite_stale, RespondRequest(message="Let me check.")])
+    result = next(s["payload"] for s in w.store.steps(TENANT, out.episode_id)
+                  if s["kind"] == "result" and s["payload"]["kind"] == "retrieve")
+    texts = [(r["text"], r.get("superseded", False)) for r in result["items"]]
+    authoritative = [t for t, sup in texts if OLD in t]
+    assert authoritative and (STALE, True) in [(t.strip(), s) for t, s in texts]
+    assert [t for t, _ in texts].index(authoritative[0]) < [t.strip() for t, _ in texts].index(STALE)
+    assert ("business_refusal", "source_superseded") in [(d["classification"], d["reason"])
+                                                         for d in w.store.denials(TENANT, out.episode_id)]
+    sent = " ".join(s["payload"]["text"] for s in w.store.steps(TENANT, out.episode_id) if s["kind"] == "egress")
+    assert "70 dollars" not in sent
+    assert all(STALE not in r.text for r in w.agent.views[0].references)  # never offered for citing
+    runner.close()
+
+
+def test_the_specification_outranks_every_source(business_copy):
+    spec = _with_second_source(business_copy, 1, "# About the business\n\nWe are a veterinary clinic.\n")
+    items = compile_specification(load_specification(spec)).context.items
+    clash = next(i for i in items if i.source_id == "old_price_list")
+    assert clash.superseded_by == "spec:identity"
+
+
+def test_conflicting_sources_of_equal_precedence_are_a_finding_naming_both(business_copy):
+    from studio.spec import validate
+    spec = _with_second_source(business_copy, 10, f"# Services and fees\n\n{STALE}\n")
+    report = validate(load_specification(spec))
+    finding = next(f for f in report.findings if f.code == "conflicting_sources_without_precedence")
+    assert finding.severity == "blocking" and "practice_guide" in finding.message and "old_price_list" in finding.message
+    agreeing = _with_second_source(business_copy, 10, "# Opening hours\n\nSee the practice guide.\n", "notes",
+                                   folder="agreeing")
+    assert not [f for f in validate(load_specification(agreeing)).findings
+                if f.code == "conflicting_sources_without_precedence" and "Services" in f.message]
+
+
+# --- Story 2.5: fresh reads before effects that depend on them (T12) --------------------------
+
+def _clocked_world():
+    from studio.tests.helpers import BUSINESSES, build_world
+    runner = asyncio.Runner()
+    now = {"t": datetime(2026, 10, 13, 9, 0, tzinfo=timezone.utc)}
+    w = build_world(runner, [BUSINESSES / "dental" / "specification.toml"],
+                    store=EpisodeStore(clock=lambda: now["t"]))
+    return w, runner, now
+
+
+def _confirmed(w):
+    from studio.tests.helpers import ask_to_confirm
+    w.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com", script=[ask_to_confirm()])
+
+
+def _reasons(w, out):
+    return [d["reason"] for d in w.store.denials(TENANT, out.episode_id)]
+
+
+def test_an_effect_with_no_basis_read_is_refused_and_the_core_reads_nothing_itself():
+    from studio.tests.helpers import book
+    w, runner, _ = _clocked_world()
+    _confirmed(w)
+    out = w.send("yes", script=[book(), RespondRequest(message="One moment.")])
+    assert "basis_missing" in _reasons(w, out)
+    assert sum(w.calendar.executions.values()) == 0
+    assert not [e for e in w.store.evidence(TENANT, out.episode_id) if e["kind"] == "read_result"]
+    runner.close()
+
+
+def test_a_read_about_other_details_is_no_basis():
+    from studio.tests.helpers import DENTAL_FACTS, book, check
+    w, runner, _ = _clocked_world()
+    _confirmed(w)
+    out = w.send("yes", script=[check({**DENTAL_FACTS, "preferred_date": "2026-10-20"}), book(),
+                                RespondRequest(message="One moment.")])
+    assert "basis_missing" in _reasons(w, out) and sum(w.calendar.executions.values()) == 0
+    runner.close()
+
+
+def _read_then_confirm(w):
+    from studio.tests.helpers import ask_to_confirm, check
+    w.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
+           script=[check(), ask_to_confirm()])
+
+
+def test_a_stale_read_is_refused():
+    from datetime import timedelta
+    from studio.tests.helpers import book
+    w, runner, now = _clocked_world()
+    _read_then_confirm(w)
+    now["t"] += timedelta(seconds=901)
+    out = w.send("yes", script=[book(), RespondRequest(message="One moment.")])
+    assert "basis_stale" in _reasons(w, out) and sum(w.calendar.executions.values()) == 0
+    runner.close()
+
+
+def test_a_fresh_read_lets_the_effect_proceed_and_the_gap_is_recorded():
+    from datetime import timedelta
+    from studio.tests.helpers import book, booked_reply
+    w, runner, now = _clocked_world()
+    _read_then_confirm(w)
+    now["t"] += timedelta(seconds=120)
+    out = w.send("yes", script=[book(), booked_reply])
+    effect = next(e for e in w.store.evidence(TENANT, out.episode_id) if e["kind"] == "effect_verified")
+    basis = effect["payload"]["basis"]
+    assert basis["read_evidence"] and basis["age_seconds"] == 120.0 and basis["turns"] == 1
+    assert sum(w.calendar.executions.values()) == 1
+    runner.close()
+
+
+def test_freshness_declared_globally_is_rejected(business_copy):
+    import pytest
+    from studio.spec import SpecificationError
+    spec = business_copy("dental", replace=[("[grounding]\n", "[grounding]\nmax_read_age_seconds = 900\n")])
+    with pytest.raises(SpecificationError):
+        load_specification(spec)
+    top = business_copy("dental", folder="top")
+    top.write_text("freshness_seconds = 900\n" + top.read_text(encoding="utf-8"), encoding="utf-8")
+    with pytest.raises(SpecificationError):
+        load_specification(top)
+
+
+def test_a_dependency_must_name_a_declared_read(business_copy):
+    from studio.spec import validate
+    spec = business_copy("dental", replace=[('read = "check_availability"', 'read = "book_visit"')])
+    codes = [f.code for f in validate(load_specification(spec)).findings]
+    assert "basis_not_a_read" in codes

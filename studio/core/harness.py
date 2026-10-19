@@ -432,14 +432,27 @@ class Core:
             pool = [entry.items[i] for i in issued if i in entry.items]
         if not pool:
             return _refused("retrieve", "nothing_to_retrieve", "this business has no authoritative material")
+        hits: list[ContextItem] = []
+        for item in self.retriever.search(request.query, pool, 4):
+            # A superseded item comes back marked, with the item that outranks it ahead of it (Story 2.4).
+            winner = entry.items.get(item.superseded_by) if item.superseded_by else None
+            if winner is not None and winner not in hits:
+                hits.append(winner)
+            if item not in hits:
+                hits.append(item)
         found, records = [], []
         with self.store.transaction():
-            for item in self.retriever.search(request.query, pool, 4):
+            for item in hits:
                 ref = issued.get(item.item_id) or self.store.issue_reference(
                     tenant, eid, item.item_id, item.source_id, item.source_version, item.locator)
-                found.append({"reference": ref, "title": item.title, "text": item.text})
+                issued[item.item_id] = ref
+                entry_out = {"reference": ref, "title": item.title, "text": item.text}
+                if item.superseded_by:
+                    entry_out["superseded"] = True
+                found.append(entry_out)
                 records.append({"reference": ref, "source_id": item.source_id,
-                                "source_version": item.source_version, "locator": item.locator})
+                                "source_version": item.source_version, "locator": item.locator,
+                                "superseded_by": item.superseded_by})
             self.store.add_evidence(tenant, eid, "retrieval", {
                 "query": request.query, "references": [r["reference"] for r in records], "items": records}, seq)
         found = tuple(found)
@@ -569,6 +582,33 @@ class Core:
 
     # --- effect -----------------------------------------------------------------------
 
+    def _basis(self, episode: Episode, cap: CapabilityPolicy, args: dict) -> tuple[Optional[dict], Optional[Result]]:
+        """T12 (approved 2026-10-19): an effect whose contract names the read it depends on proceeds only on
+        such a read, in this conversation, about the same details (every argument the two share is equal),
+        no older than the contract allows. A missing or stale basis is a typed refusal; the Core never reads
+        on the Agent's behalf (FR35, AD-1). The gap is returned for the effect's evidence (U3)."""
+        tenant, eid = episode.tenant, episode.episode_id
+        dependency = cap.depends_on_read
+
+        def same_details(read_args: dict) -> bool:
+            return all(str(read_args[k]).lower() == str(args[k]).lower() for k in set(read_args) & set(args))
+
+        reads = [e for e in self.store.evidence(tenant, eid) if e["kind"] == "read_result"
+                 and e["payload"].get("capability") == dependency and same_details(e["payload"].get("arguments", {}))]
+        if not reads:
+            return None, _refused("effect", "basis_missing",
+                                  f"'{cap.name}' needs a '{dependency}' read for these details in this "
+                                  "conversation first")
+        latest = reads[-1]
+        age = (parse_instant(self.store.now()) - parse_instant(latest["at"])).total_seconds()
+        if age > cap.max_basis_age_s:
+            return None, _refused("effect", "basis_stale",
+                                  f"the '{dependency}' read is {int(age)}s old; '{cap.name}' needs one no older "
+                                  f"than {cap.max_basis_age_s}s")
+        turns = sum(1 for s in self.store.steps(tenant, eid)
+                    if s["kind"] == "inbound" and s["seq"] > latest["step_seq"])
+        return {"read_evidence": latest["evidence_id"], "age_seconds": round(age, 3), "turns": turns}, None
+
     async def _effect(self, episode: Episode, compiled: CompiledSpecification, request: EffectRequest, seq: int,
                       effects_suspended: bool) -> Result:
         tenant, eid = episode.tenant, episode.episode_id
@@ -583,6 +623,11 @@ class Core:
         if existing and existing["state"] == "verified":
             return Result(kind="effect", status="ok", capability=cap.name, verified=True,
                           evidence_id=existing["evidence_id"], note="Already done; not repeated.")
+        basis = None
+        if cap.depends_on_read:
+            basis, refusal = self._basis(episode, cap, args)
+            if refusal:
+                return refusal
 
         if cap.authority_basis == "verified_identity" and not any(
                 e["kind"] == "identity_verified" for e in self.store.evidence(tenant, eid)):
@@ -648,7 +693,7 @@ class Core:
         state = "verified" if verified else "unverified"
         evidence_id = self.store.finish_effect(tenant, eid, key, state, reference, f"effect_{state}", {
             "capability": cap.name, "arguments": args, "reference": reference, "idempotency_key": key,
-            "adapter_problem": problem}, seq)
+            "adapter_problem": problem, "basis": basis}, seq)
         if verified:
             return Result(kind="effect", status="ok", capability=cap.name, verified=True, evidence_id=evidence_id,
                           data=(Argument(name="reference", value=reference),) if reference else ())
@@ -710,6 +755,12 @@ class Core:
                 if item is None or item.source_version != row["source_version"]:
                     return _refused("respond", "provenance_invalid",
                                     f"'{claim.reference}' does not match the version of the material in force")
+                if item.superseded_by:
+                    winner = entry.items.get(item.superseded_by)
+                    return _refused("respond", "source_superseded",
+                                    f"'{claim.reference}' ({item.title}, {item.source_id}) is outranked by "
+                                    f"{winner.source_id if winner else item.superseded_by}; cite the "
+                                    "authoritative material instead")
             elif claim.kind == "general_knowledge":
                 if not policy.general_knowledge_allowed:
                     return _refused("respond", "general_knowledge_disabled",
@@ -925,7 +976,7 @@ class Core:
         references = []
         for row in self.store.references(tenant, eid):
             item = entry.items.get(row["item_id"])
-            if item is not None:
+            if item is not None and not item.superseded_by:  # outranked material is never offered for citing
                 references.append(ProvenanceRef(ref=row["ref"], item_id=item.item_id, title=item.title,
                                                 text=item.text))
         current = self.store.get_episode(tenant, eid)

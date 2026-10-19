@@ -86,7 +86,8 @@ def reconstruct(store: EpisodeStore, tenant: str, episode_id: str) -> list[dict[
                         "text": step["payload"]["text"], "claims": claims, "cites_nothing": not claims})
     for e in evidence:
         if e["kind"] == "retrieval":
+            outranked = {r["reference"]: r.get("superseded_by") for r in e["payload"].get("items", ())}
             out.append({"kind": "retrieval", "seq": e["step_seq"], "query": e["payload"]["query"],
-                        "results": [{"reference": ref, "item": cite(ref)}
+                        "results": [{"reference": ref, "item": cite(ref), "superseded_by": outranked.get(ref)}
                                     for ref in e["payload"]["references"]]})
     return sorted(out, key=lambda r: (r["seq"], r["kind"] != "retrieval"))

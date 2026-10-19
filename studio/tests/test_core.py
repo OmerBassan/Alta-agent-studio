@@ -15,7 +15,7 @@ from studio.core import AgentView, CoreSettings, EpisodeStore
 from studio.core.types import (Claim, ClarifyRequest, EffectRequest, EscalateRequest, FactUpdate, ReadRequest,
                                ResolutionClaim, RespondRequest, RetrieveRequest, SuspendRequest)
 from studio.core.vocabulary import REASON_CLASS, Reason
-from studio.tests.helpers import (BUSINESSES, DENTAL_FACTS, MONDAY, SUNDAY, args, ask_to_confirm, book,
+from studio.tests.helpers import (BUSINESSES, DENTAL_FACTS, MONDAY, SUNDAY, args, ask_to_confirm, book, check,
                                   booked_reply, build_world, facts, last_evidence)
 
 DENTAL = BUSINESSES / "dental" / "specification.toml"
@@ -37,7 +37,7 @@ def book_happily(world, conversation="c1"):
     """The full approved path: ask, confirm, requester says yes, book, reply."""
     first = world.send("Hi, I'd like a check-up on Monday at 9. Ada Lovelace, ada@example.com",
                        conversation=conversation, script=[ask_to_confirm()])
-    second = world.send("yes", conversation=conversation, script=[book(), booked_reply])
+    second = world.send("yes", conversation=conversation, script=[check(), book(), booked_reply])
     return first, second
 
 
@@ -65,7 +65,7 @@ def test_disclosure_is_in_the_first_message_only(world):
 # --- FR53, DL-008: confirmation is the requester's, bound to the exact payload ----------
 
 def test_effect_without_confirmation_is_refused_and_nothing_runs(world):
-    out = world.send("Book me in", script=[book(with_facts=True), RespondRequest(message="ok")])
+    out = world.send("Book me in", script=[check(), book(with_facts=True), RespondRequest(message="ok")])
     assert ("business_refusal", "confirmation_missing") in world.denials()
     assert sum(world.calendar.executions.values()) == 0
     assert out.lifecycle == "active"
@@ -73,14 +73,14 @@ def test_effect_without_confirmation_is_refused_and_nothing_runs(world):
 
 def test_a_yes_inside_a_longer_sentence_is_not_consent(world):
     world.send("check-up Monday 9, Ada, ada@example.com", script=[ask_to_confirm()])
-    world.send("yes, but my cheek is really puffy now", script=[book(), RespondRequest(message="ok")])
+    world.send("yes, but my cheek is really puffy now", script=[check(), book(), RespondRequest(message="ok")])
     assert ("business_refusal", "confirmation_missing") in world.denials()
     assert sum(world.calendar.executions.values()) == 0
 
 
 def test_a_bare_no_declines(world):
     world.send("check-up Monday 9", script=[ask_to_confirm()])
-    out = world.send("no", script=[book(), RespondRequest(message="No problem.")])
+    out = world.send("no", script=[check(), book(), RespondRequest(message="No problem.")])
     offers = world.store.offers(TENANT, out.episode_id, "confirmation")
     assert [o["state"] for o in offers] == ["declined"]
     assert sum(world.calendar.executions.values()) == 0
@@ -89,7 +89,7 @@ def test_a_bare_no_declines(world):
 def test_changing_the_payload_after_consent_is_refused(world):
     world.send("check-up Monday 9", script=[ask_to_confirm()])
     moved = {**DENTAL_FACTS, "preferred_time": "11:00"}
-    world.send("yes", script=[book(moved, with_facts=True), RespondRequest(message="ok")])
+    world.send("yes", script=[check(moved), book(moved, with_facts=True), RespondRequest(message="ok")])
     assert ("business_refusal", "confirmation_missing") in world.denials()
     assert sum(world.calendar.executions.values()) == 0
 
@@ -97,7 +97,7 @@ def test_changing_the_payload_after_consent_is_refused(world):
 def test_a_confirmation_cannot_be_reused_in_another_conversation(world):
     world.send("check-up Monday 9", conversation="a", script=[ask_to_confirm()])
     world.send("yes", conversation="a", script=[RespondRequest(message="Thanks.")])
-    world.send("check-up Monday 9", conversation="b", script=[book(with_facts=True), RespondRequest(message="ok")])
+    world.send("check-up Monday 9", conversation="b", script=[check(), book(with_facts=True), RespondRequest(message="ok")])
     assert ("business_refusal", "confirmation_missing") in world.denials()
     assert sum(world.calendar.executions.values()) == 0
 
@@ -105,14 +105,14 @@ def test_a_confirmation_cannot_be_reused_in_another_conversation(world):
 def test_a_confirmation_expires_when_something_else_is_asked(world):
     world.send("check-up Monday 9", script=[ask_to_confirm()])
     world.send("hmm", script=[ClarifyRequest(message="Which day suits you best?")])
-    out = world.send("yes", script=[book(), RespondRequest(message="ok")])
+    out = world.send("yes", script=[check(), book(), RespondRequest(message="ok")])
     assert [o["state"] for o in world.store.offers(TENANT, out.episode_id, "confirmation")] == ["expired"]
     assert sum(world.calendar.executions.values()) == 0
 
 
 def test_a_consumed_confirmation_cannot_book_twice(world):
     world.send("check-up Monday 9", script=[ask_to_confirm()])
-    out = world.send("yes", script=[book(), book(), RespondRequest(message="ok")])
+    out = world.send("yes", script=[check(), book(), book(), RespondRequest(message="ok")])
     effects = [r for r in world.results(out) if r["kind"] == "effect"]
     assert effects[0]["verified"] is True and effects[1]["note"] == "Already done; not repeated."
     assert sum(world.calendar.executions.values()) == 1
@@ -121,7 +121,7 @@ def test_a_consumed_confirmation_cannot_book_twice(world):
 # --- FR53 / AD-3: effect arguments must be what the conversation established -------------
 
 def test_effect_arguments_must_have_been_established(world):
-    world.send("hi", script=[book(), RespondRequest(message="ok")])
+    world.send("hi", script=[check(), book(), RespondRequest(message="ok")])
     assert ("business_refusal", "arguments_not_established") in world.denials()
 
 
@@ -263,7 +263,7 @@ def test_claiming_an_unverified_effect_as_done_is_refused_even_without_a_resolut
     w = build_world(runner, [DENTAL])
     w.calendar.drop_writes = True
     w.send("check-up Monday 9", script=[ask_to_confirm()])
-    out = w.send("yes", script=[book(), lambda v: RespondRequest(
+    out = w.send("yes", script=[check(), book(), lambda v: RespondRequest(
         message="You're booked.", claims=(Claim(kind="action_taken", text="booked", evidence=last_evidence(v)),)),
         RespondRequest(message="I couldn't confirm it yet.")])
     assert ("business_refusal", "action_without_evidence") in w.denials()
@@ -594,7 +594,7 @@ def test_concurrent_messages_on_one_conversation_are_serialised(world):
 def test_stopping_actions_refuses_effects_but_keeps_replying(world):
     world.send("check-up Monday 9", script=[ask_to_confirm()])
     world.core.set_suspension(TENANT, agent=False, effects=True, by="owner")
-    out = world.send("yes", script=[book(), RespondRequest(message="I can't book right now.")])
+    out = world.send("yes", script=[check(), book(), RespondRequest(message="I can't book right now.")])
     assert ("business_refusal", "effects_suspended") in world.denials()
     assert out.messages and sum(world.calendar.executions.values()) == 0
 
@@ -614,7 +614,7 @@ def test_an_effect_that_cannot_be_read_back_is_unverified_and_cannot_be_claimed(
     w = build_world(runner, [DENTAL])
     setattr(w.calendar, fault, True)
     w.send("check-up Monday 9", script=[ask_to_confirm()])
-    out = w.send("yes", script=[book(), lambda v: booked_reply(last_evidence(v)),
+    out = w.send("yes", script=[check(), book(), lambda v: booked_reply(last_evidence(v)),
                                 EscalateRequest(reason_class="billing", summary="booking not confirmed",
                                                 message="I couldn't confirm it; the team will.")])
     kinds = [e["kind"] for e in w.store.evidence(TENANT, out.episode_id)]
@@ -628,7 +628,7 @@ def test_a_hung_write_times_out_and_is_not_reported_as_done(runner):
     w.calendar.hang_writes_s = 0.5
     w.calendar.fail_read_backs = True
     w.send("check-up Monday 9", script=[ask_to_confirm()])
-    out = w.send("yes", script=[book(), RespondRequest(message="I couldn't confirm the booking.")])
+    out = w.send("yes", script=[check(), book(), RespondRequest(message="I couldn't confirm the booking.")])
     assert ("platform_error", "adapter_timeout") in w.denials()
     assert any(e["kind"] == "effect_unverified" for e in w.store.evidence(TENANT, out.episode_id))
 
@@ -637,7 +637,7 @@ def test_a_rejected_write_is_a_platform_error_not_a_decision(runner):
     w = build_world(runner, [DENTAL])
     w.calendar.fail_writes = True
     w.send("check-up Monday 9", script=[ask_to_confirm()])
-    w.send("yes", script=[book(), RespondRequest(message="Something went wrong on our side.")])
+    w.send("yes", script=[check(), book(), RespondRequest(message="Something went wrong on our side.")])
     assert ("platform_error", "adapter_failed") in w.denials()
 
 
@@ -740,7 +740,7 @@ def test_identity_based_authority_is_refused_until_identity_is_verified(runner, 
     spec = business_copy("dental", replace=[('authority_basis = "requester_self"', 'authority_basis = "verified_identity"')])
     w = build_world(runner, [spec])
     w.send("check-up Monday 9", script=[ask_to_confirm()])
-    w.send("yes", script=[book(), RespondRequest(message="I need to verify who you are first.")])
+    w.send("yes", script=[check(), book(), RespondRequest(message="I need to verify who you are first.")])
     assert ("business_refusal", "authority_not_established") in w.denials()
     assert sum(w.calendar.executions.values()) == 0
 
