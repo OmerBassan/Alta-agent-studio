@@ -31,7 +31,7 @@ def test_scenario(business, scenario):
     registry = SpecRegistry()
     registry.register(compiled)
     calendar = SimulatedCalendar(tenant_times=dict(TIMES))
-    core = Core(registry, EpisodeStore(), DeterministicAgent(today=lambda: TODAY), {"calendar": calendar})
+    core = Core(registry, EpisodeStore(), DeterministicAgent(today=lambda: TODAY), {"calendar": calendar, "records": calendar})  # as the CLI wires them
     result = asyncio.run(run_scenario(core, compiled.tenant, scenario,
                                       effects_counter=lambda: sum(calendar.executions.values())))
     transcript = "\n".join(f"> {text}\n" + "\n".join(f"< [{m.kind}] {m.text}" for m in out)

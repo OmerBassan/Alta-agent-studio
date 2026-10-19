@@ -1,0 +1,50 @@
+# End-to-end scenarios for Greenway Garden Centre (Story 2.6). Expectations are about the record,
+# never about wording, and about outcomes, never about the route the agent takes.
+
+[[scenarios]]
+id = "G1-lavender-is-advised-not-blamed"
+turns = ["It's a lavender in a pot on my balcony. It's gone grey and crispy. I water it every day."]
+[scenarios.expect]
+# The Brief's deliberate failure case, as far as the credential-free stand-in agent can show it: grounded care
+# advice, nothing refused, nothing claimed, no finding of fault. Marking the cause as general knowledge and
+# deferring the guarantee question need a reasoning agent; the Core's side of that is proven in
+# studio/tests/test_knowledge.py (test_the_lavender_case_is_advised_as_general_knowledge_deferred_and_never_blamed).
+evidence = ["reply_claims"]
+denials = []
+no_evidence = ["effect_verified", "effect_unverified"]
+effects = 0
+
+[[scenarios]]
+id = "G2-bulbs-are-excluded"
+turns = ["I'd like a replacement for my bulbs, I bought them within a year and I have the receipt. My name is Ada Lovelace, ada@example.com"]
+[scenarios.expect]
+denials = ["business_refusal:rule_denied"]
+evidence = ["reply_claims"]
+effects = 0
+
+[[scenarios]]
+id = "G3-expired-guarantee"
+turns = ["My hardy outdoor shrub died and I want a replacement under the guarantee. I bought it over a year ago and I have the receipt. My name is Ada Lovelace, ada@example.com"]
+[scenarios.expect]
+denials = ["business_refusal:rule_denied"]
+evidence = ["reply_claims"]
+effects = 0
+
+[[scenarios]]
+id = "G4-no-proof-of-purchase"
+turns = ["My hardy outdoor shrub died, I want a replacement under the guarantee. I bought it within a year but I have no proof. My name is Ada Lovelace, ada@example.com"]
+[scenarios.expect]
+denials = ["business_refusal:rule_denied"]
+evidence = ["reply_claims"]
+effects = 0
+
+[[scenarios]]
+id = "G5-an-eligible-claim-waits-for-the-plant-desk"
+turns = ["My hardy outdoor shrub died and I want a replacement under the guarantee. I bought it within a year and I have the receipt. My name is Ada Lovelace, ada@example.com"]
+[scenarios.expect]
+# Liability is never the agent's: the claim waits for the plant desk's approval (an operator_approval offer,
+# recorded as the denial below) and the case is handed over; it is neither granted nor refused by rule.
+denials = ["business_refusal:operator_approval_required"]
+no_evidence = ["effect_verified"]
+outbox = ["escalation"]
+effects = 0

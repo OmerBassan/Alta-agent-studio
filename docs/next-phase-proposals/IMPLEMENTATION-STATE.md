@@ -9,7 +9,58 @@ Classes: **VERIFIED IMPLEMENTED** · **PARTIALLY IMPLEMENTED** · **NOT IMPLEMEN
 
 ---
 
-## 0. Latest phase report — Phase 1 (runtime foundation + proof gate), 2026-10-14
+## 0. Latest phase report — Phase 2 (grounded answers, Epic 2), 2026-10-19
+
+**Status:** Phase 2 delivered. Sprint 1 (Epic 1, Stories 1.9–1.12) closed on 2026-10-18; Sprint 2 (Epic 2, Stories 2.1–2.6) closed on 2026-10-19. T9–T12 were approved by the user on 2026-10-19. No model tokens were spent in Phase 2: every story is verified credential-free, as the user asked.
+
+### What was built
+
+| Story | Delivered |
+| --- | --- |
+| 2.1 Pin source material | At episode start the Core pins each source's sections under its content hash (`source_snapshots`) and the compiled specification with source texts stripped (`spec_snapshots`). Both are written once. After an edit and a restart, a resumed episode is rebuilt from the store and served the text it started on. |
+| 2.2 Reconstruct from the record | `studio/core/reconstruct.py`: every reply with the items its claims cited (text, source, version, locator), and every retrieval with its query and results, from the store alone, identical after the business folder is deleted. A reply that cites nothing says so. |
+| 2.3 Context assembly | `STUDIO_CONTEXT_ASSEMBLY` = `standing` (default) or `on_demand`. It is platform configuration validated at startup and pinned per episode. On demand, the boundary carries the specification projection plus a titles-only index, and a retrieval issues references for exactly what it returns. Retrieval sits behind a `Retriever` port (`studio/knowledge/`), with the lexical default. |
+| 2.4 Precedence | The same heading in different text is a conflict. The specification outranks every source, and between sources the lower declared precedence wins. Superseded material is marked on retrieval and never offered for citing, and citing it is refused (`source_superseded`). Equal precedence is a blocking validation finding. |
+| 2.5 Fresh reads | `depends_on = {read, max_age_seconds}` on an effect contract. A missing or stale basis is a typed refusal, and the Core never reads on the Agent's behalf. The read-to-effect gap is recorded on the effect's evidence. Dental and brewery bookings now depend on a fresh availability read. |
+| 2.6 Garden centre | `studio/businesses/garden-centre/`: specification, guarantee terms, care guides and scenarios, with no Python. Engine-leak entry P3: no leak (fixture wiring). |
+
+### Verification (2026-10-19, credential-free)
+
+- `python -m pytest studio/tests -q`: all pass, including 17 mutation proofs (5 new in this sprint). CI runs on Linux and Windows on every push.
+- `python -m studio scenarios --today 2026-10-13`: 15/15 (dental 6, brewery 4, garden centre 5), in both `standing` and `on_demand` modes.
+
+### U3: the read-to-effect gap (Story 2.5)
+
+Credential-free, 3 runs of every scenario. Six effects carried a basis. Every one came **one turn** after its read and about **0 s** later. The seconds measure nothing yet, because scripted turns arrive instantly. The distribution that answers U3 needs real or live traffic. `python -m studio gate-report <dir>` prints it from any recorded run.
+
+### Open, and why
+
+- **Story 2.3, AC4, the live comparison of the two context modes.** It needs a model-spend approval; the user chose no spend for Phase 2. The default stays `standing` until then. The gate report already gives calls, latency, pass rate, retrieval misses and mode per run. Known confounds: retrieved text appears twice on demand, and references only grow over a long episode.
+- **The live proof-gate figures (PROOF-GATE.md, 2026-10-17) predate Story 2.5.** Booking now needs an availability read first, so live calls per turn are expected to rise for booking scenarios. The credential-free decision count went from 1.38 to 1.85 per turn by design. Re-measure with the 2.3 comparison.
+- **Deferred items** (`_bmad-output/implementation-artifacts/deferred-work.md`):
+  - the compiler version is not part of the pinned version (Story 3.1);
+  - a capability's adapter is not checked as connected at startup;
+  - an operator's approval does not resume its episode;
+  - blame stated in prose is not caught deterministically (T6, measured in Epic 4).
+
+### System Frame (global manual §1.7), Phase 2
+
+| # | Answer |
+| --- | --- |
+| Failure | Adapters keep their timeouts (`adapter_timeout_s`). A missing or stale basis is a typed refusal, not a hidden read. An unreadable pinned snapshot raises `UnknownTenant`; it never falls back to today's text. |
+| Fallback | A degraded result is visible to the caller: a superseded item is marked, an unresolved citation says why, a reply that cites nothing says so, and a retrieval miss is counted. |
+| Concurrency | Single-writer SQLite store (T3), with a per-process conversation lock. Pinning runs inside the episode-creation transaction. |
+| Scalability | The growing dimension is source size. In standing mode every item is in view on every turn; on-demand exists to bound that, and its cost is to be measured (2.3 AC4). Snapshots grow by one copy per edited version (retention deferred with AD-25). |
+| Observability | Every retrieval, basis gap, supersession and pin is on the episode record under one episode id. Reconstruction reads it back. |
+| Config & secrets | `STUDIO_CONTEXT_ASSEMBLY` is validated at startup by `Settings` and by the Core. No new secret. Adapter connectedness is not yet validated at startup (deferred). |
+| Deployment | No new dependency. CI on Linux and Windows. |
+| Durable state | Snapshots are `INSERT OR IGNORE`, content-addressed and never rewritten. Everything else is unchanged from Phase 1 (transactions, crash reconciliation from Story 1.11). |
+
+### Next step
+
+Phase 3 (Epics 3–4: versions, promotion, rollback, evaluation) needs the user's go-ahead. Its gates are D7 (counterfactual replay, OPEN) and D14 and D15 (PROPOSED, wording applied). Live-spend items waiting on an approval: the 2.3 comparison run.
+
+## 0a. Earlier phase report — Phase 1 (runtime foundation + proof gate), 2026-10-14
 
 **Status: Phase 1 delivered, except the proof gate's two live axes (needs approval to spend).** Nothing committed.
 

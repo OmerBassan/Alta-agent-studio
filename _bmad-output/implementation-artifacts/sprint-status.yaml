@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-14-2026 18:00
-last_updated: 10-18-2026 10:00
+last_updated: 10-19-2026 18:00
 project: AgentStudio
 project_key: NOKEY
 tracking_system: file-system
@@ -53,13 +53,13 @@ development_status:
   1-12-credential-free-ci-on-a-clean-checkout: done  # sprint 1; D3 granted 2026-10-17; CI green on Linux and Windows
   epic-1-retrospective: optional
 
-  epic-2: in-progress  # unblocked: 1.9 proof-gate verdict PASS 2026-10-17; (PRD 7.5, 12: gate sits in front of E4-E9)
+  epic-2: done  # unblocked: 1.9 proof-gate verdict PASS 2026-10-17; (PRD 7.5, 12: gate sits in front of E4-E9)
   2-1-pin-source-material-so-episodes-survive-knowledge-edits: done
   2-2-reconstruct-every-answer-from-the-record-alone: done
   2-3-choose-context-assembly-by-measurement: done  # both modes built and tested credential-free; AC4 live comparison open (spend approval)
   2-4-resolve-conflicting-sources-by-declared-precedence: done  # D5 approved 2026-10-19
   2-5-require-fresh-reads-before-effects-that-depend-on-them: done  # D6 approved 2026-10-19
-  2-6-a-garden-centre-served-from-its-own-material: backlog
+  2-6-a-garden-centre-served-from-its-own-material: done
   epic-2-retrospective: optional
 
   epic-3: backlog
@@ -81,13 +81,13 @@ development_status:
 
   epic-5: backlog
   5-1-a-builder-conversation-that-drafts-a-specification-and-its-k: backlog
-  5-2-take-in-the-operator-s-own-material: backlog  # blocked: D15 (A4); wording applied 2026-10-16
-  5-3-interview-for-what-no-document-holds: backlog
-  5-4-surface-contradictions-and-record-what-cannot-be-settled: backlog
-  5-5-turn-a-narrated-process-into-declarations-not-steps: backlog
-  5-6-the-builder-measures-its-own-burden-and-yield: backlog
-  5-7-test-elicitation-against-a-seeded-business: backlog
-  5-8-revise-a-promoted-specification-by-conversation-with-an-exac: backlog
+  5-2-take-in-the-operator-s-own-material: backlog  # lean (B-18): text/Markdown/pasted only; D15 blocks only its Future plans
+  5-3-interview-for-what-no-document-holds: backlog  # lean (B-18); comparative fixtures are Future plans
+  5-4-surface-contradictions-and-record-what-cannot-be-settled: backlog  # lean (B-18): raise conflicts only; defect recording is Future plans
+  5-5-turn-a-narrated-process-into-declarations-not-steps: backlog  # lean (B-18): gate rejects ordering; fixtures are Future plans
+  5-6-the-builder-measures-its-own-burden-and-yield: backlog  # FUTURE PLANS (B-18): not built in V1
+  5-7-test-elicitation-against-a-seeded-business: backlog  # FUTURE PLANS (B-18): not built in V1
+  5-8-revise-a-promoted-specification-by-conversation-with-an-exac: backlog  # lean (B-18): Before/After only; Also affected/Unchanged are Future plans
   5-9-unfinished-sessions-are-stated-outcomes: backlog
   epic-5-retrospective: optional
 

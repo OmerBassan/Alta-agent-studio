@@ -66,7 +66,7 @@ Story acceptance criteria are in `_bmad-output/planning-artifacts/epics.md`; spr
 | Phase | BMAD epic | Stories | State (2026-10-14) |
 | --- | --- | --- | --- |
 | 1 | Epic 1 — Bounded agent runtime | 1.1–1.12 done (Sprint 1 closed 2026-10-18) | Done: proof gate PASS (PROOF-GATE.md), CI green on Linux and Windows |
-| 2 | Epic 2 — Grounded answers | 2.1–2.6 | After the 1.9 verdict; 2.3–2.5 blocked on D2, D4–D6 |
+| 2 | Epic 2 — Grounded answers | 2.1–2.6 done (Sprint 2 closed 2026-10-19) | Done credential-free; 2.3's live comparison of the two context modes waits on a spend approval |
 | 3 | Epic 3 — Safe change; Epic 4 — Evaluation and backlog | 3.1–3.4; 4.1–4.7 | 4.7 blocked on D7 (O11); 3.3 on D14, D15; 4.5's reference criterion on D15; 4.1's suspension-exclusion criterion on D14 |
 | 4 | Epic 5 — Builder | 5.1–5.9 | Recommended before 5.3, not a dependency: 9.8 operator conversations; 5.2 blocked on D15 |
 | 5 | Epic 6 — Teaching workspace; Epic 7 — Run surfaces | 6.1–6.6; 7.1–7.8 | 7.7 blocked on D9; 7.8 on D8; criteria of 7.1, 7.2 and 7.3 on D14 |

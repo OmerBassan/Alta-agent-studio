@@ -485,3 +485,99 @@ def test_a_dependency_must_name_a_declared_read(business_copy):
     spec = business_copy("dental", replace=[('read = "check_availability"', 'read = "book_visit"')])
     codes = [f.code for f in validate(load_specification(spec)).findings]
     assert "basis_not_a_read" in codes
+
+
+# --- Story 2.6: a garden centre served from its own material ---------------------------------
+
+GC = "greenway-garden-centre"
+GARDEN = Path(__file__).resolve().parents[1] / "businesses" / "garden-centre" / "specification.toml"
+LAVENDER = "It's a lavender in a pot on my balcony. It's gone grey and crispy. I water it every day."
+
+
+def test_the_garden_centre_passes_the_gate_with_no_business_python():
+    from studio.spec import validate
+    assert validate(load_specification(GARDEN)).passed
+    assert not list(GARDEN.parent.rglob("*.py"))
+
+
+def test_the_lavender_case_is_advised_as_general_knowledge_deferred_and_never_blamed():
+    """The Brief's deliberate failure case, run credential-free: the Core lets the right answer through and
+    stops the wrong one. Blaming the customer is refused before egress; the claim is handed to a person."""
+    from studio.core.types import Claim, EscalateRequest
+    w, runner = _core_on(GARDEN)
+    blame = RespondRequest(goal="plant_care_advice", message="You overwatered it, so the guarantee does not apply.",
+                           claims=(Claim(kind="conclusion", text="overwatered", conclusion="customer_neglect"),))
+    advise = RespondRequest(
+        goal="plant_care_advice",
+        message="Lavender in a pot usually wants water only when the top of the compost is dry; daily watering can "
+                "turn it grey. Whether the guarantee covers a balcony pot is for our plant desk to decide.",
+        claims=(Claim(kind="general_knowledge", text="potted lavender needs little water"),
+                Claim(kind="conclusion", text="guarantee position undetermined",
+                      conclusion="guarantee_position_undetermined")))
+    defer = EscalateRequest(goal="guarantee_claim", reason_class="cause_ambiguous",
+                            summary="Lavender in a balcony pot, grey and crispy; customer may want to claim. "
+                                    "Whether a potted balcony plant is covered is not declared.",
+                            message="I've passed the guarantee question to our plant desk, who will reply.")
+    out = w.send(LAVENDER, conversation="lavender", tenant=GC, script=[blame, advise])
+    w.send("Can I get a replacement?", conversation="lavender", tenant=GC, script=[defer])
+    eid = out.episode_id
+    reasons = [d["reason"] for d in w.store.denials(GC, eid)]
+    assert "conclusion_forbidden" in reasons  # the finding of neglect never left
+    assert "rule_denied" not in reasons       # the claim was not refused
+    sent = " ".join(s["payload"]["text"] for s in w.store.steps(GC, eid) if s["kind"] == "egress")
+    assert "overwatered" not in sent
+    claims = next(e for e in w.store.evidence(GC, eid) if e["kind"] == "reply_claims")
+    assert claims["payload"]["general_knowledge_used"] is True
+    kinds = {c["kind"]: c for c in claims["payload"]["claims"]}
+    assert kinds["conclusion"]["conclusion"] == "guarantee_position_undetermined"
+    episode = w.store.get_episode(GC, eid)
+    assert episode.close_reason == "escalated"  # deferred to a person, not refused
+    assert sum(w.calendar.executions.values()) == 0
+    runner.close()
+
+
+def test_advice_and_a_replacement_are_pursued_one_at_a_time_with_explicit_parking():
+    w, runner = _core_on(GARDEN)
+    out = w.send(LAVENDER, conversation="both", tenant=GC, script=[
+        RespondRequest(goal="plant_care_advice", message="Let's look at the plant first.")])
+    w.send("And I want a replacement.", conversation="both", tenant=GC, script=[
+        RespondRequest(goal="guarantee_claim", message="I can look at a claim. When did you buy it?")])
+    goals = w.store.goals(GC, out.episode_id)
+    assert goals == {"plant_care_advice": "parked", "guarantee_claim": "active"}
+    w.send("Back to the plant, please.", conversation="both", tenant=GC, script=[
+        RespondRequest(goal="plant_care_advice", message="Of course.")])
+    goals = w.store.goals(GC, out.episode_id)
+    assert goals == {"plant_care_advice": "active", "guarantee_claim": "parked"}
+    assert list(goals.values()).count("active") == 1
+    runner.close()
+
+
+def test_an_approved_claim_is_written_to_the_records_system_and_read_back():
+    """The claim path end to end: the plant desk approves the exact payload, the claim is created on the
+    records system the specification names, and success is its read-back."""
+    from studio.core.types import EffectRequest, FactUpdate
+    from studio.tests.helpers import World
+    from studio.agent.scripted import ScriptedAgent
+    from studio.tests.helpers import args as as_args
+    runner = asyncio.Runner()
+    registry = SpecRegistry()
+    registry.register(compile_specification(load_specification(GARDEN)))
+    store, agent, records = EpisodeStore(), ScriptedAgent(), SimulatedCalendar()
+    w = World(core=Core(registry, store, agent, {"records": records}), agent=agent, store=store,
+              calendar=records, runner=runner)
+    values = {"customer_name": "Ada Lovelace", "contact_email": "ada@example.com", "item_category": "hardy_outdoor",
+              "purchase_window": "within_a_year", "proof_of_purchase": "receipt"}
+    claim_args = {k: values[k] for k in ("item_category", "purchase_window", "proof_of_purchase")}
+    claim = EffectRequest(goal="guarantee_claim", capability="create_guarantee_claim", arguments=as_args(claim_args),
+                          facts=tuple(FactUpdate(name=k, value=v) for k, v in values.items()))
+    out = w.send("My hardy shrub died; replacement please.", conversation="claim", tenant=GC, script=[
+        claim, RespondRequest(goal="guarantee_claim", message="I've asked the plant desk to approve your claim.")])
+    offer = next(o for o in store.offers(GC, out.episode_id, "operator_approval"))
+    assert sum(records.executions.values()) == 0
+    w.core.decide_approval(GC, offer["offer_id"], approve=True, by="plantdesk")
+    w.send("Any news on my claim?", conversation="claim", tenant=GC, script=[
+        EffectRequest(goal="guarantee_claim", capability="create_guarantee_claim", arguments=as_args(claim_args)),
+        RespondRequest(goal="guarantee_claim", message="Your claim has been created.")])
+    verified = [e for e in store.evidence(GC, out.episode_id) if e["kind"] == "effect_verified"]
+    assert len(verified) == 1 and sum(records.executions.values()) == 1
+    runner.close()

@@ -133,6 +133,33 @@ Formerly the retroactive note under PROOF-GATE.md's leak log: "DL-015 (strict co
 
 Relation to the old label: "should have been platform behaviour from the start" becomes *genuinely novel* with the shape *platform semantics*. It is not *should have been configuration*: the change has no business value in it (test C).
 
+#### P3 — Garden centre: a records system for guarantee claims
+
+| Field | Value |
+| --- | --- |
+| Business | Greenway Garden Centre (`studio/businesses/garden-centre/`, tenant `greenway-garden-centre`), hand-written in Story 2.6 from the Brief's exemplar 3 (`spec-stress-test.md` §3) |
+| Build position | Pre-programme; third business built on the studio Core (dental and brewery events came first) |
+| Need | The guarantee claim (`create_guarantee_claim`, adapter `records`, operation `claim`) needs a connected system of record to write to and read back from. |
+| Engine paths changed | `studio/__main__.py` only: the scenario runner and `chat` register the same `SimulatedCalendar` instance under a second adapter name, `records`, beside `calendar`. Nothing in `studio/core`, `studio/spec`, `studio/agent`, `studio/channels` or `studio/extensions`. |
+| Evidence | The change is in the Story 2.6 commit. `SimulatedCalendar.effect` and `.read_back` (`studio/extensions/simulated.py`) store and read back any payload by idempotency key whatever the operation name, so `claim` needs no simulator change. The `Adapter` contract (`studio/core/ports.py`: `read`, `effect`, `read_back`, `AdapterResult`) is unchanged. The specification passes the validation suite as written, with no `.py` file in the business folder (`test_the_garden_centre_passes_the_gate_with_no_business_python`). Scenarios G1–G5 pass credential-free. The pytest scenario runner (`test_end_to_end.py`) wires the same adapters as the CLI, and `test_an_approved_claim_is_written_to_the_records_system_and_read_back` exercises the claim on `records` through approval, effect and read-back. The Phase 2 Core changes (Stories 2.1–2.5) were made for platform requirements (FR30–FR37, T9–T12) before this business, and none was needed by it. |
+| Shares a change with | none |
+| Rules version | 1 |
+| Steps | 0 Scope: yes, one engine path (the CLI wiring). 1 Fixture: yes. The change only wires an existing simulated system of record to the adapter name the specification declares. The claims record is data a real records system would hold (FR36), and the adapter contract is unchanged (`ports.py`). |
+| Outcome | **No leak** (reason: fixture data) |
+| Decided by | Step 1 (fixture) |
+| Justification | not required |
+| Litmus flag | No. (1) No engine line tests the business's identity; the alias is registered for every business the runner loads. (2) No code path exists for the garden centre only. |
+| Note | Everything the Brief's exemplar needs is declared, not coded: the exclusions, timeframe and proof rules deny the claim (`deny_when`); the liability class with `operator_approval` defers an eligible claim to a person; `customer_neglect` is a forbidden conclusion and `general_knowledge_allowed = true` lets care advice be marked as general knowledge (P2-F5 confirmed). Not declared in this first cut, from the Brief:
+  - the till-system (EPOS) lookup and the stock check;
+  - "one claim per item" across conversations (idempotency stops duplicates only within one);
+  - the value-threshold escalation;
+  - `issue_credit_note`, `notify_horticulturist` and `get_care_guide`.
+
+  These wait for a real till and records system (Epic 8) or the Builder build of this business (Story 9.4). The simulated system of record is the calendar simulator, so a claim's reference and its errors use booking wording (`BK-…`, "no such booking"). Test wiring only. |
+| Proposed by | Claude, 2026-10-19 |
+| Judged by | Claude, under the user's delegation of 2026-10-17 ("make your own decision"); the user may override at any time |
+| Second check | pending |
+
 ### Programme entries (the business 1 → 4 trend)
 
 None yet. The first comes from Story 9.2.

@@ -62,7 +62,8 @@ def test_runs_are_independent_and_recorded(tmp_path, capsys):
 
 def test_record_and_report_round_trip_without_model_calls(tmp_path, capsys):
     record = tmp_path / "rec"
-    assert main(["scenarios", "--record", str(record), "--today", TODAY]) == 0
+    # The proof gate's two businesses; later businesses (the garden centre, Story 2.6) are not in its figures.
+    assert main(["scenarios", "brewery", "dental", "--record", str(record), "--today", TODAY]) == 0
     capsys.readouterr()
     assert main(["gate-report", str(record)]) == 0
     text = capsys.readouterr().out

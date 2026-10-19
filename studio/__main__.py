@@ -107,7 +107,9 @@ async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
                     calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
                     store_file = proof_gate.store_name(label, scenario["id"], run)
                     store = EpisodeStore(record / store_file if record is not None else ":memory:", clock=clock)
-                    core = Core(registry, store, agent, {"calendar": calendar},
+                    # One generic simulated system of record stands in for each business's own systems until
+                    # one is connected: a calendar for bookings, a records system for claims.
+                    core = Core(registry, store, agent, {"calendar": calendar, "records": calendar},
                                 CoreSettings(context_assembly=settings.context_assembly))
                     try:
                         result = await run_scenario(core, compiled.tenant, scenario,
@@ -170,7 +172,8 @@ async def _chat(args, settings: Settings) -> int:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     store = EpisodeStore(settings.data_dir / f"{loaded.tenant}.db")
     agent, port = _agent(settings, args.live, date.today())
-    core = Core(registry, store, agent, {"calendar": SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))},
+    calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
+    core = Core(registry, store, agent, {"calendar": calendar, "records": calendar},
                 CoreSettings(context_assembly=settings.context_assembly))
     channel = HarnessChannel(core, loaded.tenant)
     conversation = f"terminal-{date.today().isoformat()}"
