@@ -195,6 +195,21 @@ CREATE TABLE IF NOT EXISTS late_results (
   payload TEXT NOT NULL,
   at TEXT NOT NULL
 );
+-- Pinned material (Story 2.1): written once, kept for audit and reconstruction (FR37); retention is
+-- deferred with AD-25, so these grow by one copy per edited version.
+CREATE TABLE IF NOT EXISTS source_snapshots (
+  content_hash TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL,
+  sections TEXT NOT NULL,
+  stored_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS spec_snapshots (
+  tenant TEXT NOT NULL,
+  spec_version TEXT NOT NULL,
+  compiled TEXT NOT NULL,
+  stored_at TEXT NOT NULL,
+  PRIMARY KEY (tenant, spec_version)
+);
 """
 
 logger = logging.getLogger("studio.store")
@@ -426,6 +441,26 @@ class EpisodeStore:
                    "issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                    (ref, tenant, episode_id, item_id, source_id, source_version, locator, self.now()))
         return ref
+
+    # --- pinned material (Story 2.1) ----------------------------------------------------
+    # Written once and never updated: a content hash names exactly one content.
+
+    def put_source_snapshot(self, content_hash: str, source_id: str, sections: list[dict]) -> None:
+        self._exec("INSERT OR IGNORE INTO source_snapshots (content_hash, source_id, sections, stored_at) "
+                   "VALUES (?, ?, ?, ?)", (content_hash, source_id, _dump(sections), self.now()))
+
+    def source_snapshot(self, content_hash: str) -> Optional[list[dict]]:
+        row = self._one("SELECT sections FROM source_snapshots WHERE content_hash = ?", (content_hash,))
+        return json.loads(row["sections"]) if row else None
+
+    def put_spec_snapshot(self, tenant: str, spec_version: str, compiled_json: str) -> None:
+        self._exec("INSERT OR IGNORE INTO spec_snapshots (tenant, spec_version, compiled, stored_at) "
+                   "VALUES (?, ?, ?, ?)", (tenant, spec_version, compiled_json, self.now()))
+
+    def spec_snapshot(self, tenant: str, spec_version: str) -> Optional[str]:
+        row = self._one("SELECT compiled FROM spec_snapshots WHERE tenant = ? AND spec_version = ?",
+                        (tenant, spec_version))
+        return row["compiled"] if row else None
 
     def references(self, tenant: str, episode_id: str) -> list[dict]:
         return [dict(r) for r in self._all("SELECT * FROM provenance WHERE tenant = ? AND episode_id = ? ORDER BY ref",

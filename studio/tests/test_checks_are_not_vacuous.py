@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HARNESS = "studio/core/harness.py"
 
 CHECKS = {
+    "an episode pins the material it starts on": ("            self._pin(compiled)", "            pass"),
     "an effect a crash left started is reconciled": (
         "        results: list[tuple[str, Result]] = await self._reconcile_started_effects(episode, entry.compiled)",
         "        results: list[tuple[str, Result]] = []"),
@@ -59,6 +60,6 @@ def test_disabling_the_check_fails_the_suite(check, tmp_path):
     assert source.count(original) == 1, f"the check '{check}' is no longer in {HARNESS} as written"
     target.write_text(source.replace(original, disabled), encoding="utf-8")
     env = {**os.environ, "STUDIO_SKIP_MUTATION": "1", "PYTHONPATH": str(copy)}
-    result = subprocess.run([sys.executable, "-m", "pytest", "studio/tests/test_core.py", "-q", "-x",
+    result = subprocess.run([sys.executable, "-m", "pytest", "studio/tests/test_core.py", "studio/tests/test_knowledge.py", "-q", "-x",
                              "-p", "no:cacheprovider"], cwd=copy, env=env, capture_output=True, text=True)
     assert result.returncode != 0, f"with '{check}' disabled the Core suite still passed:\n{result.stdout[-500:]}"

@@ -53,12 +53,12 @@ development_status:
   1-12-credential-free-ci-on-a-clean-checkout: done  # sprint 1; D3 granted 2026-10-17; CI green on Linux and Windows
   epic-1-retrospective: optional
 
-  epic-2: backlog  # unblocked: 1.9 proof-gate verdict PASS 2026-10-17; (PRD 7.5, 12: gate sits in front of E4-E9)
-  2-1-pin-source-material-so-episodes-survive-knowledge-edits: backlog
-  2-2-reconstruct-every-answer-from-the-record-alone: backlog
-  2-3-choose-context-assembly-by-measurement: backlog  # blocked: D2 (T9), D4 (T10)
-  2-4-resolve-conflicting-sources-by-declared-precedence: backlog  # blocked: D5 (T11)
-  2-5-require-fresh-reads-before-effects-that-depend-on-them: backlog  # blocked: D6 (T12)
+  epic-2: in-progress  # unblocked: 1.9 proof-gate verdict PASS 2026-10-17; (PRD 7.5, 12: gate sits in front of E4-E9)
+  2-1-pin-source-material-so-episodes-survive-knowledge-edits: done
+  2-2-reconstruct-every-answer-from-the-record-alone: done
+  2-3-choose-context-assembly-by-measurement: backlog  # D2, D4 approved 2026-10-19; live comparison AC waits on a spend approval
+  2-4-resolve-conflicting-sources-by-declared-precedence: backlog  # D5 approved 2026-10-19
+  2-5-require-fresh-reads-before-effects-that-depend-on-them: backlog  # D6 approved 2026-10-19
   2-6-a-garden-centre-served-from-its-own-material: backlog
   epic-2-retrospective: optional
 

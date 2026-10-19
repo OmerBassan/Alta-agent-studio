@@ -199,6 +199,7 @@ class Core:
         """Episode creation is the Core's, on an adapter's request (AD-13). The
         versions in force are pinned now and read from the episode thereafter."""
         with self.store.transaction():
+            self._pin(compiled)
             episode = self.store.create_episode(compiled.tenant, conversation_key, compiled.spec_version,
                                                 compiled.compiler_version)
             seq = self.store.append_step(episode.tenant, episode.episode_id, "core", "episode_started", {
@@ -210,9 +211,54 @@ class Core:
                                    {"count": len(compiled.context.items), "after": seq})
         return episode
 
+    def _pin(self, compiled: CompiledSpecification) -> None:
+        """Make the version an episode starts on durable (Story 2.1, AD-11): each
+        source's sections once under its content hash, and the compiled
+        specification with those texts stripped. Both are written once and never
+        rewritten, so a leaflet edited tomorrow cannot change what this episode
+        was told, even after a restart."""
+        sources: dict[str, tuple[str, list[dict]]] = {}
+        for item in compiled.context.items:
+            if item.origin == "source":
+                sources.setdefault(item.source_version, (item.source_id, []))[1].append(
+                    {"locator": item.locator, "title": item.title, "text": item.text})
+        for content_hash, (source_id, sections) in sources.items():
+            self.store.put_source_snapshot(content_hash, source_id, sections)
+        stripped = compiled.model_copy(update={"context": compiled.context.model_copy(update={"items": tuple(
+            i.model_copy(update={"text": ""}) if i.origin == "source" else i for i in compiled.context.items)})})
+        self.store.put_spec_snapshot(compiled.tenant, compiled.spec_version, stripped.model_dump_json())
+
+    def _entry(self, tenant: str, version: str) -> _Entry:
+        """The pinned version an episode runs on. After a restart that followed
+        an edit, the registry no longer holds it: rebuild it from the store."""
+        try:
+            return self.registry.entry(tenant, version)
+        except UnknownTenant:
+            raw = self.store.spec_snapshot(tenant, version)
+            if raw is None:
+                raise
+        stripped = CompiledSpecification.model_validate_json(raw)
+        texts: dict[tuple[str, str], str] = {}
+        loaded: set[str] = set()
+        items = []
+        for item in stripped.context.items:
+            if item.origin == "source":
+                if item.source_version not in loaded:
+                    loaded.add(item.source_version)
+                    for section in self.store.source_snapshot(item.source_version) or ():
+                        texts[(item.source_version, section["locator"])] = section["text"]
+                text = texts.get((item.source_version, item.locator))
+                if text is None:
+                    raise UnknownTenant(f"{tenant}@{version}: source {item.source_id} was never pinned")
+                item = item.model_copy(update={"text": text})
+            items.append(item)
+        compiled = stripped.model_copy(update={"context": stripped.context.model_copy(update={"items": tuple(items)})})
+        self.registry.register(compiled, live=False)
+        return self.registry.entry(tenant, version)
+
     async def _turn(self, episode: Episode, inbound: InboundMessage, seq: int) -> TurnOutcome:
         tenant, eid = episode.tenant, episode.episode_id
-        entry = self.registry.entry(tenant, episode.spec_version)
+        entry = self._entry(tenant, episode.spec_version)
         compiled = entry.compiled
         agent_suspended, effects_suspended = self.store.flags(tenant)
         if agent_suspended:
@@ -902,7 +948,7 @@ class Core:
         episode = self.store.get_episode(tenant, episode_id)
         if episode is None:
             raise LookupError(f"no episode {episode_id} for {tenant}")
-        policy = self.registry.entry(tenant, episode.spec_version).compiled.policy
+        policy = self._entry(tenant, episode.spec_version).compiled.policy
         if goal not in policy.goals or obligation not in policy.goals[goal].waivable:
             raise PermissionError(f"'{obligation}' of '{goal}' is not declared waivable")
         with self.store.transaction():
@@ -1001,7 +1047,7 @@ class Core:
                 return "unreadable_deadline"
             if not due:
                 return "not_due"
-            entry = self.registry.entry(tenant, episode.spec_version)  # raises UnknownTenant
+            entry = self._entry(tenant, episode.spec_version)  # raises UnknownTenant
             agent_suspended, effects_suspended = self.store.flags(tenant)
             if agent_suspended:
                 return "agent_suspended"

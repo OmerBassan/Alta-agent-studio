@@ -18,7 +18,7 @@ Clarifications made while reconciling, each from a source already cited in this 
 - **Q1, Q3, Q4** were already resolved by precedence in NEXT-PHASE-PLAN revision 3 §1 (sequencing; FR19 settles A-21; `CLAUDE.md` now scoped). **Q5** (O11 replay) is gate D7. **Q6** (budget) is superseded by the user's phase-by-phase mandate.
 - **B-15** (rollback surface) → gate D9, Story 7.7. **B-16** (UX contract gaps) → each gap owned by a story or a gate (NEXT-PHASE-PLAN §6; `epics.md` Additional Requirements); gaps 4, 5, 12, 14 go to the Spine (gate D14) and 10, 13, 17 to the PRD (gate D15), all PROPOSED (2026-10-15). 2026-10-16: the user approved the wording (not the decisions, which stay PROPOSED); applied as Spine AD-26–AD-29 and PRD §14 A4–A7, with EXPERIENCE.md Amendments item 20. B-16's status column is unchanged: gaps 3, 15, 16, 18 and 19 remain open. **E-04** (replay) → D7, Story 4.7. **E-06** (real business, operator conversations) → D13, Stories 9.7, 9.8. **D-05** (CI) → Story 1.12, gate D3.
 - **CX-06** (clerical, 2026-10-15): the PRD now records the two approved amendments in §14 (A1 templates, A2 divergence alerting) plus A3 (O1 narrowed for V1), with inline markers and no rewritten text. Status column unchanged.
-- **T9–T12 remain PROPOSED** (gates D2, D4, D5, D6). The recommendation for T9 is itself PROPOSED: both context-assembly modes as a platform setting, default chosen by measurement.
+- **T9–T12 APPROVED by the user 2026-10-19** (gates D2, D4, D5, D6), together with the go-ahead for Sprint 2 (Phase 2). T9 as recommended: both context-assembly modes as a platform setting, the default chosen by measurement (Story 2.3). *Previously PROPOSED (2026-10-14).*
 
 ## Revision 3 (2026-10-14) — implementation progress
 

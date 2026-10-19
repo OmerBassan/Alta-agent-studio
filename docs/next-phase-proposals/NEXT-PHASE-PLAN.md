@@ -116,9 +116,9 @@ Each passes AD-1's filter ("does this constrain the Agent, or decide its next st
 | T7 | **Model port**: a studio-owned, provider-agnostic OpenAI-compatible `/v1` client configured only by environment (`STUDIO_MODEL`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_TOKEN_PARAM`, `OPENAI_REASONING_EFFORT`), JSON-mode structured output with parse-then-validate, per-call records (tokens, latency, path, ok) on the episode record. Arguments are `[{name, value}]` lists, never free-keyed dicts. | Import `boilerplate/llm_client.py`. | That file is an engine file copied per agent and loads a `.env` beside itself at import, so it cannot be a shared package dependency. PRD §7.4 classifies the client as "reusable as concept". DL-037 showed free-keyed dicts break strict schemas. | — |
 | T8 | **Credential-free mode is a deterministic, domain-agnostic agent** that reads only the compiled projections. | Domain-coded mock heuristics (the old system). | PRD §7.4 keeps "a credential-free mock mode" as reusable; FR95 and the reasoning-log `domain-coupled-selftest` lesson forbid domain-coupled gates. Lets the whole product run and be demonstrated with zero tokens, and lets CI run end to end. | It is not the product's intelligence and is never presented as such. |
 
-### 3.1 Phase 2 — findings and proposed choices (**PROPOSED, NOT APPROVED**; recorded 2026-10-14)
+### 3.1 Phase 2 — findings and choices (recorded 2026-10-14; **T9–T12 APPROVED by the user 2026-10-19**)
 
-**Status:** proposal for the user's review. The user has **not** authorized Phase 2; nothing below is implemented. T9–T12 are not yet in force and do not join T1–T8 until the user approves.
+**Status:** the user approved Sprint 2 (Phase 2) and T9–T12 on 2026-10-19; they join T1–T8. T9 is approved as recommended: both modes as a platform setting, default chosen by measurement.
 
 **Findings from the Phase 1 code (verified by reading it on 2026-10-14):**
 
@@ -182,10 +182,10 @@ Status words follow the register: **OPEN** = undecided product item; **PROPOSED*
 | --- | --- | --- | --- | --- | --- | --- |
 | **D1** | Spend on one live proof-gate run | Permission | 1.9 → 1.10, 1.11, Epic 2 onward | **Yes** | Approve ≤ US$0.25 under the existing US$0.50 ceiling, on the settled model settings (DL-034/037) | Withhold: nothing behind the gate starts |
 | **D3** | Commit and push | Permission | 1.12; protects the untracked `studio/` | **Yes** | Commit Phase 1 and the planning set on a new branch (e.g. `studio/v1`); push when you say | Stay untracked: an accidental clean is unrecoverable and no clean-checkout proof is possible |
-| **D2** | T9 — source material reached only through `retrieve` | PROPOSED | 2.3 | No (Sprint 2) | Build both modes as a platform setting; choose the default from the measured comparison | Adopt T9 outright: less code, but designs up front what the Spine says to measure |
-| **D4** | T10 — lexical retrieval behind a port; embeddings only on measured misses | PROPOSED | 2.3 | No | Approve | Embeddings now: earlier recall, an unmeasured optimization (E-07) |
-| **D5** | T11 — same-heading conflicts resolved by declared precedence | PROPOSED | 2.4 | No | Approve | Agent judges conflicts: non-deterministic, unenforceable |
-| **D6** | T12 — stale or missing effect basis is a typed refusal; gap recorded (U3) | PROPOSED | 2.5 | No | Approve | Adapter re-checks at execution: no declared bound, U3 stays unmeasured |
+| **D2** | T9 — source material reached only through `retrieve` | **APPROVED 2026-10-19** (both modes, default by measurement) | 2.3 | No (Sprint 2) | Build both modes as a platform setting; choose the default from the measured comparison | Adopt T9 outright: less code, but designs up front what the Spine says to measure |
+| **D4** | T10 — lexical retrieval behind a port; embeddings only on measured misses | **APPROVED 2026-10-19** | 2.3 | No | Approve | Embeddings now: earlier recall, an unmeasured optimization (E-07) |
+| **D5** | T11 — same-heading conflicts resolved by declared precedence | **APPROVED 2026-10-19** | 2.4 | No | Approve | Agent judges conflicts: non-deterministic, unenforceable |
+| **D6** | T12 — stale or missing effect basis is a typed refusal; gap recorded (U3) | **APPROVED 2026-10-19** | 2.5 | No | Approve | Adapter re-checks at execution: no declared bound, U3 stays unmeasured |
 | **D7** | O11 — counterfactual replay in V1 | OPEN (product) | 4.7 | No (before Phase 3) | Yes: it is how a correction is shown to fix its case, and the unoccupied position the Brief found (`m-brief` 36) | Defer: the correction loop has no proof of effect |
 | **D8** | Who adjudicates sampled refusals, and where (UX gap 15) | OPEN (product) | 7.8 | No (before Phase 5) | In V1, adjudication outside the operator surface by the platform developer over the 4.4 queue, since Activity holds divergences only (`m-ux` 87) | The operator adjudicates in Activity: needs a UX amendment and adds a non-divergence item to the list |
 | **D9** | A rollback action on the operator surface (UX gap 16) | OPEN (product) | 7.7 | No (before Phase 5) | Offer "return to the previous version" at the approval moment, recorded like any promotion; amend EXPERIENCE.md through `bmad-ux` | Developer-only rollback in V1: an operator cannot undo a bad change themselves |
