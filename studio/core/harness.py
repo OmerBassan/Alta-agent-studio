@@ -45,6 +45,8 @@ from studio.core.store import Episode, EpisodeStore, parse_instant
 from studio.core.types import (TURN_ENDING_KINDS, Argument, ClarifyRequest, Denial, EffectRequest, EscalateRequest,
                                ReadRequest, Result, RespondRequest, RetrieveRequest, SuspendRequest)
 from studio.core.vocabulary import REASON_CLASS
+from studio.config import CONTEXT_ASSEMBLY_MODES, ConfigurationError
+from studio.knowledge.retrieval import LexicalRetriever, Retriever
 from studio.spec.compile import CapabilityPolicy, CompiledSpecification, ContextItem
 
 logger = logging.getLogger("studio.core")
@@ -60,6 +62,11 @@ class CoreSettings:
     stall_repeats: int = 3
     adapter_timeout_s: float = 10.0
     agent_timeout_s: float = 90.0
+    context_assembly: str = "standing"
+    """``standing``: every item's reference is issued at episode start and its text is in view.
+    ``on_demand``: only the specification projection is; source material is reached through retrieve
+    (T9, approved 2026-10-19: both modes, the default chosen by measurement — Story 2.3)."""
+
 
 
 class UnknownTenant(LookupError):
@@ -140,17 +147,14 @@ def _due(deadline: Optional[str], now: str) -> bool:
     return deadline is not None and parse_instant(deadline) <= parse_instant(now)
 
 
-_WORD = re.compile(r"[a-z0-9]+")
-_STOP = frozenset("a an and are at be can do for how i in is it me my of on or the to we what when you your".split())
-
-
-def _terms(text: str) -> set[str]:
-    return {w for w in _WORD.findall(text.lower()) if w not in _STOP and len(w) > 1}
-
-
 class Core:
     def __init__(self, registry: SpecRegistry, store: EpisodeStore, agent: AgentRuntime,
-                 adapters: dict[str, Adapter], settings: CoreSettings = CoreSettings()):
+                 adapters: dict[str, Adapter], settings: CoreSettings = CoreSettings(),
+                 retriever: Optional[Retriever] = None):
+        if settings.context_assembly not in CONTEXT_ASSEMBLY_MODES:
+            raise ConfigurationError(f"context_assembly must be one of {CONTEXT_ASSEMBLY_MODES}, "
+                                     f"got {settings.context_assembly!r}")
+        self.retriever = retriever or LexicalRetriever()
         self.registry = registry
         self.store = store
         self.agent = agent
@@ -204,11 +208,14 @@ class Core:
                                                 compiled.compiler_version)
             seq = self.store.append_step(episode.tenant, episode.episode_id, "core", "episode_started", {
                 "spec_version": compiled.spec_version, "compiler_version": compiled.compiler_version})
-            for item in compiled.context.items:
+            standing = [i for i in compiled.context.items
+                        if self.settings.context_assembly == "standing" or i.origin == "specification"]
+            for item in standing:
                 self.store.issue_reference(episode.tenant, episode.episode_id, item.item_id, item.source_id,
                                            item.source_version, item.locator)
             self.store.append_step(episode.tenant, episode.episode_id, "core", "references_issued",
-                                   {"count": len(compiled.context.items), "after": seq})
+                                   {"count": len(standing), "after": seq,
+                                    "context_assembly": self.settings.context_assembly})
         return episode
 
     def _pin(self, compiled: CompiledSpecification) -> None:
@@ -413,23 +420,29 @@ class Core:
     # --- retrieve ---------------------------------------------------------------------
 
     def _retrieve(self, episode: Episode, entry: _Entry, request: RetrieveRequest, seq: int) -> Result:
-        refs = self.store.references(episode.tenant, episode.episode_id)
-        if not refs:
+        """Retrieval over the episode's pinned material (Story 2.3). In standing
+        mode every item was issued at episode start; on demand, a retrieval
+        issues references for exactly the items it returns, so the Agent can
+        only cite what it has retrieved (FR32, FR38)."""
+        tenant, eid = episode.tenant, episode.episode_id
+        issued = {r["item_id"]: r["ref"] for r in self.store.references(tenant, eid)}
+        if self._assembly(episode) == "on_demand":
+            pool = list(entry.items.values())
+        else:
+            pool = [entry.items[i] for i in issued if i in entry.items]
+        if not pool:
             return _refused("retrieve", "nothing_to_retrieve", "this business has no authoritative material")
-        query = _terms(request.query)
-        scored = []
-        for row in refs:
-            item = entry.items.get(row["item_id"])
-            if item is None:
-                continue
-            score = len(query & _terms(item.title + " " + item.text))
-            if score:
-                scored.append((-score, item.precedence, row["ref"], item))
-        scored.sort(key=lambda s: (s[0], s[1], s[2]))
-        found = tuple({"reference": ref, "title": item.title, "text": item.text}
-                      for _, _, ref, item in scored[:4])
-        self.store.add_evidence(episode.tenant, episode.episode_id, "retrieval",
-                                {"query": request.query, "references": [f["reference"] for f in found]}, seq)
+        found, records = [], []
+        with self.store.transaction():
+            for item in self.retriever.search(request.query, pool, 4):
+                ref = issued.get(item.item_id) or self.store.issue_reference(
+                    tenant, eid, item.item_id, item.source_id, item.source_version, item.locator)
+                found.append({"reference": ref, "title": item.title, "text": item.text})
+                records.append({"reference": ref, "source_id": item.source_id,
+                                "source_version": item.source_version, "locator": item.locator})
+            self.store.add_evidence(tenant, eid, "retrieval", {
+                "query": request.query, "references": [r["reference"] for r in records], "items": records}, seq)
+        found = tuple(found)
         return Result(kind="retrieve", status="ok", items=found,
                       note=None if found else "Nothing in the business's material matches this.")
 
@@ -878,6 +891,14 @@ class Core:
     # The Agent's view
     # ==============================================================================
 
+    def _assembly(self, episode: Episode) -> str:
+        """The context-assembly mode is pinned at episode start, like the specification version (AD-11): a
+        restart under a different setting does not change what an episode can reach."""
+        for step in self.store.steps(episode.tenant, episode.episode_id):
+            if step["kind"] == "references_issued":
+                return step["payload"].get("context_assembly", "standing")
+        return self.settings.context_assembly
+
     def _view(self, episode: Episode, entry: _Entry, constraints: tuple[str, ...],
               results: list[tuple[str, Result]], requests_left: int) -> AgentView:
         tenant, eid = episode.tenant, episode.episode_id
@@ -908,8 +929,18 @@ class Core:
                 references.append(ProvenanceRef(ref=row["ref"], item_id=item.item_id, title=item.title,
                                                 text=item.text))
         current = self.store.get_episode(tenant, eid)
+        context, index = compiled.context, ()
+        if self._assembly(episode) == "on_demand":
+            # The boundary itself holds only the specification projection and what was retrieved; the rest of
+            # the material is named by title only, so the Agent knows what it can retrieve (Story 2.3).
+            issued = {r.item_id for r in references}
+            context = context.model_copy(update={"items": tuple(
+                i for i in context.items if i.origin == "specification" or i.item_id in issued)})
+            index = tuple(sorted({i.title for i in compiled.context.items
+                                  if i.origin == "source" and i.item_id not in issued}))
         return AgentView(
-            episode_id=eid, context=compiled.context, surface=compiled.surface, references=tuple(references),
+            episode_id=eid, context=context, surface=compiled.surface, references=tuple(references),
+            material_index=index,
             conversation=tuple(conversation), facts=tuple(sorted(facts.items())),
             active_goal=current.active_goal,
             parked_goals=tuple(sorted(g for g, s in goals.items() if s == "parked")),

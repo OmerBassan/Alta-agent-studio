@@ -21,6 +21,10 @@ _TOKEN_PARAMS = ("max_tokens", "max_completion_tokens")
 _EFFORT = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
+CONTEXT_ASSEMBLY_MODES = ("standing", "on_demand")
+"""Story 2.3 (T9): the one list of context-assembly modes; ``Settings`` and the Core both validate against it."""
+
+
 class ConfigurationError(ValueError):
     pass
 
@@ -44,6 +48,8 @@ class Settings:
     data_dir: Path
     model: Optional[ModelSettings]
     """None means credential-free mode."""
+    context_assembly: str = "standing"
+    """Platform configuration, never business configuration (AD-15): ``standing`` or ``on_demand``."""
 
     @property
     def live(self) -> bool:
@@ -54,8 +60,12 @@ class Settings:
         key = env.get("OPENAI_API_KEY", "").strip()
         base = env.get("OPENAI_BASE_URL", "").strip()
         data_dir = Path(env.get("STUDIO_DATA_DIR", "").strip() or "studio_data")
+        assembly = env.get("STUDIO_CONTEXT_ASSEMBLY", "").strip() or "standing"
+        if assembly not in CONTEXT_ASSEMBLY_MODES:
+            raise ConfigurationError(f"STUDIO_CONTEXT_ASSEMBLY must be one of {CONTEXT_ASSEMBLY_MODES}, "
+                                     f"got {assembly!r}")
         if not key and not base:
-            return cls(data_dir=data_dir, model=None)
+            return cls(data_dir=data_dir, model=None, context_assembly=assembly)
         model = env.get("STUDIO_AGENT_MODEL", "").strip()
         if not model:
             raise ConfigurationError("A model endpoint is configured but STUDIO_AGENT_MODEL is empty; name the model.")
@@ -75,7 +85,7 @@ class Settings:
             except ValueError:
                 raise ConfigurationError(f"{name} must be a number (dollars per million tokens)") from None
 
-        return cls(data_dir=data_dir, model=ModelSettings(
+        return cls(data_dir=data_dir, context_assembly=assembly, model=ModelSettings(
             base_url=(base or "https://api.openai.com/v1").rstrip("/"),
             api_key=key or "local", agent_model=model, token_param=token_param, reasoning_effort=effort,
             price_in_per_mtok=price("STUDIO_PRICE_IN"), price_out_per_mtok=price("STUDIO_PRICE_OUT")))

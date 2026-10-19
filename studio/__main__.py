@@ -24,7 +24,7 @@ from studio import proof_gate
 from studio.agent.deterministic import DeterministicAgent
 from studio.channels.harness import HarnessChannel, load_scenarios, run_scenario
 from studio.config import ConfigurationError, Settings
-from studio.core import Core, EpisodeStore, SpecRegistry
+from studio.core import Core, CoreSettings, EpisodeStore, SpecRegistry
 from studio.extensions.simulated import SimulatedCalendar
 from studio.spec import SpecificationError, compile_specification, load_specification, validate
 
@@ -107,7 +107,8 @@ async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
                     calendar = SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))
                     store_file = proof_gate.store_name(label, scenario["id"], run)
                     store = EpisodeStore(record / store_file if record is not None else ":memory:", clock=clock)
-                    core = Core(registry, store, agent, {"calendar": calendar})
+                    core = Core(registry, store, agent, {"calendar": calendar},
+                                CoreSettings(context_assembly=settings.context_assembly))
                     try:
                         result = await run_scenario(core, compiled.tenant, scenario,
                                                     effects_counter=lambda: sum(calendar.executions.values()))
@@ -145,7 +146,7 @@ async def _scenarios(args, settings: Settings, agent_factory=_agent) -> int:
             proof_gate.write_status(record, {
                 "planned_runs": sum(len(s) for *_, s in plan) * args.runs, "completed_runs": completed,
                 "outcome": outcome, "message": message, "agent": agent.name,
-                "model": settings.model.agent_model if settings.live else None, "today": args.today})
+                "model": settings.model.agent_model if settings.live else None, "today": args.today, "context_assembly": settings.context_assembly})
         if settings.live:
             cap = f" (cap ${args.max_cost})" if args.max_cost is not None else ""
             print(f"Estimated spend: ${spent:.4f}{cap}")
@@ -169,7 +170,8 @@ async def _chat(args, settings: Settings) -> int:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     store = EpisodeStore(settings.data_dir / f"{loaded.tenant}.db")
     agent, port = _agent(settings, args.live, date.today())
-    core = Core(registry, store, agent, {"calendar": SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))})
+    core = Core(registry, store, agent, {"calendar": SimulatedCalendar(tenant_times=dict(SIMULATED_TIMES))},
+                CoreSettings(context_assembly=settings.context_assembly))
     channel = HarnessChannel(core, loaded.tenant)
     conversation = f"terminal-{date.today().isoformat()}"
     print(f"{loaded.spec.business.name} - agent: {agent.name}. Empty line to quit.")

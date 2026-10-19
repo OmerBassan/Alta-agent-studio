@@ -26,7 +26,8 @@ _REQUEST = TypeAdapter(AgentRequest)
 
 REQUEST_GUIDE = """\
 Reply with exactly ONE JSON object: the next request. Kinds:
-- {"kind":"retrieve","query":"..."} look something up in the business's material.
+- {"kind":"retrieve","query":"..."} look something up in the business's material. Material not listed below
+  must be retrieved before you can cite it.
 - {"kind":"read","capability":"<read capability>","arguments":[{"name":..,"value":..}]}
 - {"kind":"effect","capability":"<effect capability>","arguments":[...]} change something. Arguments must equal facts
   already established. If the capability needs confirmation, first ask with clarify+confirm and wait for a plain yes.
@@ -82,6 +83,8 @@ def render(view: AgentView) -> list[dict[str, str]]:
             f"Inputs: {', '.join(f'{i.name}:{i.type}' for i in t.inputs) or '-'}" for t in s.tools]),
         _section("Business material you may cite (reference id: text)", [
             f"- {r.ref} [{r.title}]: {r.text}" for r in view.references]),
+        _section("More material you can retrieve (titles only)", [f"- {t}" for t in view.material_index])
+        if view.material_index else "",
         REQUEST_GUIDE,
     ]
     state = [

@@ -125,6 +125,7 @@ class RunFigures:
     denials: list[str] = field(default_factory=list)  # every denial, as classification:reason
     closes: list[str] = field(default_factory=list)   # per episode: closed:<reason> or its open lifecycle
     halts: list[str] = field(default_factory=list)    # cause of every declared halt
+    retrievals: list[str] = field(default_factory=list)  # per retrieval: "hit" or "miss" (no item returned)
 
 
 @dataclass
@@ -236,7 +237,9 @@ def _run_figures(store: EpisodeStore, line: dict) -> RunFigures:
         spend=spend(calls, line.get("price_in_per_mtok"), line.get("price_out_per_mtok")),
         denials=[f"{d['classification']}:{d['reason']}" for d in denials],
         closes=[f"closed:{e.close_reason}" if e.lifecycle == "closed" else e.lifecycle for e in episodes],
-        halts=[s["payload"].get("cause", "?") for s in steps if s["kind"] == "halt"])
+        halts=[s["payload"].get("cause", "?") for s in steps if s["kind"] == "halt"],
+        retrievals=["hit" if ev["payload"].get("references") else "miss"
+                    for e in episodes for ev in store.evidence(tenant, e.episode_id) if ev["kind"] == "retrieval"])
 
 
 def load_report(directory: str | Path) -> Report:
@@ -285,7 +288,7 @@ def _status_line(report: Report) -> str:
         return f"Status: INCOMPLETE - {STATUS} is missing; the invocation may have been interrupted"
     done = f"{status.get('completed_runs', '?')}/{status.get('planned_runs', '?')} runs"
     what = (f"agent {status.get('agent', '?')}, model {status.get('model') or 'none'}, "
-            f"today {status.get('today', '?')}")
+            f"today {status.get('today', '?')}, context assembly {status.get('context_assembly', 'standing')}")
     if report.complete:
         return f"Status: complete - {done}; {what}"
     message = f": {status['message']}" if status.get("message") else ""
@@ -333,7 +336,8 @@ def render(report: Report) -> str:
     for title, counts in (
             ("Denials (all, classification:reason)", Counter(d for r in report.runs for d in r.denials)),
             ("Episode outcomes", Counter(c for r in report.runs for c in r.closes)),
-            ("Halts by cause", Counter(h for r in report.runs for h in r.halts))):
+            ("Halts by cause", Counter(h for r in report.runs for h in r.halts)),
+            ("Retrievals (miss = nothing returned)", Counter(x for r in report.runs for x in r.retrievals))):
         out.append("")
         out.append(title)
         out.extend(f"  {key:50s} {count}" for key, count in sorted(counts.items()))

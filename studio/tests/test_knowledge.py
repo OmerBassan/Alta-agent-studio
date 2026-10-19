@@ -183,3 +183,136 @@ def test_a_core_notice_never_inherits_the_previous_replys_claims_and_bad_referen
         "the claim carried no reference", "the reference was never issued"]
     assert notice["egress"] == "terminal_notice" and notice["cites_nothing"]
     store.close()
+
+
+# --- Story 2.3: context assembly by setting; retrieval behind a port --------------------------
+
+def _world(mode: str, retriever=None):
+    from studio.core import CoreSettings
+    from studio.tests.helpers import BUSINESSES, build_world
+    runner = asyncio.Runner()
+    w = build_world(runner, [BUSINESSES / "dental" / "specification.toml"],
+                    settings=CoreSettings(adapter_timeout_s=1.0, context_assembly=mode))
+    if retriever is not None:
+        w.core.retriever = retriever
+    return w, runner
+
+
+def test_context_assembly_is_platform_configuration_validated_at_startup():
+    import pytest
+    from studio.config import ConfigurationError, Settings
+    from studio.core import CoreSettings
+    assert Settings.from_env({}).context_assembly == "standing"
+    assert Settings.from_env({"STUDIO_CONTEXT_ASSEMBLY": "on_demand"}).context_assembly == "on_demand"
+    with pytest.raises(ConfigurationError):
+        Settings.from_env({"STUDIO_CONTEXT_ASSEMBLY": "lazy"})
+    with pytest.raises(ValueError):
+        Core(SpecRegistry(), EpisodeStore(), Capture(), {}, CoreSettings(context_assembly="lazy"))
+
+
+def test_on_demand_starts_with_the_specification_only_and_retrieval_issues_what_it_returns():
+    from studio.core.types import RetrieveRequest
+    w, runner = _world("on_demand")
+    out = w.send("How much is a check-up?", script=[RetrieveRequest(query="check-up cost"),
+                                                     RespondRequest(message="One moment.")])
+    first, second = w.agent.views[0], w.agent.views[1]
+    # Nothing of the source material crosses the boundary before it is retrieved, only its titles.
+    assert first.references and all(not r.item_id.startswith("src:") for r in first.references)
+    assert all(i.origin == "specification" for i in first.context.items)
+    assert OLD not in repr(first) and "Services and fees" in first.material_index
+    retrieved = [r for r in second.references if r.item_id.startswith("src:")]
+    assert retrieved and OLD in " ".join(r.text for r in retrieved)
+    assert {r.item_id for r in retrieved} <= {i.item_id for i in second.context.items}
+    evidence = next(e for e in w.store.evidence(TENANT, out.episode_id) if e["kind"] == "retrieval")
+    for item in evidence["payload"]["items"]:
+        assert item["reference"] and item["source_id"] and item["source_version"] and item["locator"]
+    runner.close()
+
+
+def test_retrieving_the_same_item_again_reuses_its_reference():
+    from studio.core.types import RetrieveRequest
+    w, runner = _world("on_demand")
+    out = w.send("How much is a check-up?", script=[RetrieveRequest(query="check-up cost"),
+                                                     RetrieveRequest(query="check-up cost again"),
+                                                     RespondRequest(message="One moment.")])
+    refs = [r["item_id"] for r in w.store.references(TENANT, out.episode_id)]
+    assert len(refs) == len(set(refs))
+    runner.close()
+
+
+def test_the_mode_is_pinned_at_episode_start():
+    from studio.core import CoreSettings
+    from studio.core.types import RetrieveRequest
+    w, runner = _world("on_demand")
+    w.send("Hello", script=[RespondRequest(message="Hello.")])
+    w.core.settings = CoreSettings(adapter_timeout_s=1.0, context_assembly="standing")  # a restart, reconfigured
+    out = w.send("How much is a check-up?", script=[RetrieveRequest(query="check-up cost"),
+                                                     RespondRequest(message="One moment.")])
+    result = next(s["payload"] for s in w.store.steps(TENANT, out.episode_id)
+                  if s["kind"] == "result" and s["payload"]["kind"] == "retrieve")
+    assert result["items"] and OLD in result["items"][0]["text"]
+    assert w.agent.views[0].material_index  # still on demand for this episode
+    runner.close()
+
+
+def test_standing_issues_every_item_at_start():
+    w, runner = _world("standing")
+    w.send("Hello", script=[RespondRequest(message="Hello.")])
+    assert any(r.item_id.startswith("src:") for r in w.agent.views[0].references)
+    assert w.agent.views[0].material_index == ()
+    runner.close()
+
+
+def test_on_demand_a_claim_may_cite_only_what_this_episode_retrieved():
+    from studio.core.types import Claim, RetrieveRequest
+    w, runner = _world("on_demand")
+    other = w.send("Prices?", conversation="other", script=[RetrieveRequest(query="check-up cost"),
+                                                            RespondRequest(message="One moment.")])
+    foreign = next(r["ref"] for r in w.store.references(TENANT, other.episode_id) if r["item_id"].startswith("src:"))
+
+    def cite_retrieved(view):
+        ref = next(r.ref for r in view.references if r.item_id.startswith("src:"))
+        return RespondRequest(message="A check-up costs 95 dollars.",
+                              claims=(Claim(kind="business_fact", text="95 dollars", reference=ref),))
+
+    out = w.send("How much is a check-up?", script=[
+        RespondRequest(message="It costs 95 dollars.",
+                       claims=(Claim(kind="business_fact", text="95 dollars", reference=foreign),)),
+        RetrieveRequest(query="check-up cost"), cite_retrieved])
+    sent = [s["payload"]["text"] for s in w.store.steps(TENANT, out.episode_id) if s["kind"] == "egress"]
+    assert len([t for t in sent if "95 dollars" in t]) == 1  # the unretrieved citation never left; the retrieved one did
+    assert w.store.denials(TENANT, out.episode_id)
+    runner.close()
+
+
+def test_the_retriever_is_a_port_another_implementation_can_replace():
+    from studio.core import CoreSettings
+    from studio.core.types import RetrieveRequest
+
+    class FirstSourceOnly:
+        def search(self, query, items, limit):
+            return [i for i in items if i.origin == "source"][:1]
+
+    w, runner = _world("on_demand")
+    w.core = Core(w.core.registry, w.store, w.agent, {"calendar": w.calendar},
+                  CoreSettings(adapter_timeout_s=1.0, context_assembly="on_demand"), retriever=FirstSourceOnly())
+    out = w.send("anything at all", script=[RetrieveRequest(query="zzz"), RespondRequest(message="ok")])
+    result = next(s["payload"] for s in w.store.steps(TENANT, out.episode_id)
+                  if s["kind"] == "result" and s["payload"]["kind"] == "retrieve")
+    assert len(result["items"]) == 1
+    runner.close()
+
+
+def test_the_scenarios_pass_credential_free_in_both_modes():
+    import os
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[2]
+    for mode in ("standing", "on_demand"):
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPENAI_BASE_URL")}
+        env["STUDIO_CONTEXT_ASSEMBLY"] = mode
+        done = subprocess.run([sys.executable, "-m", "studio", "scenarios", "--today", "2026-10-13"], cwd=root,
+                              env=env, capture_output=True, text=True, timeout=600)
+        assert done.returncode == 0, f"{mode}:\n{done.stdout[-1500:]}{done.stderr[-500:]}"
+        lines = [line for line in done.stdout.splitlines() if line.startswith(("PASS", "FAIL"))]
+        assert len(lines) >= 10 and all(line.startswith("PASS") for line in lines), f"{mode}: {lines}"

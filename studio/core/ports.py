@@ -101,6 +101,8 @@ class AgentView(_F):
     """True when nothing has yet been sent to the requester in this episode."""
     today: Optional[str] = None
     """The Core's recorded date (AD-12), so the Agent can resolve "Monday"."""
+    material_index: tuple[str, ...] = ()
+    """On-demand context assembly: titles of material not yet retrieved — what exists, never its text."""
 
 
 class ModelCall(_F):
